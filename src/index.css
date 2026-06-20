@@ -3,4 +3,10 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
-body { margin: 0; -webkit-font-smoothing: antialiased; }
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  /* Hindari konten ketutup status bar / notch saat dibuka dari Layar Utama (PWA standalone) */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
