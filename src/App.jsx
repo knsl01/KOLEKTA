@@ -2418,7 +2418,7 @@ function AdminPanel({ th, onBack }) {
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <input value={cAtasan} onChange={(e) => setCAtasan(e.target.value)} placeholder="Kode atasan"
                   className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
-                <input value={cPetugas} onChange={(e) => setCPetugas(e.target.value)} placeholder="Kode petugas"
+                <input value={cPetugas} onChange={(e) => setCPetugas(e.target.value)} placeholder="Kode petugas (bawahan)"
                   className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
               </div>
             )}
