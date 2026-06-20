@@ -2210,16 +2210,84 @@ function invCoord(i) {
 }
 const escHtml = (t) => (t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/* Geocoding alamat -> koordinat akurat via Nominatim (OpenStreetMap, tanpa API key).
+   Hasil di-cache di localStorage agar tak mengulang permintaan (batas wajar ~1 req/detik). */
+const GEO_CACHE_KEY = "kolekta:geocache";
+const loadGeoCache = () => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || "{}"); } catch { return {}; } };
+const saveGeoCache = (c) => { try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(c)); } catch {} };
+const normAddr = (a) => (a || "").trim().toLowerCase().replace(/\s+/g, " ");
+async function geocodeAddr(addr) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&addressdetails=0&q=${encodeURIComponent(addr)}`;
+  const r = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!r.ok) throw new Error("geocode " + r.status);
+  const j = await r.json();
+  if (!j || !j[0]) return null;
+  return { lat: +(+j[0].lat).toFixed(6), lng: +(+j[0].lon).toFixed(6) };
+}
+
+/* Palet bucket DPD: Current hijau, lalu kuning -> oranye -> merah pekat (terlama). */
+const BUCKET_META = [
+  { key: "lancar", label: "Current", color: "#2F7D5B" },
+  { key: "1-30", label: "DPD 1-30", color: "#EAB308" },
+  { key: "31-60", label: "DPD 31-60", color: "#F59E0B" },
+  { key: "61-90", label: "DPD 61-90", color: "#E2552A" },
+  { key: "90+", label: "DPD 90+", color: "#8E1B12" },
+];
+const bucketColor = (key) => (BUCKET_META.find((b) => b.key === key) || BUCKET_META[0]).color;
+
 /* ----- 1. Peta Geografis ----- */
 function GeoHeat({ rows }) {
   const ready = useLeaflet();
   const elRef = useRef(null);
   const mapRef = useRef(null);
+  const [geo, setGeo] = useState(loadGeoCache);
+  const [geoStatus, setGeoStatus] = useState("");
+  const geoRef = useRef(geo);
+  useEffect(() => { geoRef.current = geo; }, [geo]);
+
+  const active = useMemo(() => rows.filter((i) => i.status !== "lunas" && i.total > 0), [rows]);
+
+  /* Titik per debitur: 1) GPS kunjungan, 2) hasil geocode alamat, 3) perkiraan kota. */
   const pts = useMemo(
-    () => rows.filter((i) => i.status !== "lunas" && i.total > 0).map((i) => ({ i, ...invCoord(i) })),
-    [rows]
+    () => active.map((i) => {
+      const lokVisit = (i.aktivitas || []).filter((a) => a.lok && a.lok.lat != null).pop();
+      if (lokVisit) return { i, lat: lokVisit.lok.lat, lng: lokVisit.lok.lng, src: "gps" };
+      const key = normAddr(i.alamat);
+      const g = key && geo[key];
+      if (g) return { i, lat: g.lat, lng: g.lng, src: "geocode" };
+      const c = invCoord(i);
+      return { i, lat: c.lat, lng: c.lng, src: "perkiraan" };
+    }),
+    [active, geo]
   );
-  const realN = pts.filter((p) => p.real).length;
+  const srcN = (s) => pts.filter((p) => p.src === s).length;
+
+  /* Geocode alamat yang belum di-cache, berurutan dengan jeda agar sopan ke Nominatim. */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const seen = new Set(); const need = [];
+      active.forEach((i) => {
+        const hasGps = (i.aktivitas || []).some((a) => a.lok && a.lok.lat != null);
+        const key = normAddr(i.alamat);
+        if (hasGps || !key || key in geoRef.current || seen.has(key)) return;
+        seen.add(key); need.push(key);
+      });
+      if (!need.length) { setGeoStatus(""); return; }
+      for (let n = 0; n < need.length; n++) {
+        if (!alive) return;
+        setGeoStatus(`Mencari lokasi alamat… ${n + 1}/${need.length}`);
+        let res = null;
+        try { res = await geocodeAddr(need[n]); } catch {}
+        if (!alive) return;
+        setGeo((prev) => { const nx = { ...prev, [need[n]]: res }; saveGeoCache(nx); return nx; });
+        if (n < need.length - 1) await new Promise((r) => setTimeout(r, 1100));
+      }
+      if (alive) setGeoStatus("");
+    })();
+    return () => { alive = false; };
+  }, [active]);
+
   useEffect(() => {
     if (!ready || !elRef.current) return;
     const L = window.L;
@@ -2233,16 +2301,16 @@ function GeoHeat({ rows }) {
       const heat = pts.map((p) => [p.lat, p.lng, Math.max(0.15, p.i.total / max)]);
       L.heatLayer(heat, { radius: 28, blur: 20, maxZoom: 12, gradient: { 0.0: T.green, 0.5: T.amber, 1.0: T.red } }).addTo(map);
       pts.forEach((p) => {
-        const r = p.i.total / max;
-        const col = r > 0.66 ? T.red : r > 0.33 ? T.amber : T.green;
-        const m = L.circleMarker([p.lat, p.lng], { radius: 7, color: "#fff", weight: 1.5, fillColor: col, fillOpacity: 0.9 }).addTo(map);
+        const col = bucketColor(p.i.bucket); // warna titik ikut bucket DPD
+        const m = L.circleMarker([p.lat, p.lng], { radius: 7, color: "#fff", weight: 1.5, fillColor: col, fillOpacity: 0.95 }).addTo(map);
+        const srcLbl = p.src === "gps" ? "GPS kunjungan" : p.src === "geocode" ? "geocode alamat" : "perkiraan kota";
         m.bindPopup(
           `<div style="font-family:${SANS};min-width:170px">` +
           `<div style="font-weight:700;color:${T.ink}">${escHtml(p.i.customer)}</div>` +
           `<div style="font-size:12px;color:${T.sub};margin:2px 0">${escHtml(p.i.noInvoice)}${p.i.assignedTo ? " &middot; " + escHtml(p.i.assignedTo) : ""}</div>` +
           `<div style="font-size:12px;color:${T.ink}">DPD: <b>${p.i.daysOverdue} hari</b> &middot; ${p.i.kol.short}</div>` +
-          `<div style="font-size:13px;font-weight:700;color:${T.red};margin-top:2px">Tunggakan: ${rp(p.i.total)}</div>` +
-          (p.real ? "" : `<div style="font-size:10px;color:${T.sub};margin-top:3px">*lokasi perkiraan (belum ada GPS kunjungan)</div>`) +
+          `<div style="font-size:13px;font-weight:700;color:${col};margin-top:2px">Tunggakan: ${rp(p.i.total)}</div>` +
+          `<div style="font-size:10px;color:${T.sub};margin-top:3px">Lokasi: ${srcLbl}</div>` +
           `</div>`
         );
       });
@@ -2260,12 +2328,19 @@ function GeoHeat({ rows }) {
     <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <h2 className="mb-1 text-sm font-semibold">Sebaran Geografis Tunggakan</h2>
       <p className="mb-3 text-xs" style={{ color: T.sub }}>
-        Intensitas warna mengikuti besar tunggakan — <span style={{ color: T.red, fontWeight: 600 }}>merah = tinggi</span>, <span style={{ color: T.green, fontWeight: 600 }}>hijau = rendah</span>. Ketuk titik untuk detail debitur.
+        Warna titik mengikuti umur tunggakan (bucket DPD); pekatnya area mengikuti besar tunggakan. Ketuk titik untuk detail debitur.
       </p>
       <div ref={elRef} className="overflow-hidden rounded-xl" style={{ height: 420, width: "100%", background: T.bg, border: `1px solid ${T.line}` }} />
       {!ready && <p className="mt-2 text-xs" style={{ color: T.sub }}>Memuat peta…</p>}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" style={{ color: T.sub }}>
+        {BUCKET_META.map((b) => (
+          <span key={b.key} className="inline-flex items-center gap-1">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: b.color, border: "1px solid #fff", boxShadow: `0 0 0 1px ${T.line}` }} />{b.label}
+          </span>
+        ))}
+      </div>
       <p className="mt-2 text-[11px]" style={{ color: T.sub }}>
-        {pts.length} debitur aktif dipetakan · {realN} dari GPS kunjungan, {pts.length - realN} perkiraan lokasi kota.
+        {geoStatus ? geoStatus : `${pts.length} debitur dipetakan · ${srcN("gps")} GPS kunjungan, ${srcN("geocode")} dari alamat, ${srcN("perkiraan")} perkiraan kota.`}
       </p>
     </section>
   );
@@ -2364,11 +2439,10 @@ function CalHeat({ rows, onOpen }) {
 }
 
 /* ----- 3. Matriks Bucket × Petugas ----- */
-const HM_BUCKETS = [["lancar", "Current"], ["1-30", "DPD 1-30"], ["31-60", "DPD 31-60"], ["61-90", "DPD 61-90"], ["90+", "DPD 90+"]];
 function MatrixHeat({ rows, s }) {
-  const { officers, max, colTot } = useMemo(() => {
+  const { officers, colMax, colTot } = useMemo(() => {
     const map = {};
-    const ensure = (n) => { if (!map[n]) { map[n] = {}; HM_BUCKETS.forEach(([k]) => (map[n][k] = { total: 0, count: 0 })); } };
+    const ensure = (n) => { if (!map[n]) { map[n] = {}; BUCKET_META.forEach((b) => (map[n][b.key] = { total: 0, count: 0 })); } };
     (s?.petugas || []).forEach(ensure);
     rows.forEach((i) => {
       if (i.status === "lunas") return;
@@ -2378,26 +2452,29 @@ function MatrixHeat({ rows, s }) {
     });
     const officers = Object.keys(map).map((n) => ({ nama: n, cells: map[n] }));
     officers.sort((a, b) => {
-      const sum = (o) => HM_BUCKETS.reduce((x, [k]) => x + o.cells[k].total, 0);
+      const sum = (o) => BUCKET_META.reduce((x, b) => x + o.cells[b.key].total, 0);
       return sum(b) - sum(a);
     });
-    const max = Math.max(1, ...officers.flatMap((o) => HM_BUCKETS.map(([k]) => o.cells[k].total)));
-    const colTot = {};
-    HM_BUCKETS.forEach(([k]) => { colTot[k] = officers.reduce((a, o) => a + o.cells[k].total, 0); });
-    return { officers, max, colTot };
+    const colMax = {}; const colTot = {};
+    BUCKET_META.forEach((b) => {
+      colMax[b.key] = Math.max(1, ...officers.map((o) => o.cells[b.key].total));
+      colTot[b.key] = officers.reduce((a, o) => a + o.cells[b.key].total, 0);
+    });
+    return { officers, colMax, colTot };
   }, [rows, s]);
 
-  const cellBg = (total) => {
+  /* Tiap bucket punya warna dasar sendiri; pekatnya mengikuti bobot dalam kolom itu. */
+  const cellBg = (total, key) => {
     if (!total) return T.bg;
-    const a = 0.12 + 0.78 * (total / max);
+    const a = 0.18 + 0.78 * Math.min(1, total / colMax[key]);
     const h = Math.round(a * 255).toString(16).padStart(2, "0");
-    return T.red + h;
+    return bucketColor(key) + h;
   };
 
   return (
     <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <h2 className="mb-1 text-sm font-semibold">Matriks Portofolio — Petugas × Bucket DPD</h2>
-      <p className="mb-3 text-xs" style={{ color: T.sub }}>Warna sel mengikuti besar outstanding. Bantu supervisor melihat siapa memegang portofolio terberat.</p>
+      <p className="mb-3 text-xs" style={{ color: T.sub }}>Tiap kolom DPD punya gradasi warna sendiri — <span style={{ color: BUCKET_META[0].color, fontWeight: 600 }}>Current hijau</span>, makin lama makin <span style={{ color: BUCKET_META[4].color, fontWeight: 600 }}>merah pekat</span>. Pekatnya sel mengikuti besar outstanding.</p>
       {officers.length === 0 ? (
         <p className="text-xs" style={{ color: T.sub }}>Belum ada data petugas / tagihan aktif.</p>
       ) : (
@@ -2406,8 +2483,8 @@ function MatrixHeat({ rows, s }) {
             <thead>
               <tr>
                 <th className="sticky left-0 z-10 p-2 text-left font-semibold" style={{ background: T.surface, color: T.sub }}>Petugas</th>
-                {HM_BUCKETS.map(([k, lbl]) => (
-                  <th key={k} className="p-2 text-center font-semibold" style={{ color: T.sub }}>{lbl}</th>
+                {BUCKET_META.map((b) => (
+                  <th key={b.key} className="p-2 text-center font-semibold" style={{ color: "#fff", background: b.color, borderRight: `2px solid ${T.surface}` }}>{b.label}</th>
                 ))}
               </tr>
             </thead>
@@ -2415,11 +2492,11 @@ function MatrixHeat({ rows, s }) {
               {officers.map((o) => (
                 <tr key={o.nama}>
                   <td className="sticky left-0 z-10 max-w-[120px] truncate p-2 font-medium" style={{ background: T.surface, color: T.ink }}>{o.nama}</td>
-                  {HM_BUCKETS.map(([k]) => {
-                    const c = o.cells[k];
-                    const strong = c.total / max > 0.5;
+                  {BUCKET_META.map((b) => {
+                    const c = o.cells[b.key];
+                    const strong = c.total / colMax[b.key] > 0.45;
                     return (
-                      <td key={k} className="p-1.5 text-center" style={{ background: cellBg(c.total), color: strong ? "#fff" : T.ink, border: `1px solid ${T.surface}` }}>
+                      <td key={b.key} className="p-1.5 text-center" style={{ background: cellBg(c.total, b.key), color: strong ? "#fff" : T.ink, border: `1px solid ${T.surface}` }}>
                         {c.count > 0 ? (
                           <>
                             <div className="font-bold" style={{ fontFamily: MONO }}>{rpc(c.total)}</div>
@@ -2435,8 +2512,8 @@ function MatrixHeat({ rows, s }) {
               ))}
               <tr>
                 <td className="sticky left-0 z-10 p-2 font-semibold" style={{ background: T.surface, color: T.sub }}>Total</td>
-                {HM_BUCKETS.map(([k]) => (
-                  <td key={k} className="p-2 text-center font-bold" style={{ fontFamily: MONO, color: T.ink, borderTop: `2px solid ${T.line}` }}>{colTot[k] ? rpc(colTot[k]) : "—"}</td>
+                {BUCKET_META.map((b) => (
+                  <td key={b.key} className="p-2 text-center font-bold" style={{ fontFamily: MONO, color: T.ink, borderTop: `2px solid ${T.line}` }}>{colTot[b.key] ? rpc(colTot[b.key]) : "—"}</td>
                 ))}
               </tr>
             </tbody>
