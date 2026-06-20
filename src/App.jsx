@@ -4,6 +4,7 @@ import {
   Wallet, Bell, RotateCcw, X, MessageCircle, ChevronDown, FileText, Scale,
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
+  LogOut, Lock, ShieldCheck,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -586,6 +587,37 @@ async function cloudPull(cfg) {
   return j[0] || null;
 }
 
+/* ---------- Backend Kolekta (Supabase RPC, multi-tenant) ----------
+   Semua akses data lewat fungsi security-definer di server, jadi anon key
+   tak bisa membaca/menulis data institusi lain — hanya yang kodenya diketahui. */
+const SB_URL = "https://jldswqktlywjjyjomthw.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsZHN3cWt0bHl3amp5am9tdGh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5MzQzMTcsImV4cCI6MjA5NzUxMDMxN30.g16gAXfNXUFoiSN2gooHwWoFdgFPRbR19OWtxmB-TLQ";
+const AUTH_KEY = "kolekta:auth";
+
+async function sbRpc(fn, body) {
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const txt = await r.text();
+  if (!r.ok) {
+    let msg = txt;
+    try { msg = JSON.parse(txt).message || txt; } catch {}
+    throw new Error((msg || `${r.status}`).slice(0, 160));
+  }
+  return txt ? JSON.parse(txt) : null;
+}
+const sbLogin = async (code) => { const a = await sbRpc("kolekta_login", { p_code: code }); return a && a[0] ? a[0] : null; };
+const sbPull = async (code) => { const a = await sbRpc("kolekta_pull", { p_code: code }); return a && a[0] ? a[0] : null; };
+const sbPush = (code, data) => sbRpc("kolekta_push", { p_code: code, p_data: data });
+const sbAdminCreate = async (secret, name) => { const a = await sbRpc("kolekta_admin_create_tenant", { p_admin: secret, p_name: name }); return a && a[0] ? a[0] : null; };
+const sbAdminList = async (secret) => (await sbRpc("kolekta_admin_list_tenants", { p_admin: secret })) || [];
+
+function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; } }
+function saveAuth(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch {} }
+function clearAuth() { try { localStorage.removeItem(AUTH_KEY); } catch {} }
+
 /* ---------- Import Excel/CSV ---------- */
 function pickv(row, names) {
   const keys = Object.keys(row);
@@ -655,6 +687,8 @@ const sampleData = () => {
 };
 
 const KEY = "kolekta:v1";
+const defaultSettings = () => ({ perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", peran: "atasan", petugasAktif: "", petugas: [], targets: {} });
+const emptyData = () => ({ settings: defaultSettings(), invoices: [] });
 
 /* ---------- Logo ---------- */
 function Logo({ size = 36 }) {
@@ -700,28 +734,48 @@ export default function KolektaApp() {
   const [fPetugas, setFPetugas] = useState("all");
   const [sortBy, setSortBy] = useState("overdue");
   const [toast, setToast] = useState("");
+  const [auth, setAuth] = useState(loadAuth);
   const loadedRef = useRef(false);
+  const pushTimer = useRef(null);
 
-  /* load */
+  /* load (per institusi, setelah login) */
   useEffect(() => {
+    if (!auth) { setData(null); loadedRef.current = false; return; }
+    let alive = true;
+    loadedRef.current = false;
+    setData(null);
     (async () => {
-      try {
-        const r = await window.storage.get(KEY);
-        if (r && r.value) {
-          const parsed = JSON.parse(r.value);
-          parsed.settings = { perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", cloudUrl: "", cloudKey: "", cloudId: "", peran: "atasan", petugasAktif: "", petugas: [], targets: {}, ...parsed.settings };
-          setData(parsed);
-        } else setData(sampleData());
-      } catch { setData(sampleData()); }
-      finally { loadedRef.current = true; }
+      let next = null;
+      try { const row = await sbPull(auth.code); if (row && row.data) next = row.data; } catch {}
+      if (!next) { try { const r = await window.storage.get(KEY + ":" + auth.tenantId); if (r && r.value) next = JSON.parse(r.value); } catch {} }
+      if (!next) next = emptyData();
+      next.settings = { ...defaultSettings(), ...next.settings, peran: auth.role };
+      if (!alive) return;
+      setData(next);
+      loadedRef.current = true;
     })();
-  }, []);
+    return () => { alive = false; };
+  }, [auth]);
 
-  /* persist */
+  /* persist: cache lokal langsung + push ke server (debounce) */
   useEffect(() => {
-    if (!loadedRef.current || !data) return;
-    (async () => { try { await window.storage.set(KEY, JSON.stringify(data)); } catch { setToast("Penyimpanan penuh — kurangi foto atau pakai cloud/backup"); setTimeout(() => setToast(""), 2500); } })();
-  }, [data]);
+    if (!loadedRef.current || !data || !auth) return;
+    (async () => { try { await window.storage.set(KEY + ":" + auth.tenantId, JSON.stringify(data)); } catch {} })();
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(() => {
+      sbPush(auth.code, data).catch(() => { setToast("Gagal sinkron ke server — tersimpan lokal"); setTimeout(() => setToast(""), 2500); });
+    }, 1200);
+  }, [data, auth]);
+
+  const doLogin = async (code) => {
+    const info = await sbLogin(code);
+    if (!info) throw new Error("Kode tidak dikenal");
+    const session = { code, tenantId: info.tenant_id, name: info.name, role: info.role };
+    saveAuth(session);
+    setAuth(session);
+    return session;
+  };
+  const doLogout = () => { if (pushTimer.current) clearTimeout(pushTimer.current); clearAuth(); setAuth(null); setData(null); setTab("hari"); };
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
   const s = data?.settings;
@@ -933,6 +987,8 @@ AKTIVITAS HARI INI
     try { await navigator.clipboard.writeText(text); flash("Tersalin ke clipboard"); }
     catch { flash("Tidak bisa menyalin di sini"); }
   };
+
+  if (!auth) return <LoginScreen onLogin={doLogin} />;
 
   if (!data)
     return <div className="flex h-screen items-center justify-center" style={{ background: T.bg, color: T.sub, fontFamily: SANS }}>Memuat Kolekta…</div>;
@@ -1447,6 +1503,7 @@ AKTIVITAS HARI INI
         {/* ---------- PENGATURAN ---------- */}
         {tab === "set" && (
           <Settingstab data={data} setData={setData} flash={flash} copy={copy}
+            role={auth.role} tenantName={auth.name} onLogout={doLogout}
             onBackup={() => exportJSON(data)} onRestore={() => jsonRef.current?.click()}
             onReset={() => { setData(sampleData()); flash("Data direset ke contoh"); }}
             onClear={() => { setData({ settings: data.settings, invoices: [] }); flash("Semua tagihan dihapus"); }} />
@@ -2079,26 +2136,11 @@ function Mini({ label, value, accent }) {
   );
 }
 
-function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, onRestore }) {
+function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, onRestore, role, tenantName, onLogout }) {
   const s = data.settings;
+  const isAtasan = role === "atasan";
   const upd = (k, v) => setData((d) => ({ ...d, settings: { ...d.settings, [k]: v } }));
-  const [cloudMsg, setCloudMsg] = useState("");
   const [newP, setNewP] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [showSQL, setShowSQL] = useState(false);
-  const cfg = { cloudUrl: s.cloudUrl, cloudKey: s.cloudKey, cloudId: s.cloudId };
-  const ready = s.cloudUrl && s.cloudKey && s.cloudId;
-  const SQL = `create table if not exists kolekta_state (
-  id text primary key,
-  data jsonb,
-  updated_at timestamptz default now()
-);
-alter table kolekta_state enable row level security;
-create policy "kolekta anon" on kolekta_state
-  for all to anon using (true) with check (true);`;
-  const doTest = async () => { if (!ready) return setCloudMsg("Lengkapi URL, anon key, dan ID dulu."); setBusy(true); setCloudMsg("Menguji…"); try { await cloudPull(cfg); setCloudMsg("Koneksi OK ✓"); } catch (e) { setCloudMsg("Gagal: " + e.message); } setBusy(false); };
-  const doPush = async () => { if (!ready) return setCloudMsg("Lengkapi dulu."); setBusy(true); setCloudMsg("Mengirim…"); try { await cloudPush(data, cfg); setCloudMsg("Berhasil didorong ke cloud ✓"); flash("Tersinkron ke cloud"); } catch (e) { setCloudMsg("Gagal: " + e.message); } setBusy(false); };
-  const doPull = async () => { if (!ready) return setCloudMsg("Lengkapi dulu."); setBusy(true); setCloudMsg("Menarik…"); try { const row = await cloudPull(cfg); if (!row) { setCloudMsg("Belum ada data di cloud untuk ID ini."); setBusy(false); return; } const pulled = row.data; pulled.settings = { ...pulled.settings, cloudUrl: s.cloudUrl, cloudKey: s.cloudKey, cloudId: s.cloudId, tema: s.tema }; setData(pulled); setCloudMsg("Data ditarik dari cloud ✓"); flash("Data ditarik dari cloud"); } catch (e) { setCloudMsg("Gagal: " + e.message); } setBusy(false); };
   return (
     <div className="mt-4 space-y-4">
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -2152,13 +2194,19 @@ create policy "kolekta anon" on kolekta_state
 
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <h2 className="mb-3 text-sm font-semibold">Tim &amp; peran</h2>
-        <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Mode aplikasi</p>
-        <div className="mb-3 flex gap-1.5">
-          {[["atasan", "Atasan"], ["petugas", "Petugas"]].map(([v, lbl]) => (
-            <button key={v} onClick={() => upd("peran", v)} className="flex-1 rounded-lg py-2 text-sm font-semibold"
-              style={s.peran === v ? { background: T.brand, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
-          ))}
-        </div>
+        {isAtasan ? (
+          <>
+            <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Mode tampilan</p>
+            <div className="mb-3 flex gap-1.5">
+              {[["atasan", "Atasan"], ["petugas", "Petugas"]].map(([v, lbl]) => (
+                <button key={v} onClick={() => upd("peran", v)} className="flex-1 rounded-lg py-2 text-sm font-semibold"
+                  style={s.peran === v ? { background: T.brand, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="mb-3 text-[11px]" style={{ color: T.sub }}>Anda masuk sebagai <b style={{ color: T.brand2 }}>Petugas</b>. Pilih nama Anda di bawah; hanya tagihan yang ditugaskan ke Anda yang tampil.</p>
+        )}
         {s.peran === "petugas" && (
           <div className="mb-3"><Field label="Saya petugas">
             <select className={inputCls} style={inputSt} value={s.petugasAktif} onChange={(e) => upd("petugasAktif", e.target.value)}>
@@ -2168,54 +2216,49 @@ create policy "kolekta anon" on kolekta_state
           </Field>
           <p className="mt-1 text-[11px]" style={{ color: T.sub }}>Mode petugas hanya menampilkan akun yang ditugaskan ke nama ini.</p></div>
         )}
-        <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Daftar petugas & target tagih bulanan</p>
-        <div className="mb-2 space-y-1.5">
-          {(s.petugas || []).length === 0 && <span className="text-xs" style={{ color: T.sub }}>Belum ada petugas.</span>}
-          {(s.petugas || []).map((nm) => (
-            <div key={nm} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-              <span className="min-w-0 flex-1 truncate text-sm font-medium" style={{ color: T.ink }}>{nm}</span>
-              <span className="text-[11px]" style={{ color: T.sub }}>Target</span>
-              <input value={(s.targets || {})[nm] ? String((s.targets || {})[nm]) : ""} onChange={(e) => upd("targets", { ...(s.targets || {}), [nm]: Number((e.target.value + "").replace(/[^0-9]/g, "")) || 0 })}
-                inputMode="numeric" placeholder="0" className="w-28 rounded-lg px-2 py-1 text-right text-xs" style={{ ...inputSt, fontFamily: MONO }} />
-              <button onClick={() => { upd("petugas", s.petugas.filter((x) => x !== nm)); const t = { ...(s.targets || {}) }; delete t[nm]; upd("targets", t); }}><X size={14} style={{ color: T.sub }} /></button>
+        {isAtasan && (
+          <>
+            <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Daftar petugas & target tagih bulanan</p>
+            <div className="mb-2 space-y-1.5">
+              {(s.petugas || []).length === 0 && <span className="text-xs" style={{ color: T.sub }}>Belum ada petugas.</span>}
+              {(s.petugas || []).map((nm) => (
+                <div key={nm} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium" style={{ color: T.ink }}>{nm}</span>
+                  <span className="text-[11px]" style={{ color: T.sub }}>Target</span>
+                  <input value={(s.targets || {})[nm] ? String((s.targets || {})[nm]) : ""} onChange={(e) => upd("targets", { ...(s.targets || {}), [nm]: Number((e.target.value + "").replace(/[^0-9]/g, "")) || 0 })}
+                    inputMode="numeric" placeholder="0" className="w-28 rounded-lg px-2 py-1 text-right text-xs" style={{ ...inputSt, fontFamily: MONO }} />
+                  <button onClick={() => { upd("petugas", s.petugas.filter((x) => x !== nm)); const t = { ...(s.targets || {}) }; delete t[nm]; upd("targets", t); }}><X size={14} style={{ color: T.sub }} /></button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input value={newP} onChange={(e) => setNewP(e.target.value)} placeholder="Nama petugas baru" className={inputCls} style={inputSt} />
-          <button onClick={() => { const n = newP.trim(); if (n && !(s.petugas || []).includes(n)) { upd("petugas", [...(s.petugas || []), n]); setNewP(""); } }}
-            className="shrink-0 rounded-lg px-3 text-xs font-semibold text-white" style={{ background: T.brand }}>Tambah</button>
-        </div>
+            <div className="flex gap-2">
+              <input value={newP} onChange={(e) => setNewP(e.target.value)} placeholder="Nama petugas baru" className={inputCls} style={inputSt} />
+              <button onClick={() => { const n = newP.trim(); if (n && !(s.petugas || []).includes(n)) { upd("petugas", [...(s.petugas || []), n]); setNewP(""); } }}
+                className="shrink-0 rounded-lg px-3 text-xs font-semibold text-white" style={{ background: T.brand }}>Tambah</button>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <div className="mb-1 flex items-center gap-2">
           <Cloud size={16} style={{ color: T.brand2 }} />
-          <h2 className="text-sm font-semibold">Sinkron cloud (Supabase)</h2>
+          <h2 className="text-sm font-semibold">Sesi &amp; sinkron</h2>
         </div>
-        <p className="mb-3 text-xs" style={{ color: T.sub }}>Isi URL & anon key proyek Supabase-mu, lalu pakai ID workspace yang sama di HP & PC agar datanya menyatu.</p>
-        <div className="space-y-2">
-          <input className={inputCls} style={inputSt} value={s.cloudUrl} onChange={(e) => upd("cloudUrl", e.target.value)} placeholder="https://xxxx.supabase.co" />
-          <input className={inputCls} style={inputSt} type="password" value={s.cloudKey} onChange={(e) => upd("cloudKey", e.target.value)} placeholder="anon public key" />
-          <input className={inputCls} style={inputSt} value={s.cloudId} onChange={(e) => upd("cloudId", e.target.value)} placeholder="ID workspace (mis. email kamu)" />
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button disabled={busy} onClick={doTest} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}><RefreshCw size={14} /> Tes</button>
-          <button disabled={busy} onClick={doPull} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Download size={14} /> Tarik</button>
-          <button disabled={busy} onClick={doPush} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.brand }}><Upload size={14} /> Dorong</button>
-        </div>
-        {cloudMsg && <p className="mt-2 text-[11px]" style={{ color: T.sub }}>{cloudMsg}</p>}
-        <button onClick={() => setShowSQL((v) => !v)} className="mt-2 text-[11px] font-semibold" style={{ color: T.brand2 }}>{showSQL ? "Sembunyikan" : "Lihat"} SQL setup tabel</button>
-        {showSQL && (
-          <div className="mt-2 rounded-lg p-2.5" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[11px] font-semibold" style={{ color: T.sub }}>Jalankan sekali di SQL Editor Supabase</span>
-              <button onClick={() => copy(SQL)} className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-white" style={{ background: T.brand }}><Copy size={11} /> Salin</button>
-            </div>
-            <pre className="overflow-auto text-[11px] leading-relaxed" style={{ color: T.ink, fontFamily: MONO }}>{SQL}</pre>
-            <p className="mt-1.5 text-[11px]" style={{ color: T.sub }}>Catatan: policy ini terbuka untuk peran anon (cocok untuk alat personal). Untuk produksi, batasi dengan Auth/RLS yang lebih ketat.</p>
+        <p className="mb-3 text-xs" style={{ color: T.sub }}>Data otomatis tersinkron ke server untuk institusi ini. Buka di perangkat lain dengan kode yang sama.</p>
+        <div className="rounded-lg p-3" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px]" style={{ color: T.sub }}>Institusi</span>
+            <span className="text-sm font-semibold" style={{ color: T.ink }}>{tenantName || "—"}</span>
           </div>
-        )}
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-[11px]" style={{ color: T.sub }}>Peran login</span>
+            <span className="text-xs font-semibold" style={{ color: T.brand2 }}>{isAtasan ? "Atasan" : "Petugas"}</span>
+          </div>
+        </div>
+        <button onClick={onLogout} className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold" style={{ background: T.bg, color: T.red, border: `1px solid ${T.line}` }}>
+          <LogOut size={15} /> Keluar / ganti institusi
+        </button>
       </section>
 
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -2223,19 +2266,144 @@ create policy "kolekta anon" on kolekta_state
         <p className="mb-3 text-xs" style={{ color: T.sub }}>Data tersimpan otomatis di perangkat ini. Pakai backup JSON untuk pindah perangkat tanpa cloud.</p>
         <div className="mb-2 grid grid-cols-2 gap-2">
           <button onClick={onBackup} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Download size={15} /> Backup JSON</button>
-          <button onClick={onRestore} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}><Upload size={15} /> Pulihkan</button>
+          {isAtasan && <button onClick={onRestore} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}><Upload size={15} /> Pulihkan</button>}
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button onClick={onClear} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold sm:flex-1" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}>
-            <Trash2 size={15} /> Kosongkan semua tagihan
-          </button>
-          <button onClick={onReset} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold sm:flex-1" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>
-            <RotateCcw size={15} /> Muat ulang data contoh
-          </button>
-        </div>
+        {isAtasan && (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button onClick={onClear} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold sm:flex-1" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}>
+              <Trash2 size={15} /> Kosongkan semua tagihan
+            </button>
+            <button onClick={onReset} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold sm:flex-1" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>
+              <RotateCcw size={15} /> Muat ulang data contoh
+            </button>
+          </div>
+        )}
       </section>
 
       <p className="text-center text-xs" style={{ color: T.sub }}>Kolekta · prototipe collection control</p>
+    </div>
+  );
+}
+
+/* ---------- Layar Login (gerbang sebelum app) ---------- */
+function LoginScreen({ onLogin }) {
+  const th = THEMES.hutan;
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [adminMode, setAdminMode] = useState(false);
+
+  const submit = async () => {
+    const c = code.trim();
+    if (!c) return setErr("Masukkan kode akses.");
+    setBusy(true); setErr("");
+    try { await onLogin(c); }
+    catch (e) { setErr(e.message === "Kode tidak dikenal" ? "Kode tidak dikenal / salah." : ("Gagal masuk: " + e.message)); setBusy(false); }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center p-5" style={{ background: th.bg, color: th.ink, fontFamily: SANS }}>
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+          <Logo size={56} />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: th.brand }}>Kolekta</h1>
+            <p className="text-xs" style={{ color: th.brass }}>collection control</p>
+          </div>
+        </div>
+
+        {!adminMode ? (
+          <div className="rounded-2xl p-5 shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+            <h2 className="mb-1 text-sm font-semibold">Masuk</h2>
+            <p className="mb-3 text-xs" style={{ color: th.sub }}>Masukkan kode akses institusi Anda (diberikan oleh admin).</p>
+            <input autoFocus value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder="mis. KOL-XXXX-XXXX" className="w-full rounded-lg px-3 py-2.5 text-sm tracking-wide outline-none"
+              style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
+            {err && <p className="mt-2 text-[12px]" style={{ color: th.red }}>{err}</p>}
+            <button disabled={busy} onClick={submit}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white"
+              style={{ background: th.brand, opacity: busy ? 0.6 : 1 }}>
+              <Lock size={15} /> {busy ? "Memeriksa…" : "Masuk"}
+            </button>
+            <button onClick={() => { setErr(""); setAdminMode(true); }} className="mt-3 w-full text-[11px] font-semibold" style={{ color: th.brand2 }}>
+              Panel admin
+            </button>
+          </div>
+        ) : (
+          <AdminPanel th={th} onBack={() => setAdminMode(false)} />
+        )}
+
+        <p className="mt-5 text-center text-[11px] leading-relaxed" style={{ color: th.sub }}>
+          by <span style={{ color: th.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Panel admin: kelola institusi & kode (butuh rahasia admin) ---------- */
+function AdminPanel({ th, onBack }) {
+  const [secret, setSecret] = useState("");
+  const [authed, setAuthed] = useState(false);
+  const [name, setName] = useState("");
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const open = async () => {
+    if (!secret.trim()) return setMsg("Masukkan rahasia admin.");
+    setBusy(true); setMsg("");
+    try { setRows(await sbAdminList(secret)); setAuthed(true); }
+    catch (e) { setMsg(/invalid_admin/.test(e.message) ? "Rahasia admin salah." : ("Gagal: " + e.message)); }
+    setBusy(false);
+  };
+  const create = async () => {
+    if (!name.trim()) return setMsg("Isi nama institusi.");
+    setBusy(true); setMsg("");
+    try { await sbAdminCreate(secret, name.trim()); setName(""); setRows(await sbAdminList(secret)); setMsg("Institusi dibuat ✓"); }
+    catch (e) { setMsg("Gagal: " + e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="rounded-2xl p-5 shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold"><ShieldCheck size={15} style={{ color: th.brand2 }} /> Panel admin</h2>
+        <button onClick={onBack} className="text-[11px] font-semibold" style={{ color: th.sub }}>← Kembali</button>
+      </div>
+
+      {!authed ? (
+        <>
+          <p className="mb-2 text-xs" style={{ color: th.sub }}>Masukkan rahasia admin untuk membuat/melihat institusi & kodenya.</p>
+          <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} onKeyDown={(e) => e.key === "Enter" && open()}
+            placeholder="rahasia admin" className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
+            style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
+          <button disabled={busy} onClick={open} className="mt-3 w-full rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: th.brand, opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Membuka…" : "Buka"}
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="mb-3 flex gap-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} placeholder="Nama institusi baru"
+              className="min-w-0 flex-1 rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink }} />
+            <button disabled={busy} onClick={create} className="shrink-0 rounded-lg px-3 text-xs font-semibold text-white" style={{ background: th.brand }}>+ Buat</button>
+          </div>
+          <div className="space-y-2">
+            {rows.length === 0 && <p className="text-xs" style={{ color: th.sub }}>Belum ada institusi.</p>}
+            {rows.map((t) => (
+              <div key={t.tenant_id} className="rounded-lg p-2.5" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
+                <p className="mb-1 text-sm font-semibold" style={{ color: th.ink }}>{t.name}</p>
+                <div className="grid grid-cols-2 gap-2 text-[11px]" style={{ fontFamily: MONO }}>
+                  <div><span style={{ color: th.sub }}>Atasan</span><br /><span style={{ color: th.brand, fontWeight: 600 }}>{t.atasan_code}</span></div>
+                  <div><span style={{ color: th.sub }}>Petugas</span><br /><span style={{ color: th.brand2, fontWeight: 600 }}>{t.petugas_code}</span></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {msg && <p className="mt-2 text-[12px]" style={{ color: /✓/.test(msg) ? th.green : th.red }}>{msg}</p>}
     </div>
   );
 }
