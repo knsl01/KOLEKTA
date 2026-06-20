@@ -611,7 +611,13 @@ async function sbRpc(fn, body) {
 const sbLogin = async (code) => { const a = await sbRpc("kolekta_login", { p_code: code }); return a && a[0] ? a[0] : null; };
 const sbPull = async (code) => { const a = await sbRpc("kolekta_pull", { p_code: code }); return a && a[0] ? a[0] : null; };
 const sbPush = (code, data) => sbRpc("kolekta_push", { p_code: code, p_data: data });
-const sbAdminCreate = async (secret, name) => { const a = await sbRpc("kolekta_admin_create_tenant", { p_admin: secret, p_name: name }); return a && a[0] ? a[0] : null; };
+const sbAdminCreate = async (secret, name, atasanCode, petugasCode) => {
+  const body = { p_admin: secret, p_name: name };
+  if (atasanCode && atasanCode.trim()) body.p_atasan_code = atasanCode.trim();
+  if (petugasCode && petugasCode.trim()) body.p_petugas_code = petugasCode.trim();
+  const a = await sbRpc("kolekta_admin_create_tenant", body);
+  return a && a[0] ? a[0] : null;
+};
 const sbAdminList = async (secret) => (await sbRpc("kolekta_admin_list_tenants", { p_admin: secret })) || [];
 
 function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; } }
@@ -2305,9 +2311,11 @@ function LoginScreen({ onLogin }) {
     <div className="flex min-h-screen items-center justify-center p-5" style={{ background: th.bg, color: th.ink, fontFamily: SANS }}>
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <Logo size={56} />
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+            <Logo size={64} />
+          </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: th.brand }}>Kolekta</h1>
+            <h1 className="text-3xl font-bold tracking-tight" style={{ color: th.brand }}>Kolekta</h1>
             <p className="text-xs" style={{ color: th.brass }}>collection control</p>
           </div>
         </div>
@@ -2346,22 +2354,37 @@ function AdminPanel({ th, onBack }) {
   const [secret, setSecret] = useState("");
   const [authed, setAuthed] = useState(false);
   const [name, setName] = useState("");
+  const [custom, setCustom] = useState(false);
+  const [cAtasan, setCAtasan] = useState("");
+  const [cPetugas, setCPetugas] = useState("");
   const [rows, setRows] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+
+  const errText = (m) => {
+    if (/code_taken/.test(m)) return "Kode sudah dipakai institusi lain.";
+    if (/both_codes_required/.test(m)) return "Isi kode atasan dan petugas.";
+    if (/codes_must_differ/.test(m)) return "Kode atasan dan petugas harus berbeda.";
+    if (/invalid_admin/.test(m)) return "Rahasia / kode admin salah.";
+    return "Gagal: " + m;
+  };
 
   const open = async () => {
     if (!secret.trim()) return setMsg("Masukkan rahasia admin.");
     setBusy(true); setMsg("");
     try { setRows(await sbAdminList(secret)); setAuthed(true); }
-    catch (e) { setMsg(/invalid_admin/.test(e.message) ? "Rahasia admin salah." : ("Gagal: " + e.message)); }
+    catch (e) { setMsg(errText(e.message)); }
     setBusy(false);
   };
   const create = async () => {
     if (!name.trim()) return setMsg("Isi nama institusi.");
+    if (custom && (!cAtasan.trim() || !cPetugas.trim())) return setMsg("Isi kode atasan dan petugas.");
     setBusy(true); setMsg("");
-    try { await sbAdminCreate(secret, name.trim()); setName(""); setRows(await sbAdminList(secret)); setMsg("Institusi dibuat ✓"); }
-    catch (e) { setMsg("Gagal: " + e.message); }
+    try {
+      await sbAdminCreate(secret, name.trim(), custom ? cAtasan : "", custom ? cPetugas : "");
+      setName(""); setCAtasan(""); setCPetugas("");
+      setRows(await sbAdminList(secret)); setMsg("Institusi dibuat ✓");
+    } catch (e) { setMsg(errText(e.message)); }
     setBusy(false);
   };
 
@@ -2374,9 +2397,9 @@ function AdminPanel({ th, onBack }) {
 
       {!authed ? (
         <>
-          <p className="mb-2 text-xs" style={{ color: th.sub }}>Masukkan rahasia admin untuk membuat/melihat institusi & kodenya.</p>
+          <p className="mb-2 text-xs" style={{ color: th.sub }}>Masukkan rahasia atau kode admin untuk membuat/melihat institusi & kodenya.</p>
           <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} onKeyDown={(e) => e.key === "Enter" && open()}
-            placeholder="rahasia admin" className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
+            placeholder="rahasia / kode admin" className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
             style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
           <button disabled={busy} onClick={open} className="mt-3 w-full rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: th.brand, opacity: busy ? 0.6 : 1 }}>
             {busy ? "Membuka…" : "Buka"}
@@ -2384,10 +2407,24 @@ function AdminPanel({ th, onBack }) {
         </>
       ) : (
         <>
-          <div className="mb-3 flex gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} placeholder="Nama institusi baru"
-              className="min-w-0 flex-1 rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink }} />
-            <button disabled={busy} onClick={create} className="shrink-0 rounded-lg px-3 text-xs font-semibold text-white" style={{ background: th.brand }}>+ Buat</button>
+          <div className="mb-3 rounded-lg p-2.5" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
+            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !custom && create()} placeholder="Nama institusi baru"
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink }} />
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-[12px]" style={{ color: th.sub }}>
+              <input type="checkbox" checked={custom} onChange={(e) => setCustom(e.target.checked)} />
+              Tentukan kode sendiri (kosongkan = digenerate otomatis)
+            </label>
+            {custom && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <input value={cAtasan} onChange={(e) => setCAtasan(e.target.value)} placeholder="Kode atasan"
+                  className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
+                <input value={cPetugas} onChange={(e) => setCPetugas(e.target.value)} placeholder="Kode petugas"
+                  className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
+              </div>
+            )}
+            <button disabled={busy} onClick={create} className="mt-2 w-full rounded-lg py-2 text-xs font-semibold text-white" style={{ background: th.brand, opacity: busy ? 0.6 : 1 }}>
+              {busy ? "Menyimpan…" : "+ Buat institusi"}
+            </button>
           </div>
           <div className="space-y-2">
             {rows.length === 0 && <p className="text-xs" style={{ color: th.sub }}>Belum ada institusi.</p>}
