@@ -4,7 +4,7 @@ import {
   Wallet, Bell, RotateCcw, X, MessageCircle, ChevronDown, FileText, Scale,
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
-  LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3,
+  LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -734,6 +734,7 @@ export default function KolektaApp() {
   const [showAdd, setShowAdd] = useState(false);
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [showCalc, setShowCalc] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [fStatus, setFStatus] = useState("all");
   const [fTipe, setFTipe] = useState("all");
@@ -1100,6 +1101,10 @@ AKTIVITAS HARI INI
             {NAV.map((n) => (
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
+            <button onClick={() => setShowCalc(true)}
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
+              <CalcIcon size={18} /><span>Kalkulator</span>
+            </button>
           </nav>
           {sideSummary}
           <div className="mt-auto p-5">
@@ -1554,6 +1559,10 @@ AKTIVITAS HARI INI
                   </button>
                 );
               })}
+              <button onClick={() => { setShowCalc(true); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <CalcIcon size={18} /><span>Kalkulator</span>
+              </button>
             </nav>
             {sideSummary}
             <div className="mt-auto p-5">
@@ -1570,6 +1579,117 @@ AKTIVITAS HARI INI
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-white shadow-lg"
           style={{ background: T.toast }}>{toast}</div>
       )}
+
+      <Kalkulator open={showCalc} onClose={() => setShowCalc(false)} />
+    </div>
+  );
+}
+
+/* ---------- Kalkulator (modal, ramah angka rupiah) ---------- */
+function Kalkulator({ open, onClose }) {
+  const [cur, setCur] = useState("0");
+  const [prev, setPrev] = useState(null);
+  const [op, setOp] = useState(null);
+  const [overwrite, setOverwrite] = useState(true);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      const k = e.key;
+      if (k >= "0" && k <= "9") digit(k);
+      else if (k === ".") dot();
+      else if (k === "+" ) choose("+");
+      else if (k === "-") choose("−");
+      else if (k === "*") choose("×");
+      else if (k === "/") { e.preventDefault(); choose("÷"); }
+      else if (k === "%") percent();
+      else if (k === "Enter" || k === "=") { e.preventDefault(); eq(); }
+      else if (k === "Backspace") back();
+      else if (k === "Escape") onClose();
+      else if (k === "c" || k === "C") clearAll();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  if (!open) return null;
+
+  const calc = (a, b, o) => o === "+" ? a + b : o === "−" ? a - b : o === "×" ? a * b : o === "÷" ? (b === 0 ? NaN : a / b) : b;
+  const digit = (d) => setCur((c) => (overwrite || c === "0" ? d : c + d)) || setOverwrite(false);
+  const dot = () => { if (overwrite) { setCur("0."); setOverwrite(false); } else setCur((c) => (c.includes(".") ? c : c + ".")); };
+  const choose = (o) => {
+    const c = parseFloat(cur);
+    if (prev == null) setPrev(c);
+    else if (!overwrite) { const r = calc(prev, c, op); setPrev(r); setCur(String(r)); }
+    setOp(o); setOverwrite(true);
+  };
+  const eq = () => {
+    if (op == null || prev == null) return;
+    const r = calc(prev, parseFloat(cur), op);
+    setCur(Number.isFinite(r) ? String(r) : "Error");
+    setPrev(null); setOp(null); setOverwrite(true);
+  };
+  const percent = () => setCur((c) => { const v = parseFloat(c); return String(prev != null && op ? (prev * v) / 100 : v / 100); });
+  const sign = () => setCur((c) => (c === "0" || c === "Error" ? c : c.startsWith("-") ? c.slice(1) : "-" + c));
+  const back = () => setCur((c) => (overwrite || c.length <= 1 || (c.length === 2 && c.startsWith("-")) ? "0" : c.slice(0, -1)));
+  const clearAll = () => { setCur("0"); setPrev(null); setOp(null); setOverwrite(true); };
+
+  const fmt = (s) => {
+    if (s === "Error") return s;
+    const neg = s.startsWith("-"); const body = neg ? s.slice(1) : s;
+    const [ip, dp] = body.split(".");
+    const g = Number(ip || "0").toLocaleString("id-ID");
+    const tail = s.endsWith(".") ? "," : dp != null ? "," + dp : "";
+    return (neg ? "-" : "") + g + tail;
+  };
+
+  const Btn = ({ children, onClick, kind }) => {
+    const st = kind === "op" ? { background: T.brand2 + "1A", color: T.brand2 }
+      : kind === "eq" ? { background: T.brand, color: "#fff" }
+      : kind === "fn" ? { background: T.bg, color: T.sub }
+      : { background: T.surface, color: T.ink, border: `1px solid ${T.line}` };
+    return (
+      <button onClick={onClick} className="kpress flex h-14 items-center justify-center rounded-xl text-lg font-semibold" style={st}>{children}</button>
+    );
+  };
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-t-2xl p-4 shadow-xl sm:rounded-2xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CalcIcon size={18} style={{ color: T.brand2 }} />
+            <h3 className="text-sm font-semibold">Kalkulator</h3>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1" style={{ color: T.sub }}><X size={18} /></button>
+        </div>
+        <div className="mb-3 rounded-xl p-4 text-right" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+          <div className="h-4 text-xs" style={{ color: T.sub, fontFamily: MONO }}>{prev != null ? `${fmt(String(prev))} ${op || ""}` : " "}</div>
+          <div className="truncate text-3xl font-bold" style={{ fontFamily: MONO, color: T.ink }}>{fmt(cur)}</div>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          <Btn kind="fn" onClick={clearAll}>C</Btn>
+          <Btn kind="fn" onClick={sign}>±</Btn>
+          <Btn kind="fn" onClick={percent}><Percent size={18} /></Btn>
+          <Btn kind="op" onClick={() => choose("÷")}><Divide size={18} /></Btn>
+          <Btn onClick={() => digit("7")}>7</Btn>
+          <Btn onClick={() => digit("8")}>8</Btn>
+          <Btn onClick={() => digit("9")}>9</Btn>
+          <Btn kind="op" onClick={() => choose("×")}>×</Btn>
+          <Btn onClick={() => digit("4")}>4</Btn>
+          <Btn onClick={() => digit("5")}>5</Btn>
+          <Btn onClick={() => digit("6")}>6</Btn>
+          <Btn kind="op" onClick={() => choose("−")}>−</Btn>
+          <Btn onClick={() => digit("1")}>1</Btn>
+          <Btn onClick={() => digit("2")}>2</Btn>
+          <Btn onClick={() => digit("3")}>3</Btn>
+          <Btn kind="op" onClick={() => choose("+")}>+</Btn>
+          <Btn kind="fn" onClick={back}><Delete size={18} /></Btn>
+          <Btn onClick={() => digit("0")}>0</Btn>
+          <Btn onClick={dot}>,</Btn>
+          <Btn kind="eq" onClick={eq}>=</Btn>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1734,6 +1854,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [bayar, setBayar] = useState("");
   const [hasil, setHasil] = useState("lain");
   const [foto, setFoto] = useState(null);
+  const [fotoView, setFotoView] = useState(null);
   const [lok, setLok] = useState(null);
   const [busyLoc, setBusyLoc] = useState(false);
   const fotoRef = useRef(null);
@@ -1816,6 +1937,14 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
 
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
   return (
+    <>
+    {fotoView && (
+      <div onClick={() => setFotoView(null)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
+        <button onClick={() => setFotoView(null)} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
+        <img src={fotoView} alt="Bukti kunjungan" className="max-h-full max-w-full rounded-lg object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()} />
+        <a href={fotoView} download={`bukti-${i.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
+      </div>
+    )}
     <div className="overflow-hidden rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <button onClick={onToggle} className="flex w-full items-center gap-3 p-3 text-left">
         <div className="h-9 w-1 shrink-0 rounded-full" style={{ background: i.status === "lunas" ? T.green : urgent ? (i.odRaw > 60 ? T.red : T.amber) : T.line }} />
@@ -1938,7 +2067,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                     {i.aktivitas.map((a, idx) => (
                       <div key={idx} className="rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         <div className="flex gap-2">
-                          {a.foto && <img src={a.foto} alt="bukti" className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} onClick={() => window.open(a.foto, "_blank")} />}
+                          {a.foto && <img src={a.foto} alt="bukti" className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} onClick={() => setFotoView(a.foto)} />}
                           <div className="min-w-0 flex-1">
                             <p className="text-[11px]" style={{ color: T.brass, fontFamily: MONO }}>{a.waktu ? fmtWaktu(a.waktu) : fmtTgl(a.ts).split(" ").slice(0, 2).join(" ")}</p>
                             <p className="text-xs" style={{ color: T.ink }}>{a.note}</p>
@@ -2137,6 +2266,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
         </div>
       )}
     </div>
+    </>
   );
 }
 
