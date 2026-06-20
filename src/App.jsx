@@ -4,7 +4,7 @@ import {
   Wallet, Bell, RotateCcw, X, MessageCircle, ChevronDown, FileText, Scale,
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
-  LogOut, Lock, ShieldCheck,
+  LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -44,6 +44,7 @@ const NAV = [
   { id: "hari", icon: Bell, label: "Hari Ini" },
   { id: "tagihan", icon: Wallet, label: "Tagihan" },
   { id: "analitik", icon: BarChart3, label: "Analitik" },
+  { id: "heatmap", icon: Flame, label: "Heat Map" },
   { id: "set", icon: Settings, label: "Pengaturan" },
 ];
 
@@ -684,8 +685,8 @@ const sampleData = () => {
     invoices: [
       { id: uid(), customer: "PT Karya Bangun Persada", tipe: "perusahaan", assignedTo: "Andi", alamat: "Jl. Industri Raya No. 12, Surabaya", noInvoice: "INV-2026-0188", nominal: 145000000, tglJatuhTempo: d(-42), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [], dibuat: d(-72) },
       { id: uid(), customer: "Budi Santoso", tipe: "perorangan", assignedTo: "Andi", alamat: "Perum Griya Asri Blok C-7, Gresik", noInvoice: "INV-2026-0203", nominal: 38500000, tglJatuhTempo: d(-23), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "fidusia", jaminan: "BPKB Toyota Avanza tahun 2021, Nopol W 1234 ABC a.n. Budi Santoso", pic: "Budi Santoso", telp: "081234567890", pembayaran: [{ ts: d(-5), jumlah: 10000000 }], eskalasi: [{ ts: d(-1), level: "tegas" }], aktivitas: [], dibuat: d(-39) },
-      { id: uid(), customer: "PT Graha Janto Dua", tipe: "perusahaan", assignedTo: "Rudi", alamat: "Jl. Gatot Subroto Kav. 5, Jakarta Selatan", noInvoice: "INV-2026-0171", nominal: 92000000, tglJatuhTempo: d(-21), status: "sudah_followup", lastFollowUp: d(-12), janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [{ ts: d(-12), note: "Telp ke bag. keuangan, minta dikejar approval." }], dibuat: d(-51) },
-      { id: uid(), customer: "Siti Rahmawati", tipe: "perorangan", assignedTo: "Rudi", alamat: "Jl. Diponegoro No. 88, Malang", noInvoice: "INV-2026-0199", nominal: 61000000, tglJatuhTempo: d(-72), status: "janji_bayar", lastFollowUp: d(-3), janjiBayar: d(-1), jaminanTipe: "tanah", jaminan: "Sertifikat Hak Milik No. 1234/Klojen, Malang", pic: "Siti Rahmawati", telp: "081298765432", eskalasi: [{ ts: d(-2), level: "somasi" }], aktivitas: [{ ts: d(-3), note: "Janji transfer paling lambat kemarin." }], dibuat: d(-95) },
+      { id: uid(), customer: "PT Graha Janto Dua", tipe: "perusahaan", assignedTo: "Rudi", alamat: "Jl. Gatot Subroto Kav. 5, Jakarta Selatan", noInvoice: "INV-2026-0171", nominal: 92000000, tglJatuhTempo: d(-21), status: "sudah_followup", lastFollowUp: d(-12), janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [{ ts: d(-12), waktu: new Date().toISOString(), note: "Kunjungan ke kantor, minta dikejar approval.", lok: { lat: -6.2349, lng: 106.8186, acc: 18 } }], dibuat: d(-51) },
+      { id: uid(), customer: "Siti Rahmawati", tipe: "perorangan", assignedTo: "Rudi", alamat: "Jl. Diponegoro No. 88, Malang", noInvoice: "INV-2026-0199", nominal: 61000000, tglJatuhTempo: d(-72), status: "janji_bayar", lastFollowUp: d(-3), janjiBayar: d(-1), jaminanTipe: "tanah", jaminan: "Sertifikat Hak Milik No. 1234/Klojen, Malang", pic: "Siti Rahmawati", telp: "081298765432", eskalasi: [{ ts: d(-2), level: "somasi" }], aktivitas: [{ ts: d(-3), waktu: new Date().toISOString(), note: "Kunjungan rumah, janji transfer paling lambat kemarin.", lok: { lat: -7.9785, lng: 112.6210, acc: 22 } }], dibuat: d(-95) },
       { id: uid(), customer: "CV Sentosa Material", tipe: "perusahaan", assignedTo: "Andi", alamat: "Jl. Raya Driyorejo No. 21, Gresik", noInvoice: "INV-2026-0210", nominal: 27500000, tglJatuhTempo: d(6), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [], dibuat: d(-24) },
       { id: uid(), customer: "PT Wahana Lentera", tipe: "perusahaan", assignedTo: "Rudi", alamat: "Jl. Mayjen Sungkono No. 3, Surabaya", noInvoice: "INV-2026-0150", nominal: 54000000, tglJatuhTempo: d(-30), status: "lunas", lastFollowUp: d(-8), janjiBayar: null, jaminanTipe: "none", jaminan: "", pembayaran: [{ ts: d(-8), jumlah: 54000000 }], aktivitas: [{ ts: d(-8), note: "Sudah transfer penuh + denda." }], dibuat: d(-60) },
     ],
@@ -1506,6 +1507,12 @@ AKTIVITAS HARI INI
           </div>
         )}
 
+        {/* ---------- HEAT MAP ---------- */}
+        {tab === "heatmap" && (
+          <HeatMapView rows={enriched} allRows={allEnriched} s={s}
+            onOpen={(id) => { setTab("tagihan"); setOpenId(id); }} />
+        )}
+
         {/* ---------- PENGATURAN ---------- */}
         {tab === "set" && (
           <Settingstab data={data} setData={setData} flash={flash} copy={copy}
@@ -2138,6 +2145,325 @@ function Mini({ label, value, accent }) {
     <div className="rounded-lg p-2" style={{ background: T.bg }}>
       <p className="text-[11px]" style={{ color: T.sub }}>{label}</p>
       <p className="whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO, color: accent || T.ink }}>{value}</p>
+    </div>
+  );
+}
+
+/* ================= HEAT MAP ANALYTICS ================= */
+/* Memuat Leaflet + plugin heat lewat CDN unpkg (tanpa npm install). */
+function useLeaflet() {
+  const [ready, setReady] = useState(() => !!(window.L && window.L.heatLayer));
+  useEffect(() => {
+    if (window.L && window.L.heatLayer) { setReady(true); return; }
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css"; link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    const loadScript = (src) => new Promise((res, rej) => {
+      const ex = document.querySelector(`script[src="${src}"]`);
+      if (ex) { if (ex.dataset.loaded) res(); else { ex.addEventListener("load", res); ex.addEventListener("error", rej); } return; }
+      const sc = document.createElement("script");
+      sc.src = src; sc.async = true;
+      sc.onload = () => { sc.dataset.loaded = "1"; res(); };
+      sc.onerror = rej;
+      document.body.appendChild(sc);
+    });
+    let alive = true;
+    loadScript("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js")
+      .then(() => loadScript("https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"))
+      .then(() => { if (alive) setReady(true); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return ready;
+}
+
+/* Perkiraan titik kota untuk debitur tanpa GPS kunjungan (mock terstruktur). */
+const CITY_COORDS = [
+  { k: ["jakarta selatan", "jaksel"], c: [-6.2615, 106.8106] },
+  { k: ["jakarta"], c: [-6.2088, 106.8456] },
+  { k: ["surabaya"], c: [-7.2575, 112.7521] },
+  { k: ["gresik"], c: [-7.1561, 112.6531] },
+  { k: ["sidoarjo"], c: [-7.4478, 112.7183] },
+  { k: ["malang"], c: [-7.9666, 112.6326] },
+  { k: ["bandung"], c: [-6.9175, 107.6191] },
+  { k: ["semarang"], c: [-6.9667, 110.4167] },
+  { k: ["yogyakarta", "jogja", "yogya"], c: [-7.7956, 110.3695] },
+  { k: ["medan"], c: [3.5952, 98.6722] },
+  { k: ["makassar"], c: [-5.1477, 119.4327] },
+  { k: ["denpasar", "bali"], c: [-8.6705, 115.2126] },
+];
+const HM_DEFAULT_CENTER = [-7.2575, 112.7521];
+function hashStr(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return h; }
+function invCoord(i) {
+  const withLok = (i.aktivitas || []).filter((a) => a.lok && a.lok.lat != null);
+  if (withLok.length) { const l = withLok[withLok.length - 1].lok; return { lat: l.lat, lng: l.lng, real: true }; }
+  const al = (i.alamat || "").toLowerCase();
+  let base = HM_DEFAULT_CENTER;
+  for (const c of CITY_COORDS) { if (c.k.some((k) => al.includes(k))) { base = c.c; break; } }
+  const h = hashStr((i.id || "") + (i.noInvoice || ""));
+  const jx = (((h % 1000) / 1000) - 0.5) * 0.05;
+  const jy = ((((h >> 10) % 1000) / 1000) - 0.5) * 0.05;
+  return { lat: base[0] + jy, lng: base[1] + jx, real: false };
+}
+const escHtml = (t) => (t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/* ----- 1. Peta Geografis ----- */
+function GeoHeat({ rows }) {
+  const ready = useLeaflet();
+  const elRef = useRef(null);
+  const mapRef = useRef(null);
+  const pts = useMemo(
+    () => rows.filter((i) => i.status !== "lunas" && i.total > 0).map((i) => ({ i, ...invCoord(i) })),
+    [rows]
+  );
+  const realN = pts.filter((p) => p.real).length;
+  useEffect(() => {
+    if (!ready || !elRef.current) return;
+    const L = window.L;
+    if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    const map = L.map(elRef.current, { scrollWheelZoom: false }).setView(HM_DEFAULT_CENTER, 6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap", maxZoom: 19,
+    }).addTo(map);
+    if (pts.length) {
+      const max = Math.max(...pts.map((p) => p.i.total));
+      const heat = pts.map((p) => [p.lat, p.lng, Math.max(0.15, p.i.total / max)]);
+      L.heatLayer(heat, { radius: 28, blur: 20, maxZoom: 12, gradient: { 0.0: T.green, 0.5: T.amber, 1.0: T.red } }).addTo(map);
+      pts.forEach((p) => {
+        const r = p.i.total / max;
+        const col = r > 0.66 ? T.red : r > 0.33 ? T.amber : T.green;
+        const m = L.circleMarker([p.lat, p.lng], { radius: 7, color: "#fff", weight: 1.5, fillColor: col, fillOpacity: 0.9 }).addTo(map);
+        m.bindPopup(
+          `<div style="font-family:${SANS};min-width:170px">` +
+          `<div style="font-weight:700;color:${T.ink}">${escHtml(p.i.customer)}</div>` +
+          `<div style="font-size:12px;color:${T.sub};margin:2px 0">${escHtml(p.i.noInvoice)}${p.i.assignedTo ? " &middot; " + escHtml(p.i.assignedTo) : ""}</div>` +
+          `<div style="font-size:12px;color:${T.ink}">DPD: <b>${p.i.daysOverdue} hari</b> &middot; ${p.i.kol.short}</div>` +
+          `<div style="font-size:13px;font-weight:700;color:${T.red};margin-top:2px">Tunggakan: ${rp(p.i.total)}</div>` +
+          (p.real ? "" : `<div style="font-size:10px;color:${T.sub};margin-top:3px">*lokasi perkiraan (belum ada GPS kunjungan)</div>`) +
+          `</div>`
+        );
+      });
+      try {
+        const grp = L.featureGroup(pts.map((p) => L.marker([p.lat, p.lng])));
+        map.fitBounds(grp.getBounds().pad(0.25));
+      } catch {}
+    }
+    mapRef.current = map;
+    const t = setTimeout(() => map.invalidateSize(), 250);
+    return () => { clearTimeout(t); if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+  }, [ready, pts]);
+
+  return (
+    <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <h2 className="mb-1 text-sm font-semibold">Sebaran Geografis Tunggakan</h2>
+      <p className="mb-3 text-xs" style={{ color: T.sub }}>
+        Intensitas warna mengikuti besar tunggakan — <span style={{ color: T.red, fontWeight: 600 }}>merah = tinggi</span>, <span style={{ color: T.green, fontWeight: 600 }}>hijau = rendah</span>. Ketuk titik untuk detail debitur.
+      </p>
+      <div ref={elRef} className="overflow-hidden rounded-xl" style={{ height: 420, width: "100%", background: T.bg, border: `1px solid ${T.line}` }} />
+      {!ready && <p className="mt-2 text-xs" style={{ color: T.sub }}>Memuat peta…</p>}
+      <p className="mt-2 text-[11px]" style={{ color: T.sub }}>
+        {pts.length} debitur aktif dipetakan · {realN} dari GPS kunjungan, {pts.length - realN} perkiraan lokasi kota.
+      </p>
+    </section>
+  );
+}
+
+/* ----- 2. Kalender (gaya GitHub) ----- */
+function CalHeat({ rows, onOpen }) {
+  const [sel, setSel] = useState(null);
+  const { weeks, max, byDay } = useMemo(() => {
+    const byDay = {};
+    rows.forEach((i) => {
+      if (i.status === "lunas") return;
+      const d = i.tglJatuhTempo; if (!d) return;
+      if (!byDay[d]) byDay[d] = { total: 0, count: 0, list: [] };
+      byDay[d].total += i.total; byDay[d].count++; byDay[d].list.push(i);
+    });
+    const end = today0();
+    const start = new Date(end); start.setDate(start.getDate() - 364);
+    start.setDate(start.getDate() - start.getDay()); // mundur ke Minggu
+    const weeks = []; const cur = new Date(start);
+    while (cur <= end) {
+      const week = [];
+      for (let dn = 0; dn < 7; dn++) {
+        const iso = cur.toISOString().slice(0, 10);
+        week.push({ iso, future: cur > end, month: cur.getMonth(), day: cur.getDate() });
+        cur.setDate(cur.getDate() + 1);
+      }
+      weeks.push(week);
+    }
+    const max = Math.max(1, ...Object.values(byDay).map((v) => v.total));
+    return { weeks, max, byDay };
+  }, [rows]);
+
+  const cellColor = (iso, future) => {
+    if (future) return "transparent";
+    const v = byDay[iso]; if (!v || !v.total) return T.bg;
+    const r = v.total / max;
+    if (r < 0.25) return "#FDE68A"; // kuning muda
+    if (r < 0.5) return "#FBBF24";  // kuning
+    if (r < 0.75) return "#F97316"; // oranye
+    return T.red;                    // merah
+  };
+
+  const selData = sel ? byDay[sel] : null;
+  return (
+    <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <h2 className="mb-1 text-sm font-semibold">Kalender Jatuh Tempo — 12 Bulan Terakhir</h2>
+      <p className="mb-3 text-xs" style={{ color: T.sub }}>Tiap kotak = satu hari. Makin pekat warnanya, makin besar tunggakan jatuh tempo hari itu. Ketuk untuk lihat debitur.</p>
+      <div className="overflow-x-auto pb-1">
+        <div className="flex gap-[3px]" style={{ minWidth: "min-content" }}>
+          {weeks.map((week, wi) => (
+            <div key={wi} className="flex flex-col gap-[3px]">
+              {week.map((d) => {
+                const v = byDay[d.iso];
+                const isSel = sel === d.iso;
+                return (
+                  <button key={d.iso} title={d.future ? "" : `${fmtTgl(d.iso)}${v ? ` — ${rp(v.total)} (${v.count})` : " — tidak ada"}`}
+                    disabled={d.future || !v}
+                    onClick={() => setSel(isSel ? null : d.iso)}
+                    className="rounded-[2px]"
+                    style={{ width: 13, height: 13, background: cellColor(d.iso, d.future), border: isSel ? `2px solid ${T.brand}` : `1px solid ${d.future ? "transparent" : T.line}`, cursor: d.future || !v ? "default" : "pointer" }} />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: T.sub }}>
+        <span>Rendah</span>
+        {[T.bg, "#FDE68A", "#FBBF24", "#F97316", T.red].map((c, n) => (
+          <span key={n} className="rounded-[2px]" style={{ width: 13, height: 13, background: c, border: `1px solid ${T.line}`, display: "inline-block" }} />
+        ))}
+        <span>Tinggi</span>
+      </div>
+      {selData && (
+        <div className="mt-3 rounded-lg p-3" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold">{fmtTgl(sel)}</p>
+            <p className="text-xs font-bold" style={{ fontFamily: MONO, color: T.red }}>{rp(selData.total)} · {selData.count} debitur</p>
+          </div>
+          <div className="space-y-1">
+            {selData.list.map((i) => (
+              <button key={i.id} onClick={() => onOpen(i.id)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-black/5">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: T[i.kol.tone] }} />
+                <span className="min-w-0 flex-1 truncate text-xs">{i.customer}</span>
+                <span className="shrink-0 text-[11px]" style={{ color: T.sub }}>{i.daysOverdue > 0 ? `telat ${i.daysOverdue} hr` : "belum JT"}</span>
+                <span className="shrink-0 text-xs font-bold" style={{ fontFamily: MONO }}>{rpc(i.total)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ----- 3. Matriks Bucket × Petugas ----- */
+const HM_BUCKETS = [["lancar", "Current"], ["1-30", "DPD 1-30"], ["31-60", "DPD 31-60"], ["61-90", "DPD 61-90"], ["90+", "DPD 90+"]];
+function MatrixHeat({ rows, s }) {
+  const { officers, max, colTot } = useMemo(() => {
+    const map = {};
+    const ensure = (n) => { if (!map[n]) { map[n] = {}; HM_BUCKETS.forEach(([k]) => (map[n][k] = { total: 0, count: 0 })); } };
+    (s?.petugas || []).forEach(ensure);
+    rows.forEach((i) => {
+      if (i.status === "lunas") return;
+      const n = i.assignedTo || "Belum ditugaskan";
+      ensure(n);
+      if (map[n][i.bucket]) { map[n][i.bucket].total += i.total; map[n][i.bucket].count++; }
+    });
+    const officers = Object.keys(map).map((n) => ({ nama: n, cells: map[n] }));
+    officers.sort((a, b) => {
+      const sum = (o) => HM_BUCKETS.reduce((x, [k]) => x + o.cells[k].total, 0);
+      return sum(b) - sum(a);
+    });
+    const max = Math.max(1, ...officers.flatMap((o) => HM_BUCKETS.map(([k]) => o.cells[k].total)));
+    const colTot = {};
+    HM_BUCKETS.forEach(([k]) => { colTot[k] = officers.reduce((a, o) => a + o.cells[k].total, 0); });
+    return { officers, max, colTot };
+  }, [rows, s]);
+
+  const cellBg = (total) => {
+    if (!total) return T.bg;
+    const a = 0.12 + 0.78 * (total / max);
+    const h = Math.round(a * 255).toString(16).padStart(2, "0");
+    return T.red + h;
+  };
+
+  return (
+    <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <h2 className="mb-1 text-sm font-semibold">Matriks Portofolio — Petugas × Bucket DPD</h2>
+      <p className="mb-3 text-xs" style={{ color: T.sub }}>Warna sel mengikuti besar outstanding. Bantu supervisor melihat siapa memegang portofolio terberat.</p>
+      {officers.length === 0 ? (
+        <p className="text-xs" style={{ color: T.sub }}>Belum ada data petugas / tagihan aktif.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-xs" style={{ minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-10 p-2 text-left font-semibold" style={{ background: T.surface, color: T.sub }}>Petugas</th>
+                {HM_BUCKETS.map(([k, lbl]) => (
+                  <th key={k} className="p-2 text-center font-semibold" style={{ color: T.sub }}>{lbl}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {officers.map((o) => (
+                <tr key={o.nama}>
+                  <td className="sticky left-0 z-10 max-w-[120px] truncate p-2 font-medium" style={{ background: T.surface, color: T.ink }}>{o.nama}</td>
+                  {HM_BUCKETS.map(([k]) => {
+                    const c = o.cells[k];
+                    const strong = c.total / max > 0.5;
+                    return (
+                      <td key={k} className="p-1.5 text-center" style={{ background: cellBg(c.total), color: strong ? "#fff" : T.ink, border: `1px solid ${T.surface}` }}>
+                        {c.count > 0 ? (
+                          <>
+                            <div className="font-bold" style={{ fontFamily: MONO }}>{rpc(c.total)}</div>
+                            <div style={{ fontSize: 10, opacity: 0.85 }}>{c.count} akun</div>
+                          </>
+                        ) : (
+                          <span style={{ color: T.sub }}>—</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr>
+                <td className="sticky left-0 z-10 p-2 font-semibold" style={{ background: T.surface, color: T.sub }}>Total</td>
+                {HM_BUCKETS.map(([k]) => (
+                  <td key={k} className="p-2 text-center font-bold" style={{ fontFamily: MONO, color: T.ink, borderTop: `2px solid ${T.line}` }}>{colTot[k] ? rpc(colTot[k]) : "—"}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HeatMapView({ rows, allRows, s, onOpen }) {
+  const [view, setView] = useState("geo");
+  const VIEWS = [["geo", "Geografis", MapPin], ["kalender", "Kalender", CalendarDays], ["matriks", "Matriks", Grid3x3]];
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="grid grid-cols-3 gap-1 rounded-xl p-1" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        {VIEWS.map(([k, lbl, Ic]) => (
+          <button key={k} onClick={() => setView(k)}
+            className="kpress flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-colors sm:text-sm"
+            style={view === k ? { background: T.brand, color: "#fff" } : { color: T.sub }}>
+            <Ic size={15} /> {lbl}
+          </button>
+        ))}
+      </div>
+      {view === "geo" && <div className="sub-fade"><GeoHeat rows={rows} /></div>}
+      {view === "kalender" && <div className="sub-fade"><CalHeat rows={rows} onOpen={onOpen} /></div>}
+      {view === "matriks" && <div className="sub-fade"><MatrixHeat rows={allRows} s={s} /></div>}
     </div>
   );
 }
