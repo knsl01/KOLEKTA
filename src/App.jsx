@@ -398,18 +398,38 @@ ${jabatan}`;
   return out;
 }
 
+/* Cetak via iframe tersembunyi — tetap di dalam aplikasi sehingga pengguna
+   tidak "nyantol" di tab/penampil PDF baru (penting untuk PWA standalone iOS).
+   Setelah dialog cetak ditutup, iframe otomatis dibuang dan user kembali ke app. */
+const DOC_STYLE = `@page{size:A4;margin:2.5cm}body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.55;color:#111;margin:0}.doc{white-space:pre-wrap}`;
+function printViaIframe(label, bodyHtml) {
+  try {
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;";
+    document.body.appendChild(iframe);
+    const cw = iframe.contentWindow;
+    let removed = false;
+    const cleanup = () => { if (removed) return; removed = true; setTimeout(() => { try { iframe.remove(); } catch (_) {} }, 500); };
+    cw.onafterprint = cleanup;
+    const doc = cw.document;
+    doc.open();
+    doc.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title><style>${DOC_STYLE}</style></head>` +
+      `<body>${bodyHtml}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},150)}<\/script></body></html>`
+    );
+    doc.close();
+    setTimeout(cleanup, 5 * 60 * 1000); // pengaman bila onafterprint tak terpicu
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function printDoc(label, text, sig) {
-  const w = window.open("", "_blank");
-  if (!w) return false;
   const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const sigHtml = sig ? `<div style="margin-top:16px"><div style="font-size:11pt">Tanda tangan debitur:</div><img src="${sig}" style="height:90px;display:block"/></div>` : "";
-  w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
-    `<style>@page{size:A4;margin:2.5cm}body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.55;color:#111}.doc{white-space:pre-wrap}</style>` +
-    `</head><body><div class="doc">${esc}</div>${sigHtml}<script>window.onload=function(){window.print()}<\/script></body></html>`
-  );
-  w.document.close();
-  return true;
+  return printViaIframe(label, `<div class="doc">${esc}</div>${sigHtml}`);
 }
 
 function fieldBase(s) {
@@ -477,16 +497,8 @@ ${i.customer}                               ${jabatan}`;
 }
 
 function printLetter(label, text) {
-  const w = window.open("", "_blank");
-  if (!w) return false;
   const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
-    `<style>@page{size:A4;margin:2.5cm}body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.55;color:#111}.doc{white-space:pre-wrap}</style>` +
-    `</head><body><div class="doc">${esc}</div><script>window.onload=function(){window.print()}<\/script></body></html>`
-  );
-  w.document.close();
-  return true;
+  return printViaIframe(label, `<div class="doc">${esc}</div>`);
 }
 
 function exportExcel(rows, s) {
@@ -619,6 +631,7 @@ const sbAdminCreate = async (secret, name, atasanCode, petugasCode) => {
   return a && a[0] ? a[0] : null;
 };
 const sbAdminList = async (secret) => (await sbRpc("kolekta_admin_list_tenants", { p_admin: secret })) || [];
+const sbAdminDelete = (secret, tenantId) => sbRpc("kolekta_admin_delete_tenant", { p_admin: secret, p_tenant_id: tenantId });
 
 function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; } }
 function saveAuth(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch {} }
@@ -2360,13 +2373,32 @@ function AdminPanel({ th, onBack }) {
   const [rows, setRows] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [delId, setDelId] = useState("");   // tenant yang sedang dikonfirmasi hapus
+  const [delCode, setDelCode] = useState(""); // input kode konfirmasi (harus 12345)
+
+  const DELETE_CODE = "12345";
 
   const errText = (m) => {
     if (/code_taken/.test(m)) return "Kode sudah dipakai institusi lain.";
     if (/both_codes_required/.test(m)) return "Isi kode atasan dan petugas.";
     if (/codes_must_differ/.test(m)) return "Kode atasan dan petugas harus berbeda.";
     if (/invalid_admin/.test(m)) return "Rahasia / kode admin salah.";
+    if (/tenant_required/.test(m)) return "Institusi tidak ditemukan.";
     return "Gagal: " + m;
+  };
+
+  const askDelete = (id) => { setDelId(id); setDelCode(""); setMsg(""); };
+  const cancelDelete = () => { setDelId(""); setDelCode(""); };
+  const confirmDelete = async (t) => {
+    if (delCode.trim() !== DELETE_CODE) return setMsg("Kode hapus salah. Ketik 12345 untuk menghapus.");
+    setBusy(true); setMsg("");
+    try {
+      await sbAdminDelete(secret, t.tenant_id);
+      setRows(await sbAdminList(secret));
+      cancelDelete();
+      setMsg(`Institusi "${t.name}" dihapus ✓`);
+    } catch (e) { setMsg(errText(e.message)); }
+    setBusy(false);
   };
 
   const open = async () => {
@@ -2430,11 +2462,37 @@ function AdminPanel({ th, onBack }) {
             {rows.length === 0 && <p className="text-xs" style={{ color: th.sub }}>Belum ada institusi.</p>}
             {rows.map((t) => (
               <div key={t.tenant_id} className="rounded-lg p-2.5" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
-                <p className="mb-1 text-sm font-semibold" style={{ color: th.ink }}>{t.name}</p>
+                <div className="mb-1 flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold" style={{ color: th.ink }}>{t.name}</p>
+                  {delId !== t.tenant_id && (
+                    <button onClick={() => askDelete(t.tenant_id)} title="Hapus institusi"
+                      className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}`, background: th.surface }}>
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]" style={{ fontFamily: MONO }}>
                   <div><span style={{ color: th.sub }}>Atasan</span><br /><span style={{ color: th.brand, fontWeight: 600 }}>{t.atasan_code}</span></div>
                   <div><span style={{ color: th.sub }}>Petugas</span><br /><span style={{ color: th.brand2, fontWeight: 600 }}>{t.petugas_code}</span></div>
                 </div>
+                {delId === t.tenant_id && (
+                  <div className="mt-2 rounded-lg p-2.5" style={{ background: th.surface, border: `1px solid ${th.red}` }}>
+                    <p className="mb-2 text-[12px]" style={{ color: th.red }}>
+                      Hapus <b>{t.name}</b> permanen beserta seluruh datanya? Ketik kode <b style={{ fontFamily: MONO }}>12345</b> untuk konfirmasi.
+                    </p>
+                    <input value={delCode} onChange={(e) => setDelCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmDelete(t)}
+                      inputMode="numeric" placeholder="Kode hapus" autoFocus
+                      className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button disabled={busy} onClick={cancelDelete}
+                        className="rounded-lg py-2 text-xs font-semibold" style={{ background: th.bg, color: th.ink, border: `1px solid ${th.line}` }}>Batal</button>
+                      <button disabled={busy || delCode.trim() !== DELETE_CODE} onClick={() => confirmDelete(t)}
+                        className="rounded-lg py-2 text-xs font-semibold text-white" style={{ background: th.red, opacity: busy || delCode.trim() !== DELETE_CODE ? 0.5 : 1 }}>
+                        {busy ? "Menghapus…" : "Hapus permanen"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
