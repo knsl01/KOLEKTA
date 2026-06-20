@@ -103,6 +103,82 @@ function getLoc() {
   });
 }
 
+/* Reverse geocode (koordinat -> alamat) via Nominatim, di-cache di localStorage. */
+const REVGEO_KEY = "kolekta:revgeo";
+async function reverseGeocode(lat, lng) {
+  const key = `${(+lat).toFixed(4)},${(+lng).toFixed(4)}`;
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem(REVGEO_KEY) || "{}"); } catch {}
+  if (key in cache) return cache[key];
+  let addr = null;
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=0&lat=${lat}&lon=${lng}`, { headers: { Accept: "application/json" } });
+    if (r.ok) { const j = await r.json(); addr = (j && j.display_name) || null; }
+  } catch {}
+  try { cache[key] = addr; localStorage.setItem(REVGEO_KEY, JSON.stringify(cache)); } catch {}
+  return addr;
+}
+
+/* Cap geotag ala GPS Camera: tempel alamat, koordinat, waktu di bawah foto. */
+function stampImage(dataUrl, info) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.width, h = img.height;
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const pad = Math.round(w * 0.028);
+      const fs = Math.max(12, Math.round(w * 0.030));
+      const lh = Math.round(fs * 1.4);
+      const head = []; // baris tebal (judul/perusahaan)
+      if (info.brand) head.push(info.brand);
+      const body = [];
+      if (info.address) body.push(info.address);
+      const coord = info.lat != null ? `${info.lat}, ${info.lng}${info.acc ? `  (±${info.acc} m)` : ""}` : "";
+      if (coord) body.push(coord);
+      if (info.waktu) body.push(info.waktu);
+
+      const wrapLines = (text, font) => {
+        ctx.font = font; const maxW = w - pad * 2; const res = []; let line = "";
+        for (const word of text.split(" ")) {
+          const test = line ? line + " " + word : word;
+          if (ctx.measureText(test).width > maxW && line) { res.push(line); line = word; } else line = test;
+        }
+        if (line) res.push(line);
+        return res;
+      };
+      const headFont = `700 ${Math.round(fs * 1.05)}px ${SANS}`;
+      const bodyFont = `${fs}px ${SANS}`;
+      const headLines = head.flatMap((t) => wrapLines(t, headFont));
+      const bodyLines = body.flatMap((t) => wrapLines(t, bodyFont));
+      const totalLines = headLines.length + bodyLines.length;
+      const barH = pad * 1.6 + totalLines * lh;
+
+      const grad = ctx.createLinearGradient(0, h - barH - pad, 0, h);
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(0.3, "rgba(0,0,0,0.5)");
+      grad.addColorStop(1, "rgba(0,0,0,0.8)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, h - barH - pad, w, barH + pad);
+      // garis aksen emas
+      ctx.fillStyle = "#BE863A";
+      ctx.fillRect(pad, h - barH, Math.round(w * 0.12), Math.max(2, Math.round(fs * 0.16)));
+
+      ctx.textBaseline = "top";
+      let y = h - barH + Math.round(fs * 0.5);
+      headLines.forEach((ln) => { ctx.font = headFont; ctx.fillStyle = "#FFFFFF"; ctx.fillText(ln, pad, y); y += lh; });
+      bodyLines.forEach((ln) => { ctx.font = bodyFont; ctx.fillStyle = "#EAEAEA"; ctx.fillText(ln, pad, y); y += lh; });
+
+      try { resolve(c.toDataURL("image/jpeg", 0.72)); } catch { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 function kolektibilitas(odRaw, lunas) {
   if (lunas) return { no: 1, short: "Lunas", label: "Lunas", tone: "green" };
   if (odRaw <= 0) return { no: 1, short: "Kol 1", label: "Lancar (Kol 1)", tone: "green" };
@@ -1910,8 +1986,21 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const onPickFoto = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
     if (!file) return;
-    try { setFoto(await resizeImage(file)); flash("Foto siap dilampirkan"); }
-    catch { flash("Gagal memproses foto"); }
+    try {
+      flash("Memproses foto…");
+      const base = await resizeImage(file, 960, 0.72);
+      // Ambil lokasi (pakai yang sudah ada, kalau belum coba ambil sekarang)
+      let loc = lok;
+      if (!loc) { try { loc = await getLoc(); setLok(loc); } catch {} }
+      let address = "";
+      if (loc) { try { address = (await reverseGeocode(loc.lat, loc.lng)) || ""; } catch {} }
+      const waktu = new Intl.DateTimeFormat("id-ID", { dateStyle: "long", timeStyle: "short" }).format(new Date());
+      const stamped = (loc || address)
+        ? await stampImage(base, { lat: loc?.lat, lng: loc?.lng, acc: loc?.acc, address, waktu, brand: s.perusahaan?.trim() || "" })
+        : base;
+      setFoto(stamped);
+      flash(loc ? "Foto + lokasi tercap" : "Foto siap (lokasi tak tersedia)");
+    } catch { flash("Gagal memproses foto"); }
   };
   const grabLoc = async () => {
     setBusyLoc(true);
@@ -2048,7 +2137,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               </div>
               <input ref={fotoRef} type="file" accept="image/*" capture="environment" onChange={onPickFoto} className="hidden" />
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <button onClick={() => fotoRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: foto ? T.green + "1A" : T.bg, color: foto ? T.green : T.brand2, border: `1px solid ${T.line}` }}><Camera size={14} /> {foto ? "Foto ✓" : "Foto bukti"}</button>
+                <button onClick={() => fotoRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: foto ? T.green + "1A" : T.bg, color: foto ? T.green : T.brand2, border: `1px solid ${T.line}` }}><Camera size={14} /> {foto ? "Foto ✓" : "Foto + lokasi"}</button>
                 <button onClick={grabLoc} disabled={busyLoc} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: lok ? T.green + "1A" : T.bg, color: lok ? T.green : T.brand2, border: `1px solid ${T.line}` }}><MapPin size={14} /> {busyLoc ? "Mengambil…" : lok ? "Lokasi ✓" : "Ambil lokasi"}</button>
               </div>
               {(foto || lok) && (
