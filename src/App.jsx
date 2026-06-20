@@ -2180,22 +2180,91 @@ function useLeaflet() {
   return ready;
 }
 
-/* Perkiraan titik kota untuk debitur tanpa GPS kunjungan (mock terstruktur). */
+/* Perkiraan titik kota/kabupaten untuk debitur tanpa GPS & gagal geocode (fallback). */
 const CITY_COORDS = [
+  // Jabodetabek (urut spesifik dulu)
   { k: ["jakarta selatan", "jaksel"], c: [-6.2615, 106.8106] },
-  { k: ["jakarta"], c: [-6.2088, 106.8456] },
+  { k: ["jakarta utara", "jakut"], c: [-6.1214, 106.7741] },
+  { k: ["jakarta barat", "jakbar"], c: [-6.1352, 106.7635] },
+  { k: ["jakarta timur", "jaktim"], c: [-6.2250, 106.9004] },
+  { k: ["jakarta pusat", "jakpus"], c: [-6.1862, 106.8344] },
+  { k: ["jakarta", "dki"], c: [-6.2088, 106.8456] },
+  { k: ["bogor"], c: [-6.5950, 106.8166] },
+  { k: ["depok"], c: [-6.4025, 106.7942] },
+  { k: ["bekasi"], c: [-6.2383, 106.9756] },
+  { k: ["tangerang selatan", "tangsel"], c: [-6.2887, 106.7179] },
+  { k: ["tangerang"], c: [-6.1781, 106.6300] },
+  { k: ["serang"], c: [-6.1200, 106.1503] },
+  { k: ["cilegon"], c: [-6.0173, 106.0540] },
+  // Jawa Barat
+  { k: ["bandung"], c: [-6.9175, 107.6191] },
+  { k: ["cimahi"], c: [-6.8722, 107.5425] },
+  { k: ["karawang"], c: [-6.3227, 107.3376] },
+  { k: ["purwakarta"], c: [-6.5569, 107.4431] },
+  { k: ["sukabumi"], c: [-6.9277, 106.9300] },
+  { k: ["cianjur"], c: [-6.8204, 107.1426] },
+  { k: ["garut"], c: [-7.2278, 107.9087] },
+  { k: ["tasikmalaya"], c: [-7.3274, 108.2207] },
+  { k: ["cirebon"], c: [-6.7320, 108.5523] },
+  { k: ["indramayu"], c: [-6.3373, 108.3200] },
+  { k: ["subang"], c: [-6.5719, 107.7589] },
+  // Jawa Tengah & DIY
+  { k: ["semarang"], c: [-6.9667, 110.4167] },
+  { k: ["solo", "surakarta"], c: [-7.5755, 110.8243] },
+  { k: ["yogyakarta", "jogja", "yogya"], c: [-7.7956, 110.3695] },
+  { k: ["sleman"], c: [-7.7169, 110.3550] },
+  { k: ["bantul"], c: [-7.8880, 110.3300] },
+  { k: ["magelang"], c: [-7.4706, 110.2178] },
+  { k: ["tegal"], c: [-6.8694, 109.1402] },
+  { k: ["pekalongan"], c: [-6.8886, 109.6753] },
+  { k: ["purwokerto", "banyumas"], c: [-7.4216, 109.2345] },
+  { k: ["kudus"], c: [-6.8048, 110.8405] },
+  // Jawa Timur
   { k: ["surabaya"], c: [-7.2575, 112.7521] },
   { k: ["gresik"], c: [-7.1561, 112.6531] },
   { k: ["sidoarjo"], c: [-7.4478, 112.7183] },
   { k: ["malang"], c: [-7.9666, 112.6326] },
-  { k: ["bandung"], c: [-6.9175, 107.6191] },
-  { k: ["semarang"], c: [-6.9667, 110.4167] },
-  { k: ["yogyakarta", "jogja", "yogya"], c: [-7.7956, 110.3695] },
-  { k: ["medan"], c: [3.5952, 98.6722] },
-  { k: ["makassar"], c: [-5.1477, 119.4327] },
+  { k: ["batu"], c: [-7.8672, 112.5239] },
+  { k: ["mojokerto"], c: [-7.4722, 112.4337] },
+  { k: ["pasuruan"], c: [-7.6453, 112.9075] },
+  { k: ["probolinggo"], c: [-7.7543, 113.2159] },
+  { k: ["jember"], c: [-8.1727, 113.7002] },
+  { k: ["banyuwangi"], c: [-8.2192, 114.3691] },
+  { k: ["kediri"], c: [-7.8480, 112.0178] },
+  { k: ["madiun"], c: [-7.6298, 111.5239] },
+  { k: ["blitar"], c: [-8.0954, 112.1609] },
+  // Bali, NTB, NTT
   { k: ["denpasar", "bali"], c: [-8.6705, 115.2126] },
+  { k: ["badung"], c: [-8.5800, 115.1770] },
+  { k: ["mataram", "lombok"], c: [-8.5833, 116.1167] },
+  { k: ["kupang"], c: [-10.1772, 123.6070] },
+  // Sumatera
+  { k: ["medan"], c: [3.5952, 98.6722] },
+  { k: ["binjai"], c: [3.6001, 98.4854] },
+  { k: ["pekanbaru"], c: [0.5071, 101.4478] },
+  { k: ["batam"], c: [1.1301, 104.0529] },
+  { k: ["padang"], c: [-0.9471, 100.4172] },
+  { k: ["palembang"], c: [-2.9761, 104.7754] },
+  { k: ["jambi"], c: [-1.6101, 103.6131] },
+  { k: ["bengkulu"], c: [-3.8004, 102.2655] },
+  { k: ["bandar lampung", "lampung"], c: [-5.3971, 105.2668] },
+  { k: ["banda aceh", "aceh"], c: [5.5483, 95.3238] },
+  // Kalimantan
+  { k: ["pontianak"], c: [-0.0263, 109.3425] },
+  { k: ["banjarmasin"], c: [-3.3194, 114.5908] },
+  { k: ["balikpapan"], c: [-1.2379, 116.8529] },
+  { k: ["samarinda"], c: [-0.5022, 117.1536] },
+  { k: ["palangkaraya", "palangka raya"], c: [-2.2161, 113.9135] },
+  // Sulawesi & Timur
+  { k: ["makassar"], c: [-5.1477, 119.4327] },
+  { k: ["manado"], c: [1.4748, 124.8421] },
+  { k: ["palu"], c: [-0.8917, 119.8707] },
+  { k: ["kendari"], c: [-3.9985, 122.5127] },
+  { k: ["gorontalo"], c: [0.5435, 123.0568] },
+  { k: ["ambon"], c: [-3.6954, 128.1814] },
+  { k: ["jayapura"], c: [-2.5916, 140.6690] },
 ];
-const HM_DEFAULT_CENTER = [-7.2575, 112.7521];
+const HM_DEFAULT_CENTER = [-6.2088, 106.8456]; // Jakarta sbg pusat netral terakhir
 function hashStr(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return h; }
 function invCoord(i) {
   const withLok = (i.aktivitas || []).filter((a) => a.lok && a.lok.lat != null);
@@ -2212,17 +2281,43 @@ const escHtml = (t) => (t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 
 /* Geocoding alamat -> koordinat akurat via Nominatim (OpenStreetMap, tanpa API key).
    Hasil di-cache di localStorage agar tak mengulang permintaan (batas wajar ~1 req/detik). */
-const GEO_CACHE_KEY = "kolekta:geocache";
+const GEO_CACHE_KEY = "kolekta:geocache:v2";
 const loadGeoCache = () => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || "{}"); } catch { return {}; } };
 const saveGeoCache = (c) => { try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(c)); } catch {} };
 const normAddr = (a) => (a || "").trim().toLowerCase().replace(/\s+/g, " ");
-async function geocodeAddr(addr) {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&addressdetails=0&q=${encodeURIComponent(addr)}`;
+const hmSleep = (ms = 1100) => new Promise((r) => setTimeout(r, ms));
+
+/* Daftar kueri dari yang paling spesifik ke paling kasar, supaya alamat detail
+   yang gagal tetap jatuh ke tingkat kabupaten/kota, bukan ke pusat default. */
+function addrCandidates(addr) {
+  const out = [];
+  const push = (q) => { q = (q || "").trim(); if (q.length >= 4 && !out.includes(q)) out.push(q); };
+  push(addr);
+  // sebutan kabupaten/kota/kecamatan eksplisit (mis. "Kabupaten Bogor")
+  const m = addr.match(/\b(kabupaten|kota|kab\.?|kec\.?|kecamatan)\s+[a-z][a-z .'-]{2,30}/i);
+  if (m) push(m[0].replace(/\bkab\.?\b/i, "Kabupaten").replace(/\bkec\.?\b/i, "Kecamatan"));
+  // buang segmen paling depan (paling spesifik) bertahap
+  const parts = addr.split(",").map((s) => s.trim()).filter(Boolean);
+  for (let start = 1; start < parts.length; start++) push(parts.slice(start).join(", "));
+  return out.slice(0, 4);
+}
+async function geocodeOne(q) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&addressdetails=0&q=${encodeURIComponent(q)}`;
   const r = await fetch(url, { headers: { Accept: "application/json" } });
   if (!r.ok) throw new Error("geocode " + r.status);
   const j = await r.json();
   if (!j || !j[0]) return null;
   return { lat: +(+j[0].lat).toFixed(6), lng: +(+j[0].lon).toFixed(6) };
+}
+async function geocodeAddr(addr) {
+  const cands = addrCandidates(addr);
+  for (let n = 0; n < cands.length; n++) {
+    if (n > 0) await hmSleep(); // hormati batas ~1 req/detik antar percobaan
+    let hit = null;
+    try { hit = await geocodeOne(cands[n]); } catch {}
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /* Palet bucket DPD: Current hijau, lalu kuning -> oranye -> merah pekat (terlama). */
