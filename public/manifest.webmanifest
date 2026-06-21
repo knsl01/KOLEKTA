@@ -1,0 +1,20 @@
+{
+  "name": "Kolekta — Collection Control by KNSL",
+  "short_name": "Kolekta",
+  "description": "Aplikasi manajemen penagihan piutang B2B / multifinance. by KNSL — Kansil Network Solutions Labs.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1f17",
+  "theme_color": "#1f5a3d",
+  "lang": "id",
+  "icons": [
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "/icon-192-maskable.png", "type": "image/png", "sizes": "192x192", "purpose": "maskable" },
+    { "src": "/icon-512-maskable.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}
