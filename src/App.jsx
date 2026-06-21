@@ -49,6 +49,8 @@ const NAV = [
 ];
 
 /* ---------- Helpers ---------- */
+const onlyDigits = (v) => String(v ?? "").replace(/[^0-9]/g, "");
+const grpID = (v) => { const n = onlyDigits(v); return n ? Number(n).toLocaleString("id-ID") : ""; };
 const rp = (n) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Math.round(n || 0));
 const rpc = (v) => {
@@ -479,11 +481,21 @@ function printDoc(label, text, sig) {
   const w = window.open("", "_blank");
   if (!w) return false;
   const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const sigHtml = sig ? `<div style="margin-top:16px"><div style="font-size:11pt">Tanda tangan debitur:</div><img src="${sig}" style="height:90px;display:block"/></div>` : "";
+  // Tempatkan tanda tangan tepat di atas garis nama lewat token [[SIGN]]
+  const sigBox = sig
+    ? `<span class="sig"><img src="${sig}" alt="tanda tangan"/></span>`
+    : `<span class="sigline"></span>`;
+  const body = esc.replace(/\[\[SIGN\]\]/g, sigBox);
   w.document.write(
     `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
-    `<style>@page{size:A4;margin:2.5cm}body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.55;color:#111}.doc{white-space:pre-wrap}</style>` +
-    `</head><body><div class="doc">${esc}</div>${sigHtml}<script>window.onload=function(){window.print()}<\/script></body></html>`
+    `<style>@page{size:A4;margin:2.5cm}` +
+    `body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.6;color:#111}` +
+    `.doc{white-space:pre-wrap}` +
+    `.sig{display:inline-block;min-width:230px;border-bottom:1px solid #111;text-align:center;vertical-align:bottom}` +
+    `.sig img{height:80px;display:block;margin:0 auto 2px}` +
+    `.sigline{display:inline-block;min-width:230px;height:74px;border-bottom:1px solid #111;vertical-align:bottom}` +
+    `</style>` +
+    `</head><body><div class="doc">${body}</div><script>window.onload=function(){window.print()}<\/script></body></html>`
   );
   w.document.close();
   return true;
@@ -517,9 +529,7 @@ Demikian pernyataan ini saya buat dengan sadar dan tanpa paksaan dari pihak mana
 ${ttdKota}
 Yang Menyatakan,
 
-
-
-(__________________________)
+[[SIGN]]
 ${i.customer}`;
 }
 function bastPenarikan(i, s, f) {
@@ -545,12 +555,18 @@ Sehubungan dengan kewajiban atas ${i.noInvoice} sebesar ${rp(i.total)} yang belu
 
 Demikian berita acara ini dibuat dengan sebenarnya untuk dipergunakan sebagaimana mestinya.
 
-Pihak Pertama,                              Pihak Kedua,
+Pihak Pertama (yang menyerahkan),
+
+[[SIGN]]
+${i.customer}
+
+
+Pihak Kedua (yang menerima),
 
 
 
-(________________________)                  (________________________)
-${i.customer}                               ${jabatan}`;
+(__________________________)
+${jabatan}`;
 }
 
 function printLetter(label, text) {
@@ -1846,7 +1862,7 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label={f.tipe === "perorangan" ? "Nama debitur" : "Customer / perusahaan"}><input className={inputCls} style={inputSt} value={f.customer} onChange={set("customer")} placeholder={f.tipe === "perorangan" ? "Nama lengkap" : "PT / CV …"} /></Field>
         <Field label="No. invoice"><input className={inputCls} style={inputSt} value={f.noInvoice} onChange={set("noInvoice")} placeholder="INV-…" /></Field>
-        <Field label="Nominal (pokok)"><input type="number" inputMode="numeric" className={inputCls} style={inputSt} value={f.nominal} onChange={set("nominal")} placeholder="0" /></Field>
+        <Field label="Nominal (pokok)"><input type="text" inputMode="numeric" className={inputCls} style={inputSt} value={grpID(f.nominal)} onChange={(e) => setF({ ...f, nominal: onlyDigits(e.target.value) })} placeholder="0" /></Field>
         <Field label="Jatuh tempo"><input type="date" className={inputCls} style={inputSt} value={f.tglJatuhTempo} onChange={set("tglJatuhTempo")} /></Field>
         <Field label={f.tipe === "perorangan" ? "Kontak (opsional)" : "Nama PIC (opsional)"}><input className={inputCls} style={inputSt} value={f.pic} onChange={set("pic")} placeholder={f.tipe === "perorangan" ? "mis. nomor rumah" : "mis. Bu Sari (Finance)"} /></Field>
         <Field label="No. WA (opsional)"><input className={inputCls} style={inputSt} value={f.telp} onChange={set("telp")} placeholder="08…" /></Field>
@@ -1940,6 +1956,10 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "" });
   const [dsig, setDsig] = useState(null);
   const [tindakLanjut, setTindakLanjut] = useState(i.tindakLanjut || "");
+  const [lunasAsk, setLunasAsk] = useState(false);
+  const [lunasCode, setLunasCode] = useState("");
+  const [openRiwayat, setOpenRiwayat] = useState(false);
+  const [openArsip, setOpenArsip] = useState(false);
   const [editing, setEditing] = useState(false);
   const [ed, setEd] = useState({ customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo });
   const docs = useMemo(() => escalationDocs(i, s), [i, s]);
@@ -1960,7 +1980,11 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     setBayar(""); flash("Pembayaran dicatat");
   };
 
-  const setStatus = (st) => { if (st === "lunas") return markLunas(); patch(i.id, (x) => ({ ...x, status: st })); };
+  const setStatus = (st) => { if (st === "lunas") { setLunasCode(""); setLunasAsk(true); return; } patch(i.id, (x) => ({ ...x, status: st })); };
+  const confirmLunas = () => {
+    if (lunasCode.trim() !== "12345") { flash("Kode konfirmasi salah"); return; }
+    setLunasAsk(false); setLunasCode(""); markLunas();
+  };
   const markLunas = () => {
     patch(i.id, (x) => {
       const tb = (x.pembayaran || []).reduce((a, p) => a + p.jumlah, 0);
@@ -2014,14 +2038,14 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     const label = docType === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
     const ok = printDoc(label, text, dsig);
     patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi }, ...(x.dokumen || [])] }));
-    if (!ok) { copy(text); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
+    if (!ok) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
     setShowDoc(false); setDsig(null); setDForm({ jumlah: "", tgl: "", kondisi: "" });
   };
   const reprintDoc = (dk) => {
     const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi };
     const text = dk.jenis === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
     const label = dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    if (!printDoc(label, text, dk.sig)) { copy(text); flash("Popup diblokir — teks disalin"); }
+    if (!printDoc(label, text, dk.sig)) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); }
   };
 
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
@@ -2032,6 +2056,23 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
         <button onClick={() => setFotoView(null)} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
         <img src={fotoView} alt="Bukti kunjungan" className="max-h-full max-w-full rounded-lg object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()} />
         <a href={fotoView} download={`bukti-${i.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
+      </div>
+    )}
+    {lunasAsk && (
+      <div onClick={() => setLunasAsk(false)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <div className="mb-1 flex items-center gap-2">
+            <ShieldCheck size={18} style={{ color: T.green }} />
+            <h3 className="text-sm font-semibold">Konfirmasi Lunas</h3>
+          </div>
+          <p className="mb-3 text-xs" style={{ color: T.sub }}>Menandai <b>{i.customer}</b> lunas bersifat final. Masukkan kode konfirmasi untuk melanjutkan.</p>
+          <input autoFocus value={lunasCode} onChange={(e) => setLunasCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmLunas()}
+            inputMode="numeric" placeholder="Kode konfirmasi" className={inputCls} style={{ ...inputSt, fontFamily: MONO, letterSpacing: "0.2em", textAlign: "center" }} />
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => setLunasAsk(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
+            <button onClick={confirmLunas} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.green }}>Tandai Lunas</button>
+          </div>
+        </div>
       </div>
     )}
     <div className="overflow-hidden rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -2083,7 +2124,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               )}
               {i.status !== "lunas" && (
                 <div className="mt-2 flex gap-2">
-                  <input value={bayar} onChange={(e) => setBayar(e.target.value)} inputMode="numeric" placeholder="Catat pembayaran / cicilan (Rp)…" className={inputCls} style={inputSt} />
+                  <input value={grpID(bayar)} onChange={(e) => setBayar(onlyDigits(e.target.value))} inputMode="numeric" placeholder="Catat pembayaran / cicilan (Rp)…" className={inputCls} style={inputSt} />
                   <button onClick={logBayar} className="shrink-0 rounded-lg px-3 text-xs font-semibold text-white" style={{ background: T.green }}>Catat</button>
                 </div>
               )}
@@ -2151,7 +2192,12 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
 
               {i.aktivitas?.length > 0 && (
                 <div className="mt-3">
-                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Riwayat kunjungan & kontak</p>
+                  <button onClick={() => setOpenRiwayat((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
+                    <ChevronDown size={14} style={{ transform: openRiwayat ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                    Riwayat kunjungan & kontak
+                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{i.aktivitas.length}</span>
+                  </button>
+                  {openRiwayat && (
                   <div className="space-y-2">
                     {i.aktivitas.map((a, idx) => (
                       <div key={idx} className="rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
@@ -2166,6 +2212,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
               )}
 
@@ -2182,7 +2229,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                   </div>
                   {docType === "pernyataan" ? (
                     <div className="grid grid-cols-2 gap-2">
-                      <input value={dForm.jumlah} onChange={(e) => setDForm({ ...dForm, jumlah: e.target.value })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
+                      <input value={grpID(dForm.jumlah)} onChange={(e) => setDForm({ ...dForm, jumlah: onlyDigits(e.target.value) })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
                       <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
                     </div>
                   ) : (
@@ -2195,7 +2242,12 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               )}
               {i.dokumen?.length > 0 && (
                 <div className="mt-3">
-                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Arsip dokumen lapangan</p>
+                  <button onClick={() => setOpenArsip((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
+                    <ChevronDown size={14} style={{ transform: openArsip ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                    Arsip dokumen lapangan
+                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{i.dokumen.length}</span>
+                  </button>
+                  {openArsip && (
                   <div className="space-y-1.5">
                     {i.dokumen.map((dk, idx) => (
                       <div key={idx} className="flex items-center gap-2 rounded-lg p-2 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
@@ -2208,6 +2260,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2328,7 +2381,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <input value={ed.customer} onChange={(e) => setEd({ ...ed, customer: e.target.value })} placeholder="Customer / nama" className={inputCls} style={inputSt} />
                 <input value={ed.noInvoice} onChange={(e) => setEd({ ...ed, noInvoice: e.target.value })} placeholder="No. invoice" className={inputCls} style={inputSt} />
-                <input type="number" inputMode="numeric" value={ed.nominal} onChange={(e) => setEd({ ...ed, nominal: e.target.value })} placeholder="Nominal pokok" className={inputCls} style={inputSt} />
+                <input type="text" inputMode="numeric" value={grpID(ed.nominal)} onChange={(e) => setEd({ ...ed, nominal: onlyDigits(e.target.value) })} placeholder="Nominal pokok" className={inputCls} style={inputSt} />
                 <input type="date" value={ed.tglJatuhTempo} onChange={(e) => setEd({ ...ed, tglJatuhTempo: e.target.value })} className={inputCls} style={inputSt} />
               </div>
               <button onClick={() => { patch(i.id, (x) => ({ ...x, customer: ed.customer.trim() || x.customer, noInvoice: ed.noInvoice.trim() || x.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : x.nominal, tglJatuhTempo: ed.tglJatuhTempo || x.tglJatuhTempo })); setEditing(false); flash("Data tagihan diperbarui"); }}
@@ -2948,7 +3001,7 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
                 <div key={nm} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium" style={{ color: T.ink }}>{nm}</span>
                   <span className="text-[11px]" style={{ color: T.sub }}>Target</span>
-                  <input value={(s.targets || {})[nm] ? String((s.targets || {})[nm]) : ""} onChange={(e) => upd("targets", { ...(s.targets || {}), [nm]: Number((e.target.value + "").replace(/[^0-9]/g, "")) || 0 })}
+                  <input value={grpID((s.targets || {})[nm] || "")} onChange={(e) => upd("targets", { ...(s.targets || {}), [nm]: Number(onlyDigits(e.target.value)) || 0 })}
                     inputMode="numeric" placeholder="0" className="w-28 rounded-lg px-2 py-1 text-right text-xs" style={{ ...inputSt, fontFamily: MONO }} />
                   <button onClick={() => { upd("petugas", s.petugas.filter((x) => x !== nm)); const t = { ...(s.targets || {}) }; delete t[nm]; upd("targets", t); }}><X size={14} style={{ color: T.sub }} /></button>
                 </div>
