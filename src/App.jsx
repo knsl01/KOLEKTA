@@ -340,7 +340,8 @@ Pokok / AR          : ${rp(pokok)}${barisBayar}
 Denda Keterlambatan : ${rp(i.denda)}
 Total Kewajiban     : ${rp(i.total)}`;
 
-  const sp = `SURAT PERINGATAN
+  const sp = `${kopLine(s)}
+SURAT PERINGATAN
 
 [[RIGHT]]${ttdKota}
 
@@ -371,7 +372,8 @@ ${p}
 (__________________________)
 ${jabatan}`;
 
-  const somasi = `SOMASI
+  const somasi = `${kopLine(s)}
+SOMASI
 
 [[RIGHT]]${ttdKota}
 
@@ -408,7 +410,8 @@ ${jabatan}`;
 
   let tarik = null;
   if (i.jaminanTipe === "fidusia") {
-    tarik = `SURAT PEMBERITAHUAN PENARIKAN OBJEK JAMINAN FIDUSIA
+    tarik = `${kopLine(s)}
+SURAT PEMBERITAHUAN PENARIKAN OBJEK JAMINAN FIDUSIA
 
 [[RIGHT]]${ttdKota}
 
@@ -442,7 +445,8 @@ ${p}
 (__________________________)
 ${jabatan}`;
   } else if (i.jaminanTipe === "tanah") {
-    tarik = `SURAT PEMBERITAHUAN RENCANA LELANG EKSEKUSI HAK TANGGUNGAN
+    tarik = `${kopLine(s)}
+SURAT PEMBERITAHUAN RENCANA LELANG EKSEKUSI HAK TANGGUNGAN
 
 [[RIGHT]]${ttdKota}
 
@@ -476,7 +480,8 @@ ${p}
 (__________________________)
 ${jabatan}`;
   } else if (i.jaminanTipe && i.jaminanTipe !== "none") {
-    tarik = `SURAT PEMBERITAHUAN EKSEKUSI OBJEK JAMINAN
+    tarik = `${kopLine(s)}
+SURAT PEMBERITAHUAN EKSEKUSI OBJEK JAMINAN
 
 [[RIGHT]]${ttdKota}
 
@@ -523,13 +528,17 @@ ${jabatan}`;
 /* Cetak via iframe tersembunyi — tetap di dalam aplikasi sehingga pengguna
    tidak "nyantol" di tab/penampil PDF baru (penting untuk PWA standalone iOS).
    Setelah dialog cetak ditutup, iframe otomatis dibuang dan user kembali ke app. */
-// Format surat resmi: A4, Times New Roman 12pt, margin atas/kiri 4cm — kanan/bawah 3cm,
-// spasi 1,5, paragraf justify dengan indent baris pertama 1cm & jarak antar-paragraf 6pt.
+// Format surat resmi (standar dokumen hukum): A4, Times New Roman 12pt,
+// margin atas/kiri 4cm — kanan/bawah 3cm, spasi 1,5, justify, indent baris pertama 1cm,
+// jarak antar-paragraf 6pt. Fallback metric-compatible TNR (Tinos/Liberation Serif) untuk PDF.
 const DOC_STYLE = `@page{size:A4;margin:4cm 3cm 3cm 4cm}
 html,body{width:100%}
-body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.5;color:#111;margin:0}
+body{font-family:'Times New Roman','Tinos','Liberation Serif','Nimbus Roman',Georgia,'DejaVu Serif',serif;font-size:12pt;line-height:1.5;color:#000;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 p{margin:0;orphans:2;widows:2}
-.title{text-align:center;font-weight:bold;margin:0 0 10pt;line-height:1.3;text-transform:uppercase;page-break-after:avoid;break-after:avoid}
+.kop{text-align:center;border-bottom:2.5pt double #000;padding-bottom:6pt;margin-bottom:12pt}
+.kop .kopname{font-weight:bold;font-size:15pt;letter-spacing:.3px;text-transform:uppercase;line-height:1.2}
+.kop .kopline{font-size:10.5pt;line-height:1.35}
+.title{text-align:center;font-weight:bold;margin:0 0 10pt;line-height:1.3;text-transform:uppercase;letter-spacing:.5px;text-decoration:underline;page-break-after:avoid;break-after:avoid}
 .subhead{font-weight:bold;margin:8pt 0 2pt;page-break-after:avoid;break-after:avoid}
 .body{text-align:justify;text-indent:1cm;margin:0 0 6pt}
 .right{text-align:right;margin:0 0 6pt}
@@ -663,6 +672,14 @@ function renderDocHtml(text, sigMap = {}) {
       out.push(renderSigGrid(rows));
       continue;
     }
+    const kopM = ln.trim().match(/^\[\[KOP\|(.*)\]\]$/);
+    if (kopM) {
+      const [name = "", addr = "", contact = ""] = kopM[1].split("|");
+      const ln2 = (c) => (c.trim() ? `<div class="kopline">${esc(c.trim())}</div>` : "");
+      out.push(`<div class="kop"><div class="kopname">${esc(name.trim())}</div>${ln2(addr)}${ln2(contact)}</div>`);
+      blankPending = false;
+      continue;
+    }
     if (ln.trim().startsWith("[[RIGHT]]")) {
       flushFields(); flushSig();
       if (blankPending) { gap(); blankPending = false; }
@@ -697,12 +714,33 @@ function printDoc(label, text, sig) {
   return printViaIframe(label, renderDocHtml(text, sigMap));
 }
 
+// Versi teks polos (untuk disalin ke clipboard / WA) — buang penanda tata letak.
+function docToPlain(text) {
+  return (text || "")
+    .replace(/^\[\[KOP\|(.*)\]\]$/gm, (_, g) => g.split("|").filter(Boolean).join("\n"))
+    .replace(/^\[\[RIGHT\]\]/gm, "")
+    .replace(/\[\[\/?SIGGRID\]\]\n?/g, "")
+    .replace(/^cap\|(.*)\|(.*)$/gm, (_, a, b) => `${a}\t\t${b}`)
+    .replace(/^sig\|.*$/gm, "")
+    .replace(/^name\|(.*)\|(.*)$/gm, (_, a, b) => `${a}\t\t${b}`)
+    .replace(/\[\[SIGN\d?\]\]/g, "(__________________________)")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function fieldBase(s) {
   const p = s.perusahaan?.trim() || "[Nama Perusahaan Anda]";
   const kota = s.kota?.trim();
   const jabatan = s.jabatan?.trim() || "Petugas Penagihan";
   const tgl = fmtTgl(today0().toISOString().slice(0, 10));
   return { p, jabatan, ttdKota: `${kota ? kota + ", " : ""}${tgl}` };
+}
+// Kop surat (letterhead) dari profil institusi. Pakai "/" pengganti "|" agar parser aman.
+function kopLine(s) {
+  const p = (s.perusahaan?.trim() || "[Nama Perusahaan Anda]").replace(/\|/g, "/");
+  const alamat = (s.alamatKantor?.trim() || "").replace(/\|/g, "/");
+  const kontak = (s.kontakKantor?.trim() || "").replace(/\|/g, "/");
+  return `[[KOP|${p}|${alamat}|${kontak}]]`;
 }
 function suratPernyataan(i, s, f) {
   const { p, ttdKota } = fieldBase(s);
@@ -738,7 +776,8 @@ ${i.customer}`;
 }
 function bastPenarikan(i, s, f) {
   const { p, jabatan, ttdKota } = fieldBase(s);
-  return `BERITA ACARA SERAH TERIMA OBJEK JAMINAN
+  return `${kopLine(s)}
+BERITA ACARA SERAH TERIMA OBJEK JAMINAN
 
 Pada hari ini, ${ttdKota}, yang bertanda tangan di bawah ini telah sepakat melakukan serah terima objek jaminan, masing-masing:
 
@@ -775,7 +814,8 @@ function momKunjungan(i, s, f) {
   const { p, jabatan, ttdKota } = fieldBase(s);
   const petugas = (s.petugasAktif && s.petugasAktif.trim()) || jabatan;
   const ar = i.sisaPokok ?? i.nominal;
-  return `MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN PENAGIHAN
+  return `${kopLine(s)}
+MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN PENAGIHAN
 
 Hari / Tanggal : ${ttdKota}
 Tempat         : ${i.alamat || "-"}
@@ -1007,7 +1047,7 @@ const sampleData = () => {
   const t = today0();
   const d = (off) => { const x = new Date(t); x.setDate(x.getDate() + off); return x.toISOString().slice(0, 10); };
   return {
-    settings: { perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, cloudUrl: "", cloudKey: "", cloudId: "", peran: "atasan", petugasAktif: "", petugas: ["Andi", "Rudi"], targets: { Andi: 50000000, Rudi: 50000000 } },
+    settings: { perusahaan: "", kota: "", alamatKantor: "", kontakKantor: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, cloudUrl: "", cloudKey: "", cloudId: "", peran: "atasan", petugasAktif: "", petugas: ["Andi", "Rudi"], targets: { Andi: 50000000, Rudi: 50000000 } },
     invoices: [
       { id: uid(), customer: "PT Karya Bangun Persada", tipe: "perusahaan", assignedTo: "Andi", alamat: "Jl. Industri Raya No. 12, Surabaya", noInvoice: "INV-2026-0188", nominal: 145000000, tglJatuhTempo: d(-42), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [], dibuat: d(-72) },
       { id: uid(), customer: "Budi Santoso", tipe: "perorangan", assignedTo: "Andi", alamat: "Perum Griya Asri Blok C-7, Gresik", noInvoice: "INV-2026-0203", nominal: 38500000, tglJatuhTempo: d(-23), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "fidusia", jaminan: "BPKB Toyota Avanza tahun 2021, Nopol W 1234 ABC a.n. Budi Santoso", pic: "Budi Santoso", telp: "081234567890", pembayaran: [{ ts: d(-5), jumlah: 10000000 }], eskalasi: [{ ts: d(-1), level: "tegas" }], aktivitas: [], dibuat: d(-39) },
@@ -1020,7 +1060,7 @@ const sampleData = () => {
 };
 
 const KEY = "kolekta:v1";
-const defaultSettings = () => ({ perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, peran: "atasan", petugasAktif: "", petugas: [], targets: {} });
+const defaultSettings = () => ({ perusahaan: "", kota: "", alamatKantor: "", kontakKantor: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, peran: "atasan", petugasAktif: "", petugas: [], targets: {} });
 const emptyData = () => ({ settings: defaultSettings(), invoices: [] });
 
 /* ---------- Logo ---------- */
@@ -2275,12 +2315,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
     : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
     : { gen: suratPernyataan, label: "Surat Pernyataan" };
-  const stripSign = (t) => (t || "")
-    .replace(/\[\[SIGN\d?\]\]/g, "(__________________________)")
-    .replace(/\[\[\/?SIGGRID\]\]\n?/g, "")
-    .replace(/^cap\|(.*)\|(.*)$/gm, "$1\t\t$2")
-    .replace(/^sig\|.*$/gm, "")
-    .replace(/^name\|(.*)\|(.*)$/gm, "$1\t\t$2");
+  const stripSign = docToPlain;
   const sigMapFor = (jenis, a, b) =>
     jenis === "mom" ? { SIGN1: a, SIGN2: b }
     : jenis === "bast" ? { SIGN1: a }
@@ -2572,17 +2607,17 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                           <Printer size={12} /> PDF
                         </button>
                       )}
-                      <button onClick={() => copy(sel.text)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}>
+                      <button onClick={() => copy(docToPlain(sel.text))} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}>
                         <Copy size={12} /> Salin
                       </button>
                     </div>
                   </div>
-                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: SANS }}>{sel.text}</pre>
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: SANS }}>{docToPlain(sel.text)}</pre>
                   <button onClick={() => { logEskalasi(sel.key); flash(`${sel.label} dicatat terkirim`); }}
                     className="mt-2 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold" style={{ background: T.brass + "1A", color: T.brass }}>
                     <Send size={11} /> Tandai sudah dikirim
                   </button>
-                  {!sel.wa && <p className="mt-1.5 text-[11px]" style={{ color: T.sub }}>Salin ke kop surat resmi, lalu tanda tangani pejabat berwenang sebelum dikirim.</p>}
+                  {!sel.wa && <p className="mt-1.5 text-[11px]" style={{ color: T.sub }}>Cetak PDF (sudah memuat kop & format resmi), lalu tanda tangani pejabat berwenang sebelum dikirim. Lengkapi alamat & kontak kantor di Profil agar kop tampil penuh.</p>}
                   {sel.wa && !waLink(i.telp, sel.text) && <p className="mt-1.5 text-[11px]" style={{ color: T.sub }}>Isi & simpan No. WA di tab Profil untuk tombol kirim langsung.</p>}
                 </div>
               )}
@@ -3233,8 +3268,14 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <h2 className="mb-3 text-sm font-semibold">Profil</h2>
         <div className="space-y-3">
-          <Field label="Nama perusahaan (muncul di surat & reminder)">
+          <Field label="Nama perusahaan (kop & nama di surat)">
             <input className={inputCls} style={inputSt} value={s.perusahaan} onChange={(e) => upd("perusahaan", e.target.value)} placeholder="mis. PT …" />
+          </Field>
+          <Field label="Alamat kantor (kop surat)">
+            <input className={inputCls} style={inputSt} value={s.alamatKantor || ""} onChange={(e) => upd("alamatKantor", e.target.value)} placeholder="mis. Jl. Pemuda No. 10, Surabaya 60271" />
+          </Field>
+          <Field label="Kontak kantor (kop surat — telp/email)">
+            <input className={inputCls} style={inputSt} value={s.kontakKantor || ""} onChange={(e) => upd("kontakKantor", e.target.value)} placeholder="mis. Telp (031) 123456 · legal@perusahaan.co.id" />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Kota (tanda tangan surat)">
