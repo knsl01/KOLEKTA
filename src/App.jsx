@@ -895,31 +895,54 @@ function exportExcel(rows, s) {
 
 /* ---------- Statement of Account per debitur ---------- */
 function statementText(name, list, s) {
-  const p = s.perusahaan?.trim() || "[Nama Perusahaan Anda]";
-  const kota = s.kota?.trim();
-  const tgl = fmtTgl(today0().toISOString().slice(0, 10));
+  const { p, jabatan, ttdKota } = fieldBase(s);
+  const now = new Date();
+  const tgl = fmtTgl(now.toISOString().slice(0, 10));
+  const noSOA = `......./SOA/${ROMAN[now.getMonth()]}/${now.getFullYear()}`;
   const rows = list.filter((i) => i.customer.trim().toLowerCase() === name.trim().toLowerCase());
   const totOut = rows.filter((i) => i.status !== "lunas").reduce((a, i) => a + i.total, 0);
   const totBayar = rows.reduce((a, i) => a + (i.terbayar || 0), 0);
+  const totTagih = rows.reduce((a, i) => a + i.total, 0);
   const lines = rows.map((i) =>
-    `- ${i.noInvoice} | JT ${fmtTgl(i.tglJatuhTempo)} | Pokok ${rp(i.nominal)} | Dibayar ${rp(i.terbayar || 0)} | Sisa+denda ${rp(i.total)} | ${stLabel(i.status)}`
+    `- ${i.noInvoice} | JT ${fmtTgl(i.tglJatuhTempo)} | Pokok ${rp(i.nominal)} | Dibayar ${rp(i.terbayar || 0)} | Sisa+Denda ${rp(i.total)} | ${stLabel(i.status)}`
   ).join("\n");
-  return `STATEMENT OF ACCOUNT
-${p}${kota ? " — " + kota : ""}
-Per ${tgl}
+  return `${kopLine(s)}
+STATEMENT OF ACCOUNT
 
-Debitur : ${name}
-Jumlah invoice : ${rows.length}
+[[RIGHT]]${ttdKota}
+
+Nomor : ${noSOA}
+Hal   : Statement of Account (Rincian Posisi Tagihan)
+
+Kepada Yth.
+${name}
+di Tempat
+
+Dengan hormat,
+
+Bersama ini kami sampaikan ringkasan posisi tagihan (Statement of Account) atas nama Saudara per tanggal ${tgl}, sebagai berikut:
+
+Debitur        : ${name}
+Jumlah Invoice : ${rows.length}
 
 RINCIAN TAGIHAN
 ${lines || "-"}
 
 RINGKASAN
-Total dibayar      : ${rp(totBayar)}
-Total outstanding  : ${rp(totOut)}
+Total Tagihan      : ${rp(totTagih)}
+Total Dibayar      : ${rp(totBayar)}
+Total Outstanding  : ${rp(totOut)}
 
-Dokumen ini merupakan ringkasan posisi tagihan per tanggal di atas.
-— Dibuat via Kolekta`;
+Mohon Saudara berkenan mencocokkan data di atas dengan catatan Saudara. Apabila terdapat perbedaan, mohon konfirmasi kepada kami selambat-lambatnya dalam waktu 7 (tujuh) hari kerja sejak Statement ini diterima; apabila tidak terdapat konfirmasi, maka data di atas dianggap telah sesuai dan disetujui.
+
+Demikian kami sampaikan. Atas perhatian dan kerja samanya, kami ucapkan terima kasih.
+
+Hormat kami,
+${p}
+
+
+(__________________________)
+${jabatan}`;
 }
 
 /* ---------- Backup JSON ---------- */
@@ -1266,32 +1289,32 @@ export default function KolektaApp() {
     const tgl = fmtTgl(today0().toISOString().slice(0, 10));
     const a = analytics;
     const top = prioritas.slice(0, 5).map((i, n) => `${n + 1}. ${i.customer} — ${rp(i.total)} (telat ${i.daysOverdue} hari)`).join("\n") || "-";
-    return `LAPORAN PENAGIHAN — ${tgl}
+    return `LAPORAN PENAGIHAN
 ${s?.perusahaan || "Kolekta"}
 
-RINGKASAN
-- Piutang aktif    : ${rp(a.outstanding)} (${stats.nAktif} invoice)
-- Overdue          : ${rp(a.overdueAmt)} (${stats.nOverdue} invoice, ${a.pctOverdue}%)
-- DSO              : ~${a.dso} hari
-- Tertagih bln ini : ${rp(a.tertagihBulanIni)}
+[[RIGHT]]Per ${tgl}
 
-KOLEKTIBILITAS (OJK)
-${a.kolBreak.map((k) => `- Kol ${k.no} ${k.label.padEnd(13)}: ${rp(k.amount)} (${k.count})`).join("\n")}
-- Bermasalah (Kol 3-5): ${rp(a.macet)}
+A. RINGKASAN
+Piutang Aktif     : ${rp(a.outstanding)} (${stats.nAktif} invoice)
+Overdue           : ${rp(a.overdueAmt)} (${stats.nOverdue} invoice — ${a.pctOverdue}%)
+DSO               : ~${a.dso} hari
+Tertagih Bln Ini  : ${rp(a.tertagihBulanIni)}
 
-PERLU TINDAK LANJUT
-- Belum dihubungi     : ${panels.belum.length}
-- Perlu ditagih ulang : ${panels.perlu.length}
+B. KOLEKTIBILITAS (OJK)
+${a.kolBreak.map((k) => `Kol ${k.no} : ${k.label} — ${rp(k.amount)} (${k.count})`).join("\n")}
+Bermasalah (Kol 3-5) : ${rp(a.macet)}
 
-PRIORITAS TERATAS
+C. PERLU TINDAK LANJUT
+Belum Dihubungi     : ${panels.belum.length}
+Perlu Ditagih Ulang : ${panels.perlu.length}
+
+D. PRIORITAS TERATAS
 ${top}
 
-AKTIVITAS HARI INI
-- Follow-up dilakukan  : ${a.fuToday}
-- Pembayaran masuk     : ${rp(a.payToday)} (${a.payTodayN} transaksi)
-- Surat/eskalasi kirim : ${a.eskToday}
-
-— Dibuat via Kolekta`;
+E. AKTIVITAS HARI INI
+Follow-up Dilakukan  : ${a.fuToday}
+Pembayaran Masuk     : ${rp(a.payToday)} (${a.payTodayN} transaksi)
+Surat/Eskalasi Kirim : ${a.eskToday}`;
   }, [analytics, panels, prioritas, stats, s]);
 
   const filtered = useMemo(() => {
@@ -1554,10 +1577,10 @@ AKTIVITAS HARI INI
                   <div className="ml-auto flex gap-1">
                     <button onClick={() => { if (!printLetter("Laporan Penagihan", laporanText)) flash("Popup diblokir — pakai Salin"); }}
                       className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand2 }}><Printer size={12} /> PDF</button>
-                    <button onClick={() => copy(laporanText)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}><Copy size={12} /> Salin</button>
+                    <button onClick={() => copy(docToPlain(laporanText))} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}><Copy size={12} /> Salin</button>
                   </div>
                 </div>
-                <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: MONO }}>{laporanText}</pre>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: MONO }}>{docToPlain(laporanText)}</pre>
               </div>
             )}
 
@@ -1748,7 +1771,7 @@ AKTIVITAS HARI INI
               {filtered.map((i) => (
                 <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
                   onToggle={() => setOpenId(openId === i.id ? null : i.id)}
-                  onStatement={(name) => { const t = statementText(name, enriched, s); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(t); flash("Popup diblokir — statement disalin"); } }}
+                  onStatement={(name) => { const t = statementText(name, enriched, s); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
                   patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} />
               ))}
               {filtered.length === 0 && (
