@@ -506,8 +506,26 @@ ${jabatan}`;
 /* Cetak via iframe tersembunyi — tetap di dalam aplikasi sehingga pengguna
    tidak "nyantol" di tab/penampil PDF baru (penting untuk PWA standalone iOS).
    Setelah dialog cetak ditutup, iframe otomatis dibuang dan user kembali ke app. */
-// Dokumen memakai kolom rata (label : nilai) yang hanya presisi dengan font monospace.
-const DOC_STYLE = `@page{size:A4;margin:2.2cm}body{font-family:'Cascadia Mono',ui-monospace,'SFMono-Regular','Consolas','Liberation Mono','DejaVu Sans Mono','Courier New',monospace;font-size:10.5pt;line-height:1.5;color:#111;margin:0}.doc{white-space:pre-wrap;word-break:break-word;tab-size:4}`;
+// Format surat resmi: A4, Times New Roman 12pt, margin atas/kiri 4cm — kanan/bawah 3cm,
+// spasi 1,5, paragraf justify dengan indent baris pertama 1cm & jarak antar-paragraf 6pt.
+const DOC_STYLE = `@page{size:A4;margin:4cm 3cm 3cm 4cm}
+body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.5;color:#111;margin:0}
+p{margin:0}
+.title{text-align:center;font-weight:bold;margin:0 0 10pt;line-height:1.3;text-transform:uppercase}
+.subhead{font-weight:bold;margin:8pt 0 2pt}
+.body{text-align:justify;text-indent:1cm;margin:0 0 6pt}
+.line{margin:0 0 1pt}
+.listline{margin:0 0 1pt;padding-left:1cm;text-indent:-1cm}
+.gap{height:8pt}
+table.kv{border-collapse:collapse;margin:2pt 0 6pt}
+table.kv td{vertical-align:top;padding:0 0 1pt}
+table.kv td.k{white-space:nowrap;padding-right:8px}
+table.kv td.c{padding-right:8px}
+.sigblock{display:inline-block;margin:6pt 0 0;text-align:center}
+.sigblock .ttd-img{height:60px;display:block;margin:0 auto -1px}
+.sigblock .ttd-space{height:52px}
+.sigblock .ttd-rule{width:5cm;border-bottom:1px solid #111;margin:0 auto}
+.sigblock .ttd-name{margin-top:2pt;font-weight:600;line-height:1.3}`;
 function printViaIframe(label, bodyHtml) {
   try {
     const iframe = document.createElement("iframe");
@@ -532,20 +550,84 @@ function printViaIframe(label, bodyHtml) {
   }
 }
 
+/* Ubah teks dokumen polos → HTML rapi (paragraf justify, tabel "label : nilai",
+   blok tanda tangan). sigMap memetakan token tanda tangan ke gambar data-URL:
+   { SIGN, SIGN1, SIGN2 }. Token tanpa gambar / placeholder "(____)" jadi ruang ttd manual. */
+function renderDocHtml(text, sigMap = {}) {
+  const esc = (str) => (str == null ? "" : String(str)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lines = (text || "").replace(/\r/g, "").split("\n");
+  const out = [];
+  let fieldRun = [];
+  let pendingSig = null;
+  let seenTitle = false;
+  let blankPending = false;
+
+  const gap = () => { if (out.length) out.push(`<div class="gap"></div>`); };
+  const flushFields = () => {
+    if (!fieldRun.length) return;
+    const rows = fieldRun.map((f) => `<tr><td class="k">${esc(f.k)}</td><td class="c">:</td><td class="v">${esc(f.v)}</td></tr>`).join("");
+    out.push(`<table class="kv">${rows}</table>`);
+    fieldRun = [];
+  };
+  const flushSig = () => {
+    if (!pendingSig) return;
+    const inner = pendingSig.img
+      ? `<img class="ttd-img" src="${pendingSig.img}" alt="tanda tangan"/>`
+      : `<div class="ttd-space"></div>`;
+    const names = pendingSig.names.map((n) => `<div class="ttd-name">${esc(n)}</div>`).join("");
+    out.push(`<div class="sigblock">${inner}<div class="ttd-rule"></div>${names}</div>`);
+    pendingSig = null;
+  };
+  const fieldMatch = (ln) => {
+    const m = ln.match(/^([^:]{1,22}?) *: +(\S.*)$/);
+    return m ? { k: m[1].trim(), v: m[2] } : null;
+  };
+  const sigAnchor = (ln) => {
+    const t = ln.trim();
+    const m = t.match(/^\[\[SIGN([12]?)\]\]$/);
+    if (m) return { img: sigMap["SIGN" + (m[1] || "")] || null };
+    if (/^\(?_{5,}\)?$/.test(t)) return { img: null };
+    return null;
+  };
+  const textLine = (t) => {
+    const allCaps = /[A-Z]/.test(t) && !/[a-z]/.test(t);
+    if (allCaps && t.length <= 70 && !/^(PT|CV|UD)\b/.test(t)) {
+      if (!seenTitle) { seenTitle = true; return `<p class="title">${esc(t)}</p>`; }
+      return `<p class="subhead">${esc(t)}</p>`;
+    }
+    if (/^[-•]\s+/.test(t)) return `<p class="listline">${esc(t)}</p>`;
+    if (t.length <= 55) return `<p class="line">${esc(t)}</p>`;
+    return `<p class="body">${esc(t)}</p>`;
+  };
+
+  for (const raw of lines) {
+    const ln = raw.replace(/\s+$/, "");
+    if (ln.trim() === "") { flushFields(); flushSig(); blankPending = true; continue; }
+    const anc = sigAnchor(ln);
+    if (anc) {
+      flushFields(); flushSig();
+      if (blankPending) { gap(); blankPending = false; }
+      pendingSig = { img: anc.img, names: [] };
+      continue;
+    }
+    if (pendingSig) { pendingSig.names.push(ln.trim()); continue; }
+    const fm = fieldMatch(ln);
+    if (fm) {
+      if (blankPending) { gap(); blankPending = false; }
+      fieldRun.push(fm);
+      continue;
+    }
+    flushFields();
+    if (blankPending) { gap(); blankPending = false; }
+    out.push(textLine(ln.trim()));
+  }
+  flushFields(); flushSig();
+  return out.join("");
+}
+
 function printDoc(label, text, sig) {
-  const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // Tanda tangan ditempatkan inline lewat token [[SIGN]] / [[SIGN1]] / [[SIGN2]].
-  // sig boleh berupa string (satu ttd) atau objek { SIGN1, SIGN2 } untuk dokumen dua pihak (mis. MOM).
-  const sigBox = (url) => url
-    ? `<span class="sig"><img src="${url}" alt="tanda tangan"/></span>`
-    : `<span class="sigline"></span>`;
-  const sigs = sig && typeof sig === "object" ? sig : { SIGN: sig };
-  const body = esc
-    .replace(/\[\[SIGN1\]\]/g, sigBox(sigs.SIGN1))
-    .replace(/\[\[SIGN2\]\]/g, sigBox(sigs.SIGN2))
-    .replace(/\[\[SIGN\]\]/g, sigBox(sigs.SIGN));
-  const sigStyle = `<style>.sig{display:inline-block;min-width:230px;border-bottom:1px solid #111;text-align:center;vertical-align:bottom}.sig img{height:80px;display:block;margin:0 auto 2px}.sigline{display:inline-block;min-width:230px;height:74px;border-bottom:1px solid #111;vertical-align:bottom}</style>`;
-  return printViaIframe(label, `${sigStyle}<div class="doc">${body}</div>`);
+  const sigMap = sig && typeof sig === "object" ? sig : { SIGN: sig };
+  return printViaIframe(label, renderDocHtml(text, sigMap));
 }
 
 function fieldBase(s) {
@@ -618,6 +700,7 @@ ${jabatan}`;
 function momKunjungan(i, s, f) {
   const { p, jabatan, ttdKota } = fieldBase(s);
   const petugas = (s.petugasAktif && s.petugasAktif.trim()) || jabatan;
+  const ar = i.sisaPokok ?? i.nominal;
   return `MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN
 
 Hari / Tanggal : ${ttdKota}
@@ -630,11 +713,13 @@ A. PARA PIHAK
 
 B. DATA KEWAJIBAN
 No. Tagihan     : ${i.noInvoice}
+AR / Pokok      : ${rp(ar)}
+Denda           : ${rp(i.denda)}
 Total Kewajiban : ${rp(i.total)}
 Jatuh Tempo     : ${fmtTgl(i.tglJatuhTempo)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hari)` : ""}
 
 C. HASIL PEMBAHASAN
-${f.pembahasan || "-"}
+1. Konfirmasi posisi tunggakan saat kunjungan — AR/pokok ${rp(ar)} + denda ${rp(i.denda)} = total kewajiban ${rp(i.total)}.${f.pembahasan ? "\n" + f.pembahasan : ""}
 
 D. KESEPAKATAN / TINDAK LANJUT
 ${f.kesepakatan || "-"}${f.tgl ? `\n\nTarget penyelesaian : ${fmtTgl(f.tgl)}` : ""}
@@ -657,8 +742,7 @@ ${p}`;
 }
 
 function printLetter(label, text) {
-  const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return printViaIframe(label, `<div class="doc">${esc}</div>`);
+  return printViaIframe(label, renderDocHtml(text, {}));
 }
 
 function exportExcel(rows, s) {
