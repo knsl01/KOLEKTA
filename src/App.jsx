@@ -5,18 +5,44 @@ import {
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete,
+  Moon, Sun,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
 
 /* ---------- Tema (inline style, bukan arbitrary Tailwind) ---------- */
+/* Tiap tema punya varian terang (light) & gelap (dark); mode gelap berlaku untuk semua tema. */
 const THEMES = {
-  hutan: { name: "Hutan", bg: "#EEF1ED", surface: "#FFFFFF", ink: "#16241E", sub: "#5E6E66", brand: "#0C3B2E", brand2: "#15564A", brass: "#BE863A", line: "#DDE3DD", green: "#2F7D5B", amber: "#C0822A", red: "#B0463A", slate: "#6C7B73", toast: "#16241E" },
-  tinta: { name: "Tinta Malam", bg: "#0E1A16", surface: "#16241F", ink: "#E7EFE9", sub: "#93A39B", brand: "#2E8B6F", brand2: "#38A083", brass: "#D6A24A", line: "#26352E", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#8A9A91", toast: "#05100C" },
-  baja: { name: "Baja", bg: "#EDF0F4", surface: "#FFFFFF", ink: "#18222E", sub: "#5C6675", brand: "#1B3A5B", brand2: "#2C5C82", brass: "#B07A3C", line: "#DBE1EA", green: "#2E7D63", amber: "#B97F2A", red: "#B0463F", slate: "#66707E", toast: "#18222E" },
-  arsip: { name: "Arsip", bg: "#F1EADB", surface: "#FBF6EC", ink: "#2A2317", sub: "#6E6450", brand: "#5A3D22", brand2: "#7A5A33", brass: "#A9762E", line: "#E2D7C2", green: "#4E7A4A", amber: "#A9761F", red: "#9E4A35", slate: "#7A6E55", toast: "#2A2317" },
+  hutan: {
+    name: "Hutan",
+    light: { bg: "#EEF1ED", surface: "#FFFFFF", ink: "#16241E", sub: "#5E6E66", brand: "#0C3B2E", brand2: "#15564A", brass: "#BE863A", line: "#DDE3DD", green: "#2F7D5B", amber: "#C0822A", red: "#B0463A", slate: "#6C7B73", toast: "#16241E" },
+    dark: { bg: "#0E1A16", surface: "#16241F", ink: "#E7EFE9", sub: "#93A39B", brand: "#2E8B6F", brand2: "#38A083", brass: "#D6A24A", line: "#26352E", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#8A9A91", toast: "#05100C" },
+  },
+  baja: {
+    name: "Baja",
+    light: { bg: "#EDF0F4", surface: "#FFFFFF", ink: "#18222E", sub: "#5C6675", brand: "#1B3A5B", brand2: "#2C5C82", brass: "#B07A3C", line: "#DBE1EA", green: "#2E7D63", amber: "#B97F2A", red: "#B0463F", slate: "#66707E", toast: "#18222E" },
+    dark: { bg: "#0E1722", surface: "#172533", ink: "#E5EDF6", sub: "#8E9BAD", brand: "#3F73A4", brand2: "#5288BE", brass: "#CE9E54", line: "#263444", green: "#46A883", amber: "#D79E45", red: "#DE6E63", slate: "#7E8B9C", toast: "#060E16" },
+  },
+  arsip: {
+    name: "Arsip",
+    light: { bg: "#F1EADB", surface: "#FBF6EC", ink: "#2A2317", sub: "#6E6450", brand: "#5A3D22", brand2: "#7A5A33", brass: "#A9762E", line: "#E2D7C2", green: "#4E7A4A", amber: "#A9761F", red: "#9E4A35", slate: "#7A6E55", toast: "#2A2317" },
+    dark: { bg: "#1A150E", surface: "#251E13", ink: "#F0E7D6", sub: "#AB9C80", brand: "#A07E4C", brand2: "#B98F54", brass: "#CFA040", line: "#352A1B", green: "#7FA060", amber: "#CFA040", red: "#C56A4D", slate: "#9A8D71", toast: "#0E0A05" },
+  },
+  pink: {
+    name: "Pink",
+    light: { bg: "#FCEEF4", surface: "#FFFFFF", ink: "#2C141F", sub: "#7E5E6B", brand: "#9E2A5E", brand2: "#C24A7C", brass: "#BE7C42", line: "#F2DBE5", green: "#2F7D5B", amber: "#C0822A", red: "#C0413E", slate: "#8C6976", toast: "#2C141F" },
+    dark: { bg: "#1C0E15", surface: "#28141E", ink: "#F6E4ED", sub: "#B98FA2", brand: "#D75A91", brand2: "#E771A4", brass: "#E0A65C", line: "#3A2230", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#A98C98", toast: "#0E0509" },
+  },
 };
-let T = THEMES.hutan;
+// Pemetaan tema lama → keluarga + mode (kompatibilitas data tersimpan).
+const LEGACY_TEMA = { tinta: { base: "hutan", gelap: true } };
+function themePalette(key, gelap) {
+  const leg = LEGACY_TEMA[key];
+  if (leg) { key = leg.base; gelap = leg.gelap; }
+  const fam = THEMES[key] || THEMES.hutan;
+  return fam[gelap ? "dark" : "light"];
+}
+let T = themePalette("hutan", false);
 const MONO = "ui-monospace, 'SF Mono', 'Roboto Mono', 'DejaVu Sans Mono', monospace";
 const SANS = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
@@ -480,7 +506,8 @@ ${jabatan}`;
 /* Cetak via iframe tersembunyi — tetap di dalam aplikasi sehingga pengguna
    tidak "nyantol" di tab/penampil PDF baru (penting untuk PWA standalone iOS).
    Setelah dialog cetak ditutup, iframe otomatis dibuang dan user kembali ke app. */
-const DOC_STYLE = `@page{size:A4;margin:2.5cm}body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.55;color:#111;margin:0}.doc{white-space:pre-wrap}`;
+// Dokumen memakai kolom rata (label : nilai) yang hanya presisi dengan font monospace.
+const DOC_STYLE = `@page{size:A4;margin:2.2cm}body{font-family:'Cascadia Mono',ui-monospace,'SFMono-Regular','Consolas','Liberation Mono','DejaVu Sans Mono','Courier New',monospace;font-size:10.5pt;line-height:1.5;color:#111;margin:0}.doc{white-space:pre-wrap;word-break:break-word;tab-size:4}`;
 function printViaIframe(label, bodyHtml) {
   try {
     const iframe = document.createElement("iframe");
@@ -826,7 +853,7 @@ const sampleData = () => {
   const t = today0();
   const d = (off) => { const x = new Date(t); x.setDate(x.getDate() + off); return x.toISOString().slice(0, 10); };
   return {
-    settings: { perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", cloudUrl: "", cloudKey: "", cloudId: "", peran: "atasan", petugasAktif: "", petugas: ["Andi", "Rudi"], targets: { Andi: 50000000, Rudi: 50000000 } },
+    settings: { perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, cloudUrl: "", cloudKey: "", cloudId: "", peran: "atasan", petugasAktif: "", petugas: ["Andi", "Rudi"], targets: { Andi: 50000000, Rudi: 50000000 } },
     invoices: [
       { id: uid(), customer: "PT Karya Bangun Persada", tipe: "perusahaan", assignedTo: "Andi", alamat: "Jl. Industri Raya No. 12, Surabaya", noInvoice: "INV-2026-0188", nominal: 145000000, tglJatuhTempo: d(-42), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [], dibuat: d(-72) },
       { id: uid(), customer: "Budi Santoso", tipe: "perorangan", assignedTo: "Andi", alamat: "Perum Griya Asri Blok C-7, Gresik", noInvoice: "INV-2026-0203", nominal: 38500000, tglJatuhTempo: d(-23), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "fidusia", jaminan: "BPKB Toyota Avanza tahun 2021, Nopol W 1234 ABC a.n. Budi Santoso", pic: "Budi Santoso", telp: "081234567890", pembayaran: [{ ts: d(-5), jumlah: 10000000 }], eskalasi: [{ ts: d(-1), level: "tegas" }], aktivitas: [], dibuat: d(-39) },
@@ -839,7 +866,7 @@ const sampleData = () => {
 };
 
 const KEY = "kolekta:v1";
-const defaultSettings = () => ({ perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", peran: "atasan", petugasAktif: "", petugas: [], targets: {} });
+const defaultSettings = () => ({ perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, peran: "atasan", petugasAktif: "", petugas: [], targets: {} });
 const emptyData = () => ({ settings: defaultSettings(), invoices: [] });
 
 /* ---------- Logo ---------- */
@@ -1146,7 +1173,7 @@ AKTIVITAS HARI INI
   if (!data)
     return <div className="flex h-screen items-center justify-center" style={{ background: T.bg, color: T.sub, fontFamily: SANS }}>Memuat Kolekta…</div>;
 
-  T = THEMES[data.settings.tema] || THEMES.hutan;
+  T = themePalette(data.settings.tema, data.settings.gelap);
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => {
     const active = tab === id;
@@ -3004,8 +3031,9 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <h2 className="mb-3 text-sm font-semibold">Tema tampilan</h2>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {Object.entries(THEMES).map(([key, th]) => {
+          {Object.entries(THEMES).map(([key, fam]) => {
             const active = s.tema === key;
+            const th = fam[s.gelap ? "dark" : "light"];
             return (
               <button key={key} onClick={() => upd("tema", key)}
                 className="rounded-lg p-2.5 text-left transition-colors"
@@ -3016,11 +3044,26 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
                   <span className="h-4 w-4 rounded-full" style={{ background: th.surface, border: `1px solid ${th.line}` }} />
                 </div>
                 <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: th.ink }}>
-                  {th.name}{active && <Check size={12} style={{ color: th.brand }} />}
+                  {fam.name}{active && <Check size={12} style={{ color: th.brand }} />}
                 </span>
               </button>
             );
           })}
+        </div>
+        <div className="mt-3 flex items-center justify-between rounded-lg p-3" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: s.gelap ? T.brand2 + "1A" : T.brass + "1A", color: s.gelap ? T.brand2 : T.brass }}>
+              {s.gelap ? <Moon size={16} /> : <Sun size={16} />}
+            </span>
+            <div>
+              <p className="text-xs font-semibold">Mode gelap</p>
+              <p className="text-[11px]" style={{ color: T.sub }}>Berlaku untuk semua tema di atas</p>
+            </div>
+          </div>
+          <button onClick={() => upd("gelap", !s.gelap)} role="switch" aria-checked={s.gelap} aria-label="Mode gelap"
+            className="relative h-6 w-11 shrink-0 rounded-full transition-colors" style={{ background: s.gelap ? T.brand2 : T.line }}>
+            <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white" style={{ left: 2, transform: s.gelap ? "translateX(20px)" : "none", transition: "transform .2s cubic-bezier(.22,.61,.36,1)", boxShadow: "0 1px 3px rgba(0,0,0,.35)" }} />
+          </button>
         </div>
       </section>
 
@@ -3145,7 +3188,7 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
 
 /* ---------- Layar Login (gerbang sebelum app) ---------- */
 function LoginScreen({ onLogin }) {
-  const th = THEMES.hutan;
+  const th = themePalette("hutan", false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
