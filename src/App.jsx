@@ -4,7 +4,7 @@ import {
   Wallet, Bell, RotateCcw, X, MessageCircle, ChevronDown, FileText, Scale,
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
-  LogOut, Lock, ShieldCheck,
+  LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -44,10 +44,13 @@ const NAV = [
   { id: "hari", icon: Bell, label: "Hari Ini" },
   { id: "tagihan", icon: Wallet, label: "Tagihan" },
   { id: "analitik", icon: BarChart3, label: "Analitik" },
+  { id: "heatmap", icon: Flame, label: "Heat Map" },
   { id: "set", icon: Settings, label: "Pengaturan" },
 ];
 
 /* ---------- Helpers ---------- */
+const onlyDigits = (v) => String(v ?? "").replace(/[^0-9]/g, "");
+const grpID = (v) => { const n = onlyDigits(v); return n ? Number(n).toLocaleString("id-ID") : ""; };
 const rp = (n) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Math.round(n || 0));
 const rpc = (v) => {
@@ -99,6 +102,82 @@ function getLoc() {
       (e) => reject(e),
       { enableHighAccuracy: true, timeout: 10000 }
     );
+  });
+}
+
+/* Reverse geocode (koordinat -> alamat) via Nominatim, di-cache di localStorage. */
+const REVGEO_KEY = "kolekta:revgeo";
+async function reverseGeocode(lat, lng) {
+  const key = `${(+lat).toFixed(4)},${(+lng).toFixed(4)}`;
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem(REVGEO_KEY) || "{}"); } catch {}
+  if (key in cache) return cache[key];
+  let addr = null;
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&addressdetails=0&lat=${lat}&lon=${lng}`, { headers: { Accept: "application/json" } });
+    if (r.ok) { const j = await r.json(); addr = (j && j.display_name) || null; }
+  } catch {}
+  try { cache[key] = addr; localStorage.setItem(REVGEO_KEY, JSON.stringify(cache)); } catch {}
+  return addr;
+}
+
+/* Cap geotag ala GPS Camera: tempel alamat, koordinat, waktu di bawah foto. */
+function stampImage(dataUrl, info) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.width, h = img.height;
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const pad = Math.round(w * 0.028);
+      const fs = Math.max(12, Math.round(w * 0.030));
+      const lh = Math.round(fs * 1.4);
+      const head = []; // baris tebal (judul/perusahaan)
+      if (info.brand) head.push(info.brand);
+      const body = [];
+      if (info.address) body.push(info.address);
+      const coord = info.lat != null ? `${info.lat}, ${info.lng}${info.acc ? `  (±${info.acc} m)` : ""}` : "";
+      if (coord) body.push(coord);
+      if (info.waktu) body.push(info.waktu);
+
+      const wrapLines = (text, font) => {
+        ctx.font = font; const maxW = w - pad * 2; const res = []; let line = "";
+        for (const word of text.split(" ")) {
+          const test = line ? line + " " + word : word;
+          if (ctx.measureText(test).width > maxW && line) { res.push(line); line = word; } else line = test;
+        }
+        if (line) res.push(line);
+        return res;
+      };
+      const headFont = `700 ${Math.round(fs * 1.05)}px ${SANS}`;
+      const bodyFont = `${fs}px ${SANS}`;
+      const headLines = head.flatMap((t) => wrapLines(t, headFont));
+      const bodyLines = body.flatMap((t) => wrapLines(t, bodyFont));
+      const totalLines = headLines.length + bodyLines.length;
+      const barH = pad * 1.6 + totalLines * lh;
+
+      const grad = ctx.createLinearGradient(0, h - barH - pad, 0, h);
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(0.3, "rgba(0,0,0,0.5)");
+      grad.addColorStop(1, "rgba(0,0,0,0.8)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, h - barH - pad, w, barH + pad);
+      // garis aksen emas
+      ctx.fillStyle = "#BE863A";
+      ctx.fillRect(pad, h - barH, Math.round(w * 0.12), Math.max(2, Math.round(fs * 0.16)));
+
+      ctx.textBaseline = "top";
+      let y = h - barH + Math.round(fs * 0.5);
+      headLines.forEach((ln) => { ctx.font = headFont; ctx.fillStyle = "#FFFFFF"; ctx.fillText(ln, pad, y); y += lh; });
+      bodyLines.forEach((ln) => { ctx.font = bodyFont; ctx.fillStyle = "#EAEAEA"; ctx.fillText(ln, pad, y); y += lh; });
+
+      try { resolve(c.toDataURL("image/jpeg", 0.72)); } catch { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
   });
 }
 
@@ -428,8 +507,18 @@ function printViaIframe(label, bodyHtml) {
 
 function printDoc(label, text, sig) {
   const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const sigHtml = sig ? `<div style="margin-top:16px"><div style="font-size:11pt">Tanda tangan debitur:</div><img src="${sig}" style="height:90px;display:block"/></div>` : "";
-  return printViaIframe(label, `<div class="doc">${esc}</div>${sigHtml}`);
+  // Tanda tangan ditempatkan inline lewat token [[SIGN]] / [[SIGN1]] / [[SIGN2]].
+  // sig boleh berupa string (satu ttd) atau objek { SIGN1, SIGN2 } untuk dokumen dua pihak (mis. MOM).
+  const sigBox = (url) => url
+    ? `<span class="sig"><img src="${url}" alt="tanda tangan"/></span>`
+    : `<span class="sigline"></span>`;
+  const sigs = sig && typeof sig === "object" ? sig : { SIGN: sig };
+  const body = esc
+    .replace(/\[\[SIGN1\]\]/g, sigBox(sigs.SIGN1))
+    .replace(/\[\[SIGN2\]\]/g, sigBox(sigs.SIGN2))
+    .replace(/\[\[SIGN\]\]/g, sigBox(sigs.SIGN));
+  const sigStyle = `<style>.sig{display:inline-block;min-width:230px;border-bottom:1px solid #111;text-align:center;vertical-align:bottom}.sig img{height:80px;display:block;margin:0 auto 2px}.sigline{display:inline-block;min-width:230px;height:74px;border-bottom:1px solid #111;vertical-align:bottom}</style>`;
+  return printViaIframe(label, `${sigStyle}<div class="doc">${body}</div>`);
 }
 
 function fieldBase(s) {
@@ -460,9 +549,7 @@ Demikian pernyataan ini saya buat dengan sadar dan tanpa paksaan dari pihak mana
 ${ttdKota}
 Yang Menyatakan,
 
-
-
-(__________________________)
+[[SIGN]]
 ${i.customer}`;
 }
 function bastPenarikan(i, s, f) {
@@ -488,12 +575,58 @@ Sehubungan dengan kewajiban atas ${i.noInvoice} sebesar ${rp(i.total)} yang belu
 
 Demikian berita acara ini dibuat dengan sebenarnya untuk dipergunakan sebagaimana mestinya.
 
-Pihak Pertama,                              Pihak Kedua,
+Pihak Pertama (yang menyerahkan),
+
+[[SIGN]]
+${i.customer}
+
+
+Pihak Kedua (yang menerima),
 
 
 
-(________________________)                  (________________________)
-${i.customer}                               ${jabatan}`;
+(__________________________)
+${jabatan}`;
+}
+function momKunjungan(i, s, f) {
+  const { p, jabatan, ttdKota } = fieldBase(s);
+  const petugas = (s.petugasAktif && s.petugasAktif.trim()) || jabatan;
+  return `MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN
+
+Hari / Tanggal : ${ttdKota}
+Perihal        : Kunjungan penagihan & pembahasan penyelesaian kewajiban
+
+A. PARA PIHAK
+1. Pihak Penagih : ${petugas} — ${p}
+2. Pihak Debitur : ${i.customer}${i.pic ? ` (PIC: ${i.pic})` : ""}
+   Alamat        : ${i.alamat || "-"}
+
+B. DATA KEWAJIBAN
+No. Tagihan     : ${i.noInvoice}
+Total Kewajiban : ${rp(i.total)}
+Jatuh Tempo     : ${fmtTgl(i.tglJatuhTempo)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hari)` : ""}
+
+C. HASIL PEMBAHASAN
+${f.pembahasan || "-"}
+
+D. KESEPAKATAN / TINDAK LANJUT
+${f.kesepakatan || "-"}${f.tgl ? `\n\nTarget penyelesaian : ${fmtTgl(f.tgl)}` : ""}
+
+Demikian berita acara kunjungan ini dibuat dengan sebenarnya dan disetujui oleh kedua belah pihak tanpa adanya paksaan, untuk dipergunakan sebagaimana mestinya.
+
+${ttdKota}
+
+Pihak Debitur,
+
+[[SIGN1]]
+${i.customer}
+
+
+Pihak Penagih,
+
+[[SIGN2]]
+${petugas}
+${p}`;
 }
 
 function printLetter(label, text) {
@@ -697,8 +830,8 @@ const sampleData = () => {
     invoices: [
       { id: uid(), customer: "PT Karya Bangun Persada", tipe: "perusahaan", assignedTo: "Andi", alamat: "Jl. Industri Raya No. 12, Surabaya", noInvoice: "INV-2026-0188", nominal: 145000000, tglJatuhTempo: d(-42), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [], dibuat: d(-72) },
       { id: uid(), customer: "Budi Santoso", tipe: "perorangan", assignedTo: "Andi", alamat: "Perum Griya Asri Blok C-7, Gresik", noInvoice: "INV-2026-0203", nominal: 38500000, tglJatuhTempo: d(-23), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "fidusia", jaminan: "BPKB Toyota Avanza tahun 2021, Nopol W 1234 ABC a.n. Budi Santoso", pic: "Budi Santoso", telp: "081234567890", pembayaran: [{ ts: d(-5), jumlah: 10000000 }], eskalasi: [{ ts: d(-1), level: "tegas" }], aktivitas: [], dibuat: d(-39) },
-      { id: uid(), customer: "PT Graha Janto Dua", tipe: "perusahaan", assignedTo: "Rudi", alamat: "Jl. Gatot Subroto Kav. 5, Jakarta Selatan", noInvoice: "INV-2026-0171", nominal: 92000000, tglJatuhTempo: d(-21), status: "sudah_followup", lastFollowUp: d(-12), janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [{ ts: d(-12), note: "Telp ke bag. keuangan, minta dikejar approval." }], dibuat: d(-51) },
-      { id: uid(), customer: "Siti Rahmawati", tipe: "perorangan", assignedTo: "Rudi", alamat: "Jl. Diponegoro No. 88, Malang", noInvoice: "INV-2026-0199", nominal: 61000000, tglJatuhTempo: d(-72), status: "janji_bayar", lastFollowUp: d(-3), janjiBayar: d(-1), jaminanTipe: "tanah", jaminan: "Sertifikat Hak Milik No. 1234/Klojen, Malang", pic: "Siti Rahmawati", telp: "081298765432", eskalasi: [{ ts: d(-2), level: "somasi" }], aktivitas: [{ ts: d(-3), note: "Janji transfer paling lambat kemarin." }], dibuat: d(-95) },
+      { id: uid(), customer: "PT Graha Janto Dua", tipe: "perusahaan", assignedTo: "Rudi", alamat: "Jl. Gatot Subroto Kav. 5, Jakarta Selatan", noInvoice: "INV-2026-0171", nominal: 92000000, tglJatuhTempo: d(-21), status: "sudah_followup", lastFollowUp: d(-12), janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [{ ts: d(-12), waktu: new Date().toISOString(), note: "Kunjungan ke kantor, minta dikejar approval.", lok: { lat: -6.2349, lng: 106.8186, acc: 18 } }], dibuat: d(-51) },
+      { id: uid(), customer: "Siti Rahmawati", tipe: "perorangan", assignedTo: "Rudi", alamat: "Jl. Diponegoro No. 88, Malang", noInvoice: "INV-2026-0199", nominal: 61000000, tglJatuhTempo: d(-72), status: "janji_bayar", lastFollowUp: d(-3), janjiBayar: d(-1), jaminanTipe: "tanah", jaminan: "Sertifikat Hak Milik No. 1234/Klojen, Malang", pic: "Siti Rahmawati", telp: "081298765432", eskalasi: [{ ts: d(-2), level: "somasi" }], aktivitas: [{ ts: d(-3), waktu: new Date().toISOString(), note: "Kunjungan rumah, janji transfer paling lambat kemarin.", lok: { lat: -7.9785, lng: 112.6210, acc: 22 } }], dibuat: d(-95) },
       { id: uid(), customer: "CV Sentosa Material", tipe: "perusahaan", assignedTo: "Andi", alamat: "Jl. Raya Driyorejo No. 21, Gresik", noInvoice: "INV-2026-0210", nominal: 27500000, tglJatuhTempo: d(6), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [], dibuat: d(-24) },
       { id: uid(), customer: "PT Wahana Lentera", tipe: "perusahaan", assignedTo: "Rudi", alamat: "Jl. Mayjen Sungkono No. 3, Surabaya", noInvoice: "INV-2026-0150", nominal: 54000000, tglJatuhTempo: d(-30), status: "lunas", lastFollowUp: d(-8), janjiBayar: null, jaminanTipe: "none", jaminan: "", pembayaran: [{ ts: d(-8), jumlah: 54000000 }], aktivitas: [{ ts: d(-8), note: "Sudah transfer penuh + denda." }], dibuat: d(-60) },
     ],
@@ -746,6 +879,7 @@ export default function KolektaApp() {
   const [showAdd, setShowAdd] = useState(false);
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [showCalc, setShowCalc] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [fStatus, setFStatus] = useState("all");
   const [fTipe, setFTipe] = useState("all");
@@ -1091,11 +1225,15 @@ AKTIVITAS HARI INI
 .sub-fade{animation:kolektaFade .2s cubic-bezier(.22,.61,.36,1)}
 .kpress{transition:transform .09s ease}
 .kpress:active{transform:scale(.96)}
+@keyframes kolektaExpand{from{opacity:0;transform:translateY(-8px) scaleY(.97)}to{opacity:1;transform:none}}
+.filter-anim{animation:kolektaExpand .26s cubic-bezier(.22,.61,.36,1);transform-origin:top}
+.chip{transition:background-color .18s ease,color .18s ease,border-color .18s ease,transform .09s ease}
+.chip:active{transform:scale(.94)}
 @keyframes kolektaOv{from{opacity:0}to{opacity:1}}
 @keyframes kolektaSlide{from{transform:translateX(-100%)}to{transform:none}}
 .drawer-ov{animation:kolektaOv .2s ease}
 .drawer-pn{animation:kolektaSlide .26s cubic-bezier(.2,.7,.2,1)}
-@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade{animation:none}.kpress:active{transform:none}}
+@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim{animation:none}.kpress:active,.chip:active{transform:none}}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
@@ -1112,6 +1250,10 @@ AKTIVITAS HARI INI
             {NAV.map((n) => (
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
+            <button onClick={() => setShowCalc(true)}
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
+              <CalcIcon size={18} /><span>Kalkulator</span>
+            </button>
           </nav>
           {sideSummary}
           <div className="mt-auto p-5">
@@ -1311,8 +1453,8 @@ AKTIVITAS HARI INI
                   className="w-full bg-transparent py-2.5 text-sm outline-none" />
               </div>
               <button onClick={() => setShowFilter((v) => !v)}
-                className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
-                style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} /></button>
+                className="chip flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
+                style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} style={{ transition: "transform .2s ease", transform: showFilter ? "rotate(90deg)" : "none" }} /></button>
               <button onClick={() => fileRef.current?.click()}
                 className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><Upload size={16} /><span className="hidden sm:inline">Impor</span></button>
@@ -1325,11 +1467,11 @@ AKTIVITAS HARI INI
             </div>
 
             {showFilter && (
-              <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <div className="filter-anim rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                 <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Status</p>
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {[["all", "Semua"], ...STATUS_ORDER.map((st) => [st, stLabel(st)])].map(([v, lbl]) => (
-                    <button key={v} onClick={() => setFStatus(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                    <button key={v} onClick={() => setFStatus(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                       style={fStatus === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                   ))}
                 </div>
@@ -1338,7 +1480,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Petugas</p>
                     <div className="mb-2 flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["_none", "Belum ditugaskan"], ...s.petugas.map((nm) => [nm, nm])].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFPetugas(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFPetugas(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fPetugas === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1349,7 +1491,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Tipe</p>
                     <div className="flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["perusahaan", "PT/CV"], ["perorangan", "Perorangan"]].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFTipe(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFTipe(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fTipe === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1358,7 +1500,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Jaminan</p>
                     <div className="flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["ada", "Ada"], ["tanpa", "Tanpa"]].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFJaminan(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFJaminan(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fJaminan === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1519,6 +1661,12 @@ AKTIVITAS HARI INI
           </div>
         )}
 
+        {/* ---------- HEAT MAP ---------- */}
+        {tab === "heatmap" && (
+          <HeatMapView rows={enriched} allRows={allEnriched} s={s}
+            onOpen={(id) => { setTab("tagihan"); setOpenId(id); }} />
+        )}
+
         {/* ---------- PENGATURAN ---------- */}
         {tab === "set" && (
           <Settingstab data={data} setData={setData} flash={flash} copy={copy}
@@ -1560,6 +1708,10 @@ AKTIVITAS HARI INI
                   </button>
                 );
               })}
+              <button onClick={() => { setShowCalc(true); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <CalcIcon size={18} /><span>Kalkulator</span>
+              </button>
             </nav>
             {sideSummary}
             <div className="mt-auto p-5">
@@ -1576,6 +1728,117 @@ AKTIVITAS HARI INI
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-white shadow-lg"
           style={{ background: T.toast }}>{toast}</div>
       )}
+
+      <Kalkulator open={showCalc} onClose={() => setShowCalc(false)} />
+    </div>
+  );
+}
+
+/* ---------- Kalkulator (modal, ramah angka rupiah) ---------- */
+function Kalkulator({ open, onClose }) {
+  const [cur, setCur] = useState("0");
+  const [prev, setPrev] = useState(null);
+  const [op, setOp] = useState(null);
+  const [overwrite, setOverwrite] = useState(true);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      const k = e.key;
+      if (k >= "0" && k <= "9") digit(k);
+      else if (k === ".") dot();
+      else if (k === "+" ) choose("+");
+      else if (k === "-") choose("−");
+      else if (k === "*") choose("×");
+      else if (k === "/") { e.preventDefault(); choose("÷"); }
+      else if (k === "%") percent();
+      else if (k === "Enter" || k === "=") { e.preventDefault(); eq(); }
+      else if (k === "Backspace") back();
+      else if (k === "Escape") onClose();
+      else if (k === "c" || k === "C") clearAll();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  if (!open) return null;
+
+  const calc = (a, b, o) => o === "+" ? a + b : o === "−" ? a - b : o === "×" ? a * b : o === "÷" ? (b === 0 ? NaN : a / b) : b;
+  const digit = (d) => setCur((c) => (overwrite || c === "0" ? d : c + d)) || setOverwrite(false);
+  const dot = () => { if (overwrite) { setCur("0."); setOverwrite(false); } else setCur((c) => (c.includes(".") ? c : c + ".")); };
+  const choose = (o) => {
+    const c = parseFloat(cur);
+    if (prev == null) setPrev(c);
+    else if (!overwrite) { const r = calc(prev, c, op); setPrev(r); setCur(String(r)); }
+    setOp(o); setOverwrite(true);
+  };
+  const eq = () => {
+    if (op == null || prev == null) return;
+    const r = calc(prev, parseFloat(cur), op);
+    setCur(Number.isFinite(r) ? String(r) : "Error");
+    setPrev(null); setOp(null); setOverwrite(true);
+  };
+  const percent = () => setCur((c) => { const v = parseFloat(c); return String(prev != null && op ? (prev * v) / 100 : v / 100); });
+  const sign = () => setCur((c) => (c === "0" || c === "Error" ? c : c.startsWith("-") ? c.slice(1) : "-" + c));
+  const back = () => setCur((c) => (overwrite || c.length <= 1 || (c.length === 2 && c.startsWith("-")) ? "0" : c.slice(0, -1)));
+  const clearAll = () => { setCur("0"); setPrev(null); setOp(null); setOverwrite(true); };
+
+  const fmt = (s) => {
+    if (s === "Error") return s;
+    const neg = s.startsWith("-"); const body = neg ? s.slice(1) : s;
+    const [ip, dp] = body.split(".");
+    const g = Number(ip || "0").toLocaleString("id-ID");
+    const tail = s.endsWith(".") ? "," : dp != null ? "," + dp : "";
+    return (neg ? "-" : "") + g + tail;
+  };
+
+  const Btn = ({ children, onClick, kind }) => {
+    const st = kind === "op" ? { background: T.brand2 + "1A", color: T.brand2 }
+      : kind === "eq" ? { background: T.brand, color: "#fff" }
+      : kind === "fn" ? { background: T.bg, color: T.sub }
+      : { background: T.surface, color: T.ink, border: `1px solid ${T.line}` };
+    return (
+      <button onClick={onClick} className="kpress flex h-14 items-center justify-center rounded-xl text-lg font-semibold" style={st}>{children}</button>
+    );
+  };
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-t-2xl p-4 shadow-xl sm:rounded-2xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CalcIcon size={18} style={{ color: T.brand2 }} />
+            <h3 className="text-sm font-semibold">Kalkulator</h3>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1" style={{ color: T.sub }}><X size={18} /></button>
+        </div>
+        <div className="mb-3 rounded-xl p-4 text-right" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+          <div className="h-4 text-xs" style={{ color: T.sub, fontFamily: MONO }}>{prev != null ? `${fmt(String(prev))} ${op || ""}` : " "}</div>
+          <div className="truncate text-3xl font-bold" style={{ fontFamily: MONO, color: T.ink }}>{fmt(cur)}</div>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          <Btn kind="fn" onClick={clearAll}>C</Btn>
+          <Btn kind="fn" onClick={sign}>±</Btn>
+          <Btn kind="fn" onClick={percent}><Percent size={18} /></Btn>
+          <Btn kind="op" onClick={() => choose("÷")}><Divide size={18} /></Btn>
+          <Btn onClick={() => digit("7")}>7</Btn>
+          <Btn onClick={() => digit("8")}>8</Btn>
+          <Btn onClick={() => digit("9")}>9</Btn>
+          <Btn kind="op" onClick={() => choose("×")}>×</Btn>
+          <Btn onClick={() => digit("4")}>4</Btn>
+          <Btn onClick={() => digit("5")}>5</Btn>
+          <Btn onClick={() => digit("6")}>6</Btn>
+          <Btn kind="op" onClick={() => choose("−")}>−</Btn>
+          <Btn onClick={() => digit("1")}>1</Btn>
+          <Btn onClick={() => digit("2")}>2</Btn>
+          <Btn onClick={() => digit("3")}>3</Btn>
+          <Btn kind="op" onClick={() => choose("+")}>+</Btn>
+          <Btn kind="fn" onClick={back}><Delete size={18} /></Btn>
+          <Btn onClick={() => digit("0")}>0</Btn>
+          <Btn onClick={dot}>,</Btn>
+          <Btn kind="eq" onClick={eq}>=</Btn>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1656,7 +1919,7 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label={f.tipe === "perorangan" ? "Nama debitur" : "Customer / perusahaan"}><input className={inputCls} style={inputSt} value={f.customer} onChange={set("customer")} placeholder={f.tipe === "perorangan" ? "Nama lengkap" : "PT / CV …"} /></Field>
         <Field label="No. invoice"><input className={inputCls} style={inputSt} value={f.noInvoice} onChange={set("noInvoice")} placeholder="INV-…" /></Field>
-        <Field label="Nominal (pokok)"><input type="number" inputMode="numeric" className={inputCls} style={inputSt} value={f.nominal} onChange={set("nominal")} placeholder="0" /></Field>
+        <Field label="Nominal (pokok)"><input type="text" inputMode="numeric" className={inputCls} style={inputSt} value={grpID(f.nominal)} onChange={(e) => setF({ ...f, nominal: onlyDigits(e.target.value) })} placeholder="0" /></Field>
         <Field label="Jatuh tempo"><input type="date" className={inputCls} style={inputSt} value={f.tglJatuhTempo} onChange={set("tglJatuhTempo")} /></Field>
         <Field label={f.tipe === "perorangan" ? "Kontak (opsional)" : "Nama PIC (opsional)"}><input className={inputCls} style={inputSt} value={f.pic} onChange={set("pic")} placeholder={f.tipe === "perorangan" ? "mis. nomor rumah" : "mis. Bu Sari (Finance)"} /></Field>
         <Field label="No. WA (opsional)"><input className={inputCls} style={inputSt} value={f.telp} onChange={set("telp")} placeholder="08…" /></Field>
@@ -1740,15 +2003,21 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [bayar, setBayar] = useState("");
   const [hasil, setHasil] = useState("lain");
   const [foto, setFoto] = useState(null);
+  const [fotoView, setFotoView] = useState(null);
   const [lok, setLok] = useState(null);
   const [busyLoc, setBusyLoc] = useState(false);
   const fotoRef = useRef(null);
   const [showDoc, setShowDoc] = useState(false);
   const [sub, setSub] = useState("tagih");
   const [docType, setDocType] = useState("pernyataan");
-  const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "" });
+  const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   const [dsig, setDsig] = useState(null);
+  const [dsig2, setDsig2] = useState(null);
   const [tindakLanjut, setTindakLanjut] = useState(i.tindakLanjut || "");
+  const [lunasAsk, setLunasAsk] = useState(false);
+  const [lunasCode, setLunasCode] = useState("");
+  const [openRiwayat, setOpenRiwayat] = useState(false);
+  const [openArsip, setOpenArsip] = useState(false);
   const [editing, setEditing] = useState(false);
   const [ed, setEd] = useState({ customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo });
   const docs = useMemo(() => escalationDocs(i, s), [i, s]);
@@ -1769,7 +2038,11 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     setBayar(""); flash("Pembayaran dicatat");
   };
 
-  const setStatus = (st) => { if (st === "lunas") return markLunas(); patch(i.id, (x) => ({ ...x, status: st })); };
+  const setStatus = (st) => { if (st === "lunas") { setLunasCode(""); setLunasAsk(true); return; } patch(i.id, (x) => ({ ...x, status: st })); };
+  const confirmLunas = () => {
+    if (lunasCode.trim() !== "12345") { flash("Kode konfirmasi salah"); return; }
+    setLunasAsk(false); setLunasCode(""); markLunas();
+  };
   const markLunas = () => {
     patch(i.id, (x) => {
       const tb = (x.pembayaran || []).reduce((a, p) => a + p.jumlah, 0);
@@ -1795,8 +2068,21 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const onPickFoto = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
     if (!file) return;
-    try { setFoto(await resizeImage(file)); flash("Foto siap dilampirkan"); }
-    catch { flash("Gagal memproses foto"); }
+    try {
+      flash("Memproses foto…");
+      const base = await resizeImage(file, 960, 0.72);
+      // Ambil lokasi (pakai yang sudah ada, kalau belum coba ambil sekarang)
+      let loc = lok;
+      if (!loc) { try { loc = await getLoc(); setLok(loc); } catch {} }
+      let address = "";
+      if (loc) { try { address = (await reverseGeocode(loc.lat, loc.lng)) || ""; } catch {} }
+      const waktu = new Intl.DateTimeFormat("id-ID", { dateStyle: "long", timeStyle: "short" }).format(new Date());
+      const stamped = (loc || address)
+        ? await stampImage(base, { lat: loc?.lat, lng: loc?.lng, acc: loc?.acc, address, waktu, brand: s.perusahaan?.trim() || "" })
+        : base;
+      setFoto(stamped);
+      flash(loc ? "Foto + lokasi tercap" : "Foto siap (lokasi tak tersedia)");
+    } catch { flash("Gagal memproses foto"); }
   };
   const grabLoc = async () => {
     setBusyLoc(true);
@@ -1804,24 +2090,56 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     catch { flash("Lokasi tidak tersedia / izin ditolak"); }
     setBusyLoc(false);
   };
+  const docMeta = (jenis) =>
+    jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
+    : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
+    : { gen: suratPernyataan, label: "Surat Pernyataan" };
+  const stripSign = (t) => (t || "").replace(/\[\[SIGN\d?\]\]/g, "(__________________________)");
   const createDoc = () => {
-    const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi };
-    const text = docType === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
-    const label = docType === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    const ok = printDoc(label, text, dsig);
-    patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi }, ...(x.dokumen || [])] }));
-    if (!ok) { copy(text); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
-    setShowDoc(false); setDsig(null); setDForm({ jumlah: "", tgl: "", kondisi: "" });
+    const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi, pembahasan: dForm.pembahasan, kesepakatan: dForm.kesepakatan };
+    const { gen, label } = docMeta(docType);
+    const text = gen(i, s, f);
+    const sigArg = docType === "mom" ? { SIGN1: dsig, SIGN2: dsig2 } : dsig;
+    const ok = printDoc(label, text, sigArg);
+    patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, sig2: dsig2 || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi, pembahasan: f.pembahasan, kesepakatan: f.kesepakatan }, ...(x.dokumen || [])] }));
+    if (!ok) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
+    setShowDoc(false); setDsig(null); setDsig2(null); setDForm({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   };
   const reprintDoc = (dk) => {
-    const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi };
-    const text = dk.jenis === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
-    const label = dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    if (!printDoc(label, text, dk.sig)) { copy(text); flash("Popup diblokir — teks disalin"); }
+    const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi, pembahasan: dk.pembahasan, kesepakatan: dk.kesepakatan };
+    const { gen, label } = docMeta(dk.jenis);
+    const text = gen(i, s, f);
+    const sigArg = dk.jenis === "mom" ? { SIGN1: dk.sig, SIGN2: dk.sig2 } : dk.sig;
+    if (!printDoc(label, text, sigArg)) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); }
   };
 
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
   return (
+    <>
+    {fotoView && (
+      <div onClick={() => setFotoView(null)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
+        <button onClick={() => setFotoView(null)} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
+        <img src={fotoView} alt="Bukti kunjungan" className="max-h-full max-w-full rounded-lg object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()} />
+        <a href={fotoView} download={`bukti-${i.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
+      </div>
+    )}
+    {lunasAsk && (
+      <div onClick={() => setLunasAsk(false)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <div className="mb-1 flex items-center gap-2">
+            <ShieldCheck size={18} style={{ color: T.green }} />
+            <h3 className="text-sm font-semibold">Konfirmasi Lunas</h3>
+          </div>
+          <p className="mb-3 text-xs" style={{ color: T.sub }}>Menandai <b>{i.customer}</b> lunas bersifat final. Masukkan kode konfirmasi untuk melanjutkan.</p>
+          <input autoFocus value={lunasCode} onChange={(e) => setLunasCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmLunas()}
+            inputMode="numeric" placeholder="Kode konfirmasi" className={inputCls} style={{ ...inputSt, fontFamily: MONO, letterSpacing: "0.2em", textAlign: "center" }} />
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => setLunasAsk(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
+            <button onClick={confirmLunas} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.green }}>Tandai Lunas</button>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="overflow-hidden rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <button onClick={onToggle} className="flex w-full items-center gap-3 p-3 text-left">
         <div className="h-9 w-1 shrink-0 rounded-full" style={{ background: i.status === "lunas" ? T.green : urgent ? (i.odRaw > 60 ? T.red : T.amber) : T.line }} />
@@ -1871,7 +2189,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               )}
               {i.status !== "lunas" && (
                 <div className="mt-2 flex gap-2">
-                  <input value={bayar} onChange={(e) => setBayar(e.target.value)} inputMode="numeric" placeholder="Catat pembayaran / cicilan (Rp)…" className={inputCls} style={inputSt} />
+                  <input value={grpID(bayar)} onChange={(e) => setBayar(onlyDigits(e.target.value))} inputMode="numeric" placeholder="Catat pembayaran / cicilan (Rp)…" className={inputCls} style={inputSt} />
                   <button onClick={logBayar} className="shrink-0 rounded-lg px-3 text-xs font-semibold text-white" style={{ background: T.green }}>Catat</button>
                 </div>
               )}
@@ -1925,7 +2243,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               </div>
               <input ref={fotoRef} type="file" accept="image/*" capture="environment" onChange={onPickFoto} className="hidden" />
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <button onClick={() => fotoRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: foto ? T.green + "1A" : T.bg, color: foto ? T.green : T.brand2, border: `1px solid ${T.line}` }}><Camera size={14} /> {foto ? "Foto ✓" : "Foto bukti"}</button>
+                <button onClick={() => fotoRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: foto ? T.green + "1A" : T.bg, color: foto ? T.green : T.brand2, border: `1px solid ${T.line}` }}><Camera size={14} /> {foto ? "Foto ✓" : "Foto + lokasi"}</button>
                 <button onClick={grabLoc} disabled={busyLoc} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: lok ? T.green + "1A" : T.bg, color: lok ? T.green : T.brand2, border: `1px solid ${T.line}` }}><MapPin size={14} /> {busyLoc ? "Mengambil…" : lok ? "Lokasi ✓" : "Ambil lokasi"}</button>
               </div>
               {(foto || lok) && (
@@ -1939,12 +2257,17 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
 
               {i.aktivitas?.length > 0 && (
                 <div className="mt-3">
-                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Riwayat kunjungan & kontak</p>
+                  <button onClick={() => setOpenRiwayat((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
+                    <ChevronDown size={14} style={{ transform: openRiwayat ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                    Riwayat kunjungan & kontak
+                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{i.aktivitas.length}</span>
+                  </button>
+                  {openRiwayat && (
                   <div className="space-y-2">
                     {i.aktivitas.map((a, idx) => (
                       <div key={idx} className="rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         <div className="flex gap-2">
-                          {a.foto && <img src={a.foto} alt="bukti" className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} onClick={() => window.open(a.foto, "_blank")} />}
+                          {a.foto && <img src={a.foto} alt="bukti" className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} onClick={() => setFotoView(a.foto)} />}
                           <div className="min-w-0 flex-1">
                             <p className="text-[11px]" style={{ color: T.brass, fontFamily: MONO }}>{a.waktu ? fmtWaktu(a.waktu) : fmtTgl(a.ts).split(" ").slice(0, 2).join(" ")}</p>
                             <p className="text-xs" style={{ color: T.ink }}>{a.note}</p>
@@ -1954,6 +2277,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
               )}
 
@@ -1964,38 +2288,61 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               </button>
               {showDoc && (
                 <div className="mt-2 rounded-lg p-2.5" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                  <div className="mb-2 flex gap-1.5">
-                    <button onClick={() => setDocType("pernyataan")} className="flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
-                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    <button onClick={() => setDocType("pernyataan")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
+                    <button onClick={() => setDocType("mom")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "mom" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>MOM / Visit Report</button>
+                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
                   </div>
                   {docType === "pernyataan" ? (
                     <div className="grid grid-cols-2 gap-2">
-                      <input value={dForm.jumlah} onChange={(e) => setDForm({ ...dForm, jumlah: e.target.value })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
+                      <input value={grpID(dForm.jumlah)} onChange={(e) => setDForm({ ...dForm, jumlah: onlyDigits(e.target.value) })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
                       <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
+                    </div>
+                  ) : docType === "mom" ? (
+                    <div className="space-y-2 sub-fade">
+                      <textarea value={dForm.pembahasan} onChange={(e) => setDForm({ ...dForm, pembahasan: e.target.value })} rows={2} placeholder="Hasil pembahasan / poin pertemuan…" className={inputCls} style={inputSt} />
+                      <textarea value={dForm.kesepakatan} onChange={(e) => setDForm({ ...dForm, kesepakatan: e.target.value })} rows={2} placeholder="Kesepakatan / tindak lanjut…" className={inputCls} style={inputSt} />
+                      <div>
+                        <p className="mb-1 text-[11px] font-medium" style={{ color: T.sub }}>Target penyelesaian (opsional)</p>
+                        <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
+                      </div>
                     </div>
                   ) : (
                     <input value={dForm.kondisi} onChange={(e) => setDForm({ ...dForm, kondisi: e.target.value })} placeholder="Kondisi / kelengkapan unit" className={inputCls} style={inputSt} />
                   )}
-                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan debitur</p>
+                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan {docType === "mom" ? "debitur / customer" : "debitur"}</p>
                   <SignaturePad onChange={setDsig} />
+                  {docType === "mom" && (
+                    <>
+                      <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan petugas / atasan</p>
+                      <SignaturePad onChange={setDsig2} />
+                    </>
+                  )}
                   <button onClick={createDoc} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Buat &amp; cetak (PDF)</button>
                 </div>
               )}
               {i.dokumen?.length > 0 && (
                 <div className="mt-3">
-                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Arsip dokumen lapangan</p>
+                  <button onClick={() => setOpenArsip((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
+                    <ChevronDown size={14} style={{ transform: openArsip ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                    Arsip dokumen lapangan
+                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{i.dokumen.length}</span>
+                  </button>
+                  {openArsip && (
                   <div className="space-y-1.5">
                     {i.dokumen.map((dk, idx) => (
                       <div key={idx} className="flex items-center gap-2 rounded-lg p-2 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         {dk.sig && <img src={dk.sig} alt="ttd" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
+                        {dk.jenis === "mom" && dk.sig2 && <img src={dk.sig2} alt="ttd petugas" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold" style={{ color: T.ink }}>{dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan"}</p>
+                          <p className="font-semibold" style={{ color: T.ink }}>{dk.jenis === "mom" ? "MOM / Visit Report" : dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan"}</p>
                           <p className="text-[11px]" style={{ color: T.sub }}>{fmtWaktu(dk.waktu)}</p>
                         </div>
                         <button onClick={() => reprintDoc(dk)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-white" style={{ background: T.brand2 }}>Cetak ulang</button>
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2116,7 +2463,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <input value={ed.customer} onChange={(e) => setEd({ ...ed, customer: e.target.value })} placeholder="Customer / nama" className={inputCls} style={inputSt} />
                 <input value={ed.noInvoice} onChange={(e) => setEd({ ...ed, noInvoice: e.target.value })} placeholder="No. invoice" className={inputCls} style={inputSt} />
-                <input type="number" inputMode="numeric" value={ed.nominal} onChange={(e) => setEd({ ...ed, nominal: e.target.value })} placeholder="Nominal pokok" className={inputCls} style={inputSt} />
+                <input type="text" inputMode="numeric" value={grpID(ed.nominal)} onChange={(e) => setEd({ ...ed, nominal: onlyDigits(e.target.value) })} placeholder="Nominal pokok" className={inputCls} style={inputSt} />
                 <input type="date" value={ed.tglJatuhTempo} onChange={(e) => setEd({ ...ed, tglJatuhTempo: e.target.value })} className={inputCls} style={inputSt} />
               </div>
               <button onClick={() => { patch(i.id, (x) => ({ ...x, customer: ed.customer.trim() || x.customer, noInvoice: ed.noInvoice.trim() || x.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : x.nominal, tglJatuhTempo: ed.tglJatuhTempo || x.tglJatuhTempo })); setEditing(false); flash("Data tagihan diperbarui"); }}
@@ -2143,6 +2490,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
         </div>
       )}
     </div>
+    </>
   );
 }
 
@@ -2151,6 +2499,497 @@ function Mini({ label, value, accent }) {
     <div className="rounded-lg p-2" style={{ background: T.bg }}>
       <p className="text-[11px]" style={{ color: T.sub }}>{label}</p>
       <p className="whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO, color: accent || T.ink }}>{value}</p>
+    </div>
+  );
+}
+
+/* ================= HEAT MAP ANALYTICS ================= */
+/* Memuat Leaflet + plugin heat lewat CDN unpkg (tanpa npm install). */
+function useLeaflet() {
+  const [ready, setReady] = useState(() => !!(window.L && window.L.heatLayer));
+  useEffect(() => {
+    if (window.L && window.L.heatLayer) { setReady(true); return; }
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css"; link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    const loadScript = (src) => new Promise((res, rej) => {
+      const ex = document.querySelector(`script[src="${src}"]`);
+      if (ex) { if (ex.dataset.loaded) res(); else { ex.addEventListener("load", res); ex.addEventListener("error", rej); } return; }
+      const sc = document.createElement("script");
+      sc.src = src; sc.async = true;
+      sc.onload = () => { sc.dataset.loaded = "1"; res(); };
+      sc.onerror = rej;
+      document.body.appendChild(sc);
+    });
+    let alive = true;
+    loadScript("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js")
+      .then(() => loadScript("https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"))
+      .then(() => { if (alive) setReady(true); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return ready;
+}
+
+/* Perkiraan titik kota/kabupaten untuk debitur tanpa GPS & gagal geocode (fallback). */
+const CITY_COORDS = [
+  // Jabodetabek (urut spesifik dulu)
+  { k: ["jakarta selatan", "jaksel"], c: [-6.2615, 106.8106] },
+  { k: ["jakarta utara", "jakut"], c: [-6.1214, 106.7741] },
+  { k: ["jakarta barat", "jakbar"], c: [-6.1352, 106.7635] },
+  { k: ["jakarta timur", "jaktim"], c: [-6.2250, 106.9004] },
+  { k: ["jakarta pusat", "jakpus"], c: [-6.1862, 106.8344] },
+  { k: ["jakarta", "dki"], c: [-6.2088, 106.8456] },
+  { k: ["bogor"], c: [-6.5950, 106.8166] },
+  { k: ["depok"], c: [-6.4025, 106.7942] },
+  { k: ["bekasi"], c: [-6.2383, 106.9756] },
+  { k: ["tangerang selatan", "tangsel"], c: [-6.2887, 106.7179] },
+  { k: ["tangerang"], c: [-6.1781, 106.6300] },
+  { k: ["serang"], c: [-6.1200, 106.1503] },
+  { k: ["cilegon"], c: [-6.0173, 106.0540] },
+  // Jawa Barat
+  { k: ["bandung"], c: [-6.9175, 107.6191] },
+  { k: ["cimahi"], c: [-6.8722, 107.5425] },
+  { k: ["karawang"], c: [-6.3227, 107.3376] },
+  { k: ["purwakarta"], c: [-6.5569, 107.4431] },
+  { k: ["sukabumi"], c: [-6.9277, 106.9300] },
+  { k: ["cianjur"], c: [-6.8204, 107.1426] },
+  { k: ["garut"], c: [-7.2278, 107.9087] },
+  { k: ["tasikmalaya"], c: [-7.3274, 108.2207] },
+  { k: ["cirebon"], c: [-6.7320, 108.5523] },
+  { k: ["indramayu"], c: [-6.3373, 108.3200] },
+  { k: ["subang"], c: [-6.5719, 107.7589] },
+  // Jawa Tengah & DIY
+  { k: ["semarang"], c: [-6.9667, 110.4167] },
+  { k: ["solo", "surakarta"], c: [-7.5755, 110.8243] },
+  { k: ["yogyakarta", "jogja", "yogya"], c: [-7.7956, 110.3695] },
+  { k: ["sleman"], c: [-7.7169, 110.3550] },
+  { k: ["bantul"], c: [-7.8880, 110.3300] },
+  { k: ["magelang"], c: [-7.4706, 110.2178] },
+  { k: ["tegal"], c: [-6.8694, 109.1402] },
+  { k: ["pekalongan"], c: [-6.8886, 109.6753] },
+  { k: ["purwokerto", "banyumas"], c: [-7.4216, 109.2345] },
+  { k: ["kudus"], c: [-6.8048, 110.8405] },
+  // Jawa Timur
+  { k: ["surabaya"], c: [-7.2575, 112.7521] },
+  { k: ["gresik"], c: [-7.1561, 112.6531] },
+  { k: ["sidoarjo"], c: [-7.4478, 112.7183] },
+  { k: ["malang"], c: [-7.9666, 112.6326] },
+  { k: ["batu"], c: [-7.8672, 112.5239] },
+  { k: ["mojokerto"], c: [-7.4722, 112.4337] },
+  { k: ["pasuruan"], c: [-7.6453, 112.9075] },
+  { k: ["probolinggo"], c: [-7.7543, 113.2159] },
+  { k: ["jember"], c: [-8.1727, 113.7002] },
+  { k: ["banyuwangi"], c: [-8.2192, 114.3691] },
+  { k: ["kediri"], c: [-7.8480, 112.0178] },
+  { k: ["madiun"], c: [-7.6298, 111.5239] },
+  { k: ["blitar"], c: [-8.0954, 112.1609] },
+  // Bali, NTB, NTT
+  { k: ["denpasar", "bali"], c: [-8.6705, 115.2126] },
+  { k: ["badung"], c: [-8.5800, 115.1770] },
+  { k: ["mataram", "lombok"], c: [-8.5833, 116.1167] },
+  { k: ["kupang"], c: [-10.1772, 123.6070] },
+  // Sumatera
+  { k: ["medan"], c: [3.5952, 98.6722] },
+  { k: ["binjai"], c: [3.6001, 98.4854] },
+  { k: ["pekanbaru"], c: [0.5071, 101.4478] },
+  { k: ["batam"], c: [1.1301, 104.0529] },
+  { k: ["padang"], c: [-0.9471, 100.4172] },
+  { k: ["palembang"], c: [-2.9761, 104.7754] },
+  { k: ["jambi"], c: [-1.6101, 103.6131] },
+  { k: ["bengkulu"], c: [-3.8004, 102.2655] },
+  { k: ["bandar lampung", "lampung"], c: [-5.3971, 105.2668] },
+  { k: ["banda aceh", "aceh"], c: [5.5483, 95.3238] },
+  // Kalimantan
+  { k: ["pontianak"], c: [-0.0263, 109.3425] },
+  { k: ["banjarmasin"], c: [-3.3194, 114.5908] },
+  { k: ["balikpapan"], c: [-1.2379, 116.8529] },
+  { k: ["samarinda"], c: [-0.5022, 117.1536] },
+  { k: ["palangkaraya", "palangka raya"], c: [-2.2161, 113.9135] },
+  // Sulawesi & Timur
+  { k: ["makassar"], c: [-5.1477, 119.4327] },
+  { k: ["manado"], c: [1.4748, 124.8421] },
+  { k: ["palu"], c: [-0.8917, 119.8707] },
+  { k: ["kendari"], c: [-3.9985, 122.5127] },
+  { k: ["gorontalo"], c: [0.5435, 123.0568] },
+  { k: ["ambon"], c: [-3.6954, 128.1814] },
+  { k: ["jayapura"], c: [-2.5916, 140.6690] },
+];
+const HM_DEFAULT_CENTER = [-6.2088, 106.8456]; // Jakarta sbg pusat netral terakhir
+function hashStr(str) { let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0; return h; }
+function invCoord(i) {
+  const withLok = (i.aktivitas || []).filter((a) => a.lok && a.lok.lat != null);
+  if (withLok.length) { const l = withLok[withLok.length - 1].lok; return { lat: l.lat, lng: l.lng, real: true }; }
+  const al = (i.alamat || "").toLowerCase();
+  let base = HM_DEFAULT_CENTER;
+  for (const c of CITY_COORDS) { if (c.k.some((k) => al.includes(k))) { base = c.c; break; } }
+  const h = hashStr((i.id || "") + (i.noInvoice || ""));
+  const jx = (((h % 1000) / 1000) - 0.5) * 0.05;
+  const jy = ((((h >> 10) % 1000) / 1000) - 0.5) * 0.05;
+  return { lat: base[0] + jy, lng: base[1] + jx, real: false };
+}
+const escHtml = (t) => (t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/* Geocoding alamat -> koordinat akurat via Nominatim (OpenStreetMap, tanpa API key).
+   Hasil di-cache di localStorage agar tak mengulang permintaan (batas wajar ~1 req/detik). */
+const GEO_CACHE_KEY = "kolekta:geocache:v2";
+const loadGeoCache = () => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || "{}"); } catch { return {}; } };
+const saveGeoCache = (c) => { try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(c)); } catch {} };
+const normAddr = (a) => (a || "").trim().toLowerCase().replace(/\s+/g, " ");
+const hmSleep = (ms = 1100) => new Promise((r) => setTimeout(r, ms));
+
+/* Daftar kueri dari yang paling spesifik ke paling kasar, supaya alamat detail
+   yang gagal tetap jatuh ke tingkat kabupaten/kota, bukan ke pusat default. */
+function addrCandidates(addr) {
+  const out = [];
+  const push = (q) => { q = (q || "").trim(); if (q.length >= 4 && !out.includes(q)) out.push(q); };
+  push(addr);
+  // sebutan kabupaten/kota/kecamatan eksplisit (mis. "Kabupaten Bogor")
+  const m = addr.match(/\b(kabupaten|kota|kab\.?|kec\.?|kecamatan)\s+[a-z][a-z .'-]{2,30}/i);
+  if (m) push(m[0].replace(/\bkab\.?\b/i, "Kabupaten").replace(/\bkec\.?\b/i, "Kecamatan"));
+  // buang segmen paling depan (paling spesifik) bertahap
+  const parts = addr.split(",").map((s) => s.trim()).filter(Boolean);
+  for (let start = 1; start < parts.length; start++) push(parts.slice(start).join(", "));
+  return out.slice(0, 4);
+}
+async function geocodeOne(q) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=id&addressdetails=0&q=${encodeURIComponent(q)}`;
+  const r = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!r.ok) throw new Error("geocode " + r.status);
+  const j = await r.json();
+  if (!j || !j[0]) return null;
+  return { lat: +(+j[0].lat).toFixed(6), lng: +(+j[0].lon).toFixed(6) };
+}
+async function geocodeAddr(addr) {
+  const cands = addrCandidates(addr);
+  for (let n = 0; n < cands.length; n++) {
+    if (n > 0) await hmSleep(); // hormati batas ~1 req/detik antar percobaan
+    let hit = null;
+    try { hit = await geocodeOne(cands[n]); } catch {}
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/* Palet bucket DPD: Current hijau, lalu kuning -> oranye -> merah pekat (terlama). */
+const BUCKET_META = [
+  { key: "lancar", label: "Current", color: "#2F7D5B" },
+  { key: "1-30", label: "DPD 1-30", color: "#EAB308" },
+  { key: "31-60", label: "DPD 31-60", color: "#F59E0B" },
+  { key: "61-90", label: "DPD 61-90", color: "#E2552A" },
+  { key: "90+", label: "DPD 90+", color: "#8E1B12" },
+];
+const bucketColor = (key) => (BUCKET_META.find((b) => b.key === key) || BUCKET_META[0]).color;
+
+/* ----- 1. Peta Geografis ----- */
+function GeoHeat({ rows }) {
+  const ready = useLeaflet();
+  const elRef = useRef(null);
+  const mapRef = useRef(null);
+  const [geo, setGeo] = useState(loadGeoCache);
+  const [geoStatus, setGeoStatus] = useState("");
+  const geoRef = useRef(geo);
+  useEffect(() => { geoRef.current = geo; }, [geo]);
+
+  const active = useMemo(() => rows.filter((i) => i.status !== "lunas" && i.total > 0), [rows]);
+
+  /* Titik per debitur: 1) GPS kunjungan, 2) hasil geocode alamat, 3) perkiraan kota. */
+  const pts = useMemo(
+    () => active.map((i) => {
+      const lokVisit = (i.aktivitas || []).filter((a) => a.lok && a.lok.lat != null).pop();
+      if (lokVisit) return { i, lat: lokVisit.lok.lat, lng: lokVisit.lok.lng, src: "gps" };
+      const key = normAddr(i.alamat);
+      const g = key && geo[key];
+      if (g) return { i, lat: g.lat, lng: g.lng, src: "geocode" };
+      const c = invCoord(i);
+      return { i, lat: c.lat, lng: c.lng, src: "perkiraan" };
+    }),
+    [active, geo]
+  );
+  const srcN = (s) => pts.filter((p) => p.src === s).length;
+
+  /* Geocode alamat yang belum di-cache, berurutan dengan jeda agar sopan ke Nominatim. */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const seen = new Set(); const need = [];
+      active.forEach((i) => {
+        const hasGps = (i.aktivitas || []).some((a) => a.lok && a.lok.lat != null);
+        const key = normAddr(i.alamat);
+        if (hasGps || !key || key in geoRef.current || seen.has(key)) return;
+        seen.add(key); need.push(key);
+      });
+      if (!need.length) { setGeoStatus(""); return; }
+      for (let n = 0; n < need.length; n++) {
+        if (!alive) return;
+        setGeoStatus(`Mencari lokasi alamat… ${n + 1}/${need.length}`);
+        let res = null;
+        try { res = await geocodeAddr(need[n]); } catch {}
+        if (!alive) return;
+        setGeo((prev) => { const nx = { ...prev, [need[n]]: res }; saveGeoCache(nx); return nx; });
+        if (n < need.length - 1) await new Promise((r) => setTimeout(r, 1100));
+      }
+      if (alive) setGeoStatus("");
+    })();
+    return () => { alive = false; };
+  }, [active]);
+
+  useEffect(() => {
+    if (!ready || !elRef.current) return;
+    const L = window.L;
+    if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    const map = L.map(elRef.current, { scrollWheelZoom: false }).setView(HM_DEFAULT_CENTER, 6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap", maxZoom: 19,
+    }).addTo(map);
+    if (pts.length) {
+      const max = Math.max(...pts.map((p) => p.i.total));
+      const heat = pts.map((p) => [p.lat, p.lng, Math.max(0.15, p.i.total / max)]);
+      L.heatLayer(heat, { radius: 28, blur: 20, maxZoom: 12, gradient: { 0.0: T.green, 0.5: T.amber, 1.0: T.red } }).addTo(map);
+      pts.forEach((p) => {
+        const col = bucketColor(p.i.bucket); // warna titik ikut bucket DPD
+        const m = L.circleMarker([p.lat, p.lng], { radius: 7, color: "#fff", weight: 1.5, fillColor: col, fillOpacity: 0.95 }).addTo(map);
+        const srcLbl = p.src === "gps" ? "GPS kunjungan" : p.src === "geocode" ? "geocode alamat" : "perkiraan kota";
+        m.bindPopup(
+          `<div style="font-family:${SANS};min-width:170px">` +
+          `<div style="font-weight:700;color:${T.ink}">${escHtml(p.i.customer)}</div>` +
+          `<div style="font-size:12px;color:${T.sub};margin:2px 0">${escHtml(p.i.noInvoice)}${p.i.assignedTo ? " &middot; " + escHtml(p.i.assignedTo) : ""}</div>` +
+          `<div style="font-size:12px;color:${T.ink}">DPD: <b>${p.i.daysOverdue} hari</b> &middot; ${p.i.kol.short}</div>` +
+          `<div style="font-size:13px;font-weight:700;color:${col};margin-top:2px">Tunggakan: ${rp(p.i.total)}</div>` +
+          `<div style="font-size:10px;color:${T.sub};margin-top:3px">Lokasi: ${srcLbl}</div>` +
+          `</div>`
+        );
+      });
+      try {
+        const grp = L.featureGroup(pts.map((p) => L.marker([p.lat, p.lng])));
+        map.fitBounds(grp.getBounds().pad(0.25));
+      } catch {}
+    }
+    mapRef.current = map;
+    const t = setTimeout(() => map.invalidateSize(), 250);
+    return () => { clearTimeout(t); if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+  }, [ready, pts]);
+
+  return (
+    <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <h2 className="mb-1 text-sm font-semibold">Sebaran Geografis Tunggakan</h2>
+      <p className="mb-3 text-xs" style={{ color: T.sub }}>
+        Warna titik mengikuti umur tunggakan (bucket DPD); pekatnya area mengikuti besar tunggakan. Ketuk titik untuk detail debitur.
+      </p>
+      <div ref={elRef} className="overflow-hidden rounded-xl" style={{ height: 420, width: "100%", background: T.bg, border: `1px solid ${T.line}` }} />
+      {!ready && <p className="mt-2 text-xs" style={{ color: T.sub }}>Memuat peta…</p>}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" style={{ color: T.sub }}>
+        {BUCKET_META.map((b) => (
+          <span key={b.key} className="inline-flex items-center gap-1">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: b.color, border: "1px solid #fff", boxShadow: `0 0 0 1px ${T.line}` }} />{b.label}
+          </span>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px]" style={{ color: T.sub }}>
+        {geoStatus ? geoStatus : `${pts.length} debitur dipetakan · ${srcN("gps")} GPS kunjungan, ${srcN("geocode")} dari alamat, ${srcN("perkiraan")} perkiraan kota.`}
+      </p>
+    </section>
+  );
+}
+
+/* ----- 2. Kalender (gaya GitHub) ----- */
+function CalHeat({ rows, onOpen }) {
+  const [sel, setSel] = useState(null);
+  const { weeks, max, byDay } = useMemo(() => {
+    const byDay = {};
+    rows.forEach((i) => {
+      if (i.status === "lunas") return;
+      const d = i.tglJatuhTempo; if (!d) return;
+      if (!byDay[d]) byDay[d] = { total: 0, count: 0, list: [] };
+      byDay[d].total += i.total; byDay[d].count++; byDay[d].list.push(i);
+    });
+    const end = today0();
+    const start = new Date(end); start.setDate(start.getDate() - 364);
+    start.setDate(start.getDate() - start.getDay()); // mundur ke Minggu
+    const weeks = []; const cur = new Date(start);
+    while (cur <= end) {
+      const week = [];
+      for (let dn = 0; dn < 7; dn++) {
+        const iso = cur.toISOString().slice(0, 10);
+        week.push({ iso, future: cur > end, month: cur.getMonth(), day: cur.getDate() });
+        cur.setDate(cur.getDate() + 1);
+      }
+      weeks.push(week);
+    }
+    const max = Math.max(1, ...Object.values(byDay).map((v) => v.total));
+    return { weeks, max, byDay };
+  }, [rows]);
+
+  const cellColor = (iso, future) => {
+    if (future) return "transparent";
+    const v = byDay[iso]; if (!v || !v.total) return T.bg;
+    const r = v.total / max;
+    if (r < 0.25) return "#FDE68A"; // kuning muda
+    if (r < 0.5) return "#FBBF24";  // kuning
+    if (r < 0.75) return "#F97316"; // oranye
+    return T.red;                    // merah
+  };
+
+  const selData = sel ? byDay[sel] : null;
+  return (
+    <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <h2 className="mb-1 text-sm font-semibold">Kalender Jatuh Tempo — 12 Bulan Terakhir</h2>
+      <p className="mb-3 text-xs" style={{ color: T.sub }}>Tiap kotak = satu hari. Makin pekat warnanya, makin besar tunggakan jatuh tempo hari itu. Ketuk untuk lihat debitur.</p>
+      <div className="overflow-x-auto pb-1">
+        <div className="flex gap-[3px]" style={{ minWidth: "min-content" }}>
+          {weeks.map((week, wi) => (
+            <div key={wi} className="flex flex-col gap-[3px]">
+              {week.map((d) => {
+                const v = byDay[d.iso];
+                const isSel = sel === d.iso;
+                return (
+                  <button key={d.iso} title={d.future ? "" : `${fmtTgl(d.iso)}${v ? ` — ${rp(v.total)} (${v.count})` : " — tidak ada"}`}
+                    disabled={d.future || !v}
+                    onClick={() => setSel(isSel ? null : d.iso)}
+                    className="rounded-[2px]"
+                    style={{ width: 13, height: 13, background: cellColor(d.iso, d.future), border: isSel ? `2px solid ${T.brand}` : `1px solid ${d.future ? "transparent" : T.line}`, cursor: d.future || !v ? "default" : "pointer" }} />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: T.sub }}>
+        <span>Rendah</span>
+        {[T.bg, "#FDE68A", "#FBBF24", "#F97316", T.red].map((c, n) => (
+          <span key={n} className="rounded-[2px]" style={{ width: 13, height: 13, background: c, border: `1px solid ${T.line}`, display: "inline-block" }} />
+        ))}
+        <span>Tinggi</span>
+      </div>
+      {selData && (
+        <div className="mt-3 rounded-lg p-3" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold">{fmtTgl(sel)}</p>
+            <p className="text-xs font-bold" style={{ fontFamily: MONO, color: T.red }}>{rp(selData.total)} · {selData.count} debitur</p>
+          </div>
+          <div className="space-y-1">
+            {selData.list.map((i) => (
+              <button key={i.id} onClick={() => onOpen(i.id)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-black/5">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: T[i.kol.tone] }} />
+                <span className="min-w-0 flex-1 truncate text-xs">{i.customer}</span>
+                <span className="shrink-0 text-[11px]" style={{ color: T.sub }}>{i.daysOverdue > 0 ? `telat ${i.daysOverdue} hr` : "belum JT"}</span>
+                <span className="shrink-0 text-xs font-bold" style={{ fontFamily: MONO }}>{rpc(i.total)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ----- 3. Matriks Bucket × Petugas ----- */
+function MatrixHeat({ rows, s }) {
+  const { officers, colMax, colTot } = useMemo(() => {
+    const map = {};
+    const ensure = (n) => { if (!map[n]) { map[n] = {}; BUCKET_META.forEach((b) => (map[n][b.key] = { total: 0, count: 0 })); } };
+    (s?.petugas || []).forEach(ensure);
+    rows.forEach((i) => {
+      if (i.status === "lunas") return;
+      const n = i.assignedTo || "Belum ditugaskan";
+      ensure(n);
+      if (map[n][i.bucket]) { map[n][i.bucket].total += i.total; map[n][i.bucket].count++; }
+    });
+    const officers = Object.keys(map).map((n) => ({ nama: n, cells: map[n] }));
+    officers.sort((a, b) => {
+      const sum = (o) => BUCKET_META.reduce((x, b) => x + o.cells[b.key].total, 0);
+      return sum(b) - sum(a);
+    });
+    const colMax = {}; const colTot = {};
+    BUCKET_META.forEach((b) => {
+      colMax[b.key] = Math.max(1, ...officers.map((o) => o.cells[b.key].total));
+      colTot[b.key] = officers.reduce((a, o) => a + o.cells[b.key].total, 0);
+    });
+    return { officers, colMax, colTot };
+  }, [rows, s]);
+
+  /* Tiap bucket punya warna dasar sendiri; pekatnya mengikuti bobot dalam kolom itu. */
+  const cellBg = (total, key) => {
+    if (!total) return T.bg;
+    const a = 0.18 + 0.78 * Math.min(1, total / colMax[key]);
+    const h = Math.round(a * 255).toString(16).padStart(2, "0");
+    return bucketColor(key) + h;
+  };
+
+  return (
+    <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <h2 className="mb-1 text-sm font-semibold">Matriks Portofolio — Petugas × Bucket DPD</h2>
+      <p className="mb-3 text-xs" style={{ color: T.sub }}>Tiap kolom DPD punya gradasi warna sendiri — <span style={{ color: BUCKET_META[0].color, fontWeight: 600 }}>Current hijau</span>, makin lama makin <span style={{ color: BUCKET_META[4].color, fontWeight: 600 }}>merah pekat</span>. Pekatnya sel mengikuti besar outstanding.</p>
+      {officers.length === 0 ? (
+        <p className="text-xs" style={{ color: T.sub }}>Belum ada data petugas / tagihan aktif.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-xs" style={{ minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-10 p-2 text-left font-semibold" style={{ background: T.surface, color: T.sub }}>Petugas</th>
+                {BUCKET_META.map((b) => (
+                  <th key={b.key} className="p-2 text-center font-semibold" style={{ color: "#fff", background: b.color, borderRight: `2px solid ${T.surface}` }}>{b.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {officers.map((o) => (
+                <tr key={o.nama}>
+                  <td className="sticky left-0 z-10 max-w-[120px] truncate p-2 font-medium" style={{ background: T.surface, color: T.ink }}>{o.nama}</td>
+                  {BUCKET_META.map((b) => {
+                    const c = o.cells[b.key];
+                    const strong = c.total / colMax[b.key] > 0.45;
+                    return (
+                      <td key={b.key} className="p-1.5 text-center" style={{ background: cellBg(c.total, b.key), color: strong ? "#fff" : T.ink, border: `1px solid ${T.surface}` }}>
+                        {c.count > 0 ? (
+                          <>
+                            <div className="font-bold" style={{ fontFamily: MONO }}>{rpc(c.total)}</div>
+                            <div style={{ fontSize: 10, opacity: 0.85 }}>{c.count} akun</div>
+                          </>
+                        ) : (
+                          <span style={{ color: T.sub }}>—</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr>
+                <td className="sticky left-0 z-10 p-2 font-semibold" style={{ background: T.surface, color: T.sub }}>Total</td>
+                {BUCKET_META.map((b) => (
+                  <td key={b.key} className="p-2 text-center font-bold" style={{ fontFamily: MONO, color: T.ink, borderTop: `2px solid ${T.line}` }}>{colTot[b.key] ? rpc(colTot[b.key]) : "—"}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HeatMapView({ rows, allRows, s, onOpen }) {
+  const [view, setView] = useState("geo");
+  const VIEWS = [["geo", "Geografis", MapPin], ["kalender", "Kalender", CalendarDays], ["matriks", "Matriks", Grid3x3]];
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="grid grid-cols-3 gap-1 rounded-xl p-1" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        {VIEWS.map(([k, lbl, Ic]) => (
+          <button key={k} onClick={() => setView(k)}
+            className="kpress flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-colors sm:text-sm"
+            style={view === k ? { background: T.brand, color: "#fff" } : { color: T.sub }}>
+            <Ic size={15} /> {lbl}
+          </button>
+        ))}
+      </div>
+      {view === "geo" && <div className="sub-fade"><GeoHeat rows={rows} /></div>}
+      {view === "kalender" && <div className="sub-fade"><CalHeat rows={rows} onOpen={onOpen} /></div>}
+      {view === "matriks" && <div className="sub-fade"><MatrixHeat rows={allRows} s={s} /></div>}
     </div>
   );
 }
@@ -2244,7 +3083,7 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
                 <div key={nm} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium" style={{ color: T.ink }}>{nm}</span>
                   <span className="text-[11px]" style={{ color: T.sub }}>Target</span>
-                  <input value={(s.targets || {})[nm] ? String((s.targets || {})[nm]) : ""} onChange={(e) => upd("targets", { ...(s.targets || {}), [nm]: Number((e.target.value + "").replace(/[^0-9]/g, "")) || 0 })}
+                  <input value={grpID((s.targets || {})[nm] || "")} onChange={(e) => upd("targets", { ...(s.targets || {}), [nm]: Number(onlyDigits(e.target.value)) || 0 })}
                     inputMode="numeric" placeholder="0" className="w-28 rounded-lg px-2 py-1 text-right text-xs" style={{ ...inputSt, fontFamily: MONO }} />
                   <button onClick={() => { upd("petugas", s.petugas.filter((x) => x !== nm)); const t = { ...(s.targets || {}) }; delete t[nm]; upd("targets", t); }}><X size={14} style={{ color: T.sub }} /></button>
                 </div>
