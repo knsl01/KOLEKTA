@@ -481,11 +481,16 @@ function printDoc(label, text, sig) {
   const w = window.open("", "_blank");
   if (!w) return false;
   const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // Tempatkan tanda tangan tepat di atas garis nama lewat token [[SIGN]]
-  const sigBox = sig
-    ? `<span class="sig"><img src="${sig}" alt="tanda tangan"/></span>`
+  // Tempatkan tanda tangan tepat di atas garis nama lewat token [[SIGN]] / [[SIGN1]] / [[SIGN2]].
+  // sig boleh berupa string (satu ttd) atau objek { SIGN1, SIGN2 } (dokumen dua pihak, mis. MOM).
+  const sigBox = (url) => url
+    ? `<span class="sig"><img src="${url}" alt="tanda tangan"/></span>`
     : `<span class="sigline"></span>`;
-  const body = esc.replace(/\[\[SIGN\]\]/g, sigBox);
+  const sigs = sig && typeof sig === "object" ? sig : { SIGN: sig };
+  const body = esc
+    .replace(/\[\[SIGN1\]\]/g, sigBox(sigs.SIGN1))
+    .replace(/\[\[SIGN2\]\]/g, sigBox(sigs.SIGN2))
+    .replace(/\[\[SIGN\]\]/g, sigBox(sigs.SIGN));
   w.document.write(
     `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
     `<style>@page{size:A4;margin:2.5cm}` +
@@ -567,6 +572,46 @@ Pihak Kedua (yang menerima),
 
 (__________________________)
 ${jabatan}`;
+}
+function momKunjungan(i, s, f) {
+  const { p, jabatan, ttdKota } = fieldBase(s);
+  const petugas = (s.petugasAktif && s.petugasAktif.trim()) || jabatan;
+  return `MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN
+
+Hari / Tanggal : ${ttdKota}
+Perihal        : Kunjungan penagihan & pembahasan penyelesaian kewajiban
+
+A. PARA PIHAK
+1. Pihak Penagih : ${petugas} — ${p}
+2. Pihak Debitur : ${i.customer}${i.pic ? ` (PIC: ${i.pic})` : ""}
+   Alamat        : ${i.alamat || "-"}
+
+B. DATA KEWAJIBAN
+No. Tagihan     : ${i.noInvoice}
+Total Kewajiban : ${rp(i.total)}
+Jatuh Tempo     : ${fmtTgl(i.tglJatuhTempo)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hari)` : ""}
+
+C. HASIL PEMBAHASAN
+${f.pembahasan || "-"}
+
+D. KESEPAKATAN / TINDAK LANJUT
+${f.kesepakatan || "-"}${f.tgl ? `\n\nTarget penyelesaian : ${fmtTgl(f.tgl)}` : ""}
+
+Demikian berita acara kunjungan ini dibuat dengan sebenarnya dan disetujui oleh kedua belah pihak tanpa adanya paksaan, untuk dipergunakan sebagaimana mestinya.
+
+${ttdKota}
+
+Pihak Debitur,
+
+[[SIGN1]]
+${i.customer}
+
+
+Pihak Penagih,
+
+[[SIGN2]]
+${petugas}
+${p}`;
 }
 
 function printLetter(label, text) {
@@ -1172,11 +1217,15 @@ AKTIVITAS HARI INI
 .sub-fade{animation:kolektaFade .2s cubic-bezier(.22,.61,.36,1)}
 .kpress{transition:transform .09s ease}
 .kpress:active{transform:scale(.96)}
+@keyframes kolektaExpand{from{opacity:0;transform:translateY(-8px) scaleY(.97)}to{opacity:1;transform:none}}
+.filter-anim{animation:kolektaExpand .26s cubic-bezier(.22,.61,.36,1);transform-origin:top}
+.chip{transition:background-color .18s ease,color .18s ease,border-color .18s ease,transform .09s ease}
+.chip:active{transform:scale(.94)}
 @keyframes kolektaOv{from{opacity:0}to{opacity:1}}
 @keyframes kolektaSlide{from{transform:translateX(-100%)}to{transform:none}}
 .drawer-ov{animation:kolektaOv .2s ease}
 .drawer-pn{animation:kolektaSlide .26s cubic-bezier(.2,.7,.2,1)}
-@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade{animation:none}.kpress:active{transform:none}}
+@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim{animation:none}.kpress:active,.chip:active{transform:none}}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
@@ -1396,8 +1445,8 @@ AKTIVITAS HARI INI
                   className="w-full bg-transparent py-2.5 text-sm outline-none" />
               </div>
               <button onClick={() => setShowFilter((v) => !v)}
-                className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
-                style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} /></button>
+                className="chip flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
+                style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} style={{ transition: "transform .2s ease", transform: showFilter ? "rotate(90deg)" : "none" }} /></button>
               <button onClick={() => fileRef.current?.click()}
                 className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><Upload size={16} /><span className="hidden sm:inline">Impor</span></button>
@@ -1410,11 +1459,11 @@ AKTIVITAS HARI INI
             </div>
 
             {showFilter && (
-              <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <div className="filter-anim rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                 <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Status</p>
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {[["all", "Semua"], ...STATUS_ORDER.map((st) => [st, stLabel(st)])].map(([v, lbl]) => (
-                    <button key={v} onClick={() => setFStatus(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                    <button key={v} onClick={() => setFStatus(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                       style={fStatus === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                   ))}
                 </div>
@@ -1423,7 +1472,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Petugas</p>
                     <div className="mb-2 flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["_none", "Belum ditugaskan"], ...s.petugas.map((nm) => [nm, nm])].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFPetugas(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFPetugas(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fPetugas === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1434,7 +1483,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Tipe</p>
                     <div className="flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["perusahaan", "PT/CV"], ["perorangan", "Perorangan"]].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFTipe(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFTipe(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fTipe === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1443,7 +1492,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Jaminan</p>
                     <div className="flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["ada", "Ada"], ["tanpa", "Tanpa"]].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFJaminan(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFJaminan(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fJaminan === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1953,8 +2002,9 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [showDoc, setShowDoc] = useState(false);
   const [sub, setSub] = useState("tagih");
   const [docType, setDocType] = useState("pernyataan");
-  const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "" });
+  const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   const [dsig, setDsig] = useState(null);
+  const [dsig2, setDsig2] = useState(null);
   const [tindakLanjut, setTindakLanjut] = useState(i.tindakLanjut || "");
   const [lunasAsk, setLunasAsk] = useState(false);
   const [lunasCode, setLunasCode] = useState("");
@@ -2032,20 +2082,27 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     catch { flash("Lokasi tidak tersedia / izin ditolak"); }
     setBusyLoc(false);
   };
+  const docMeta = (jenis) =>
+    jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
+    : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
+    : { gen: suratPernyataan, label: "Surat Pernyataan" };
+  const stripSign = (t) => (t || "").replace(/\[\[SIGN\d?\]\]/g, "(__________________________)");
   const createDoc = () => {
-    const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi };
-    const text = docType === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
-    const label = docType === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    const ok = printDoc(label, text, dsig);
-    patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi }, ...(x.dokumen || [])] }));
-    if (!ok) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
-    setShowDoc(false); setDsig(null); setDForm({ jumlah: "", tgl: "", kondisi: "" });
+    const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi, pembahasan: dForm.pembahasan, kesepakatan: dForm.kesepakatan };
+    const { gen, label } = docMeta(docType);
+    const text = gen(i, s, f);
+    const sigArg = docType === "mom" ? { SIGN1: dsig, SIGN2: dsig2 } : dsig;
+    const ok = printDoc(label, text, sigArg);
+    patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, sig2: dsig2 || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi, pembahasan: f.pembahasan, kesepakatan: f.kesepakatan }, ...(x.dokumen || [])] }));
+    if (!ok) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
+    setShowDoc(false); setDsig(null); setDsig2(null); setDForm({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   };
   const reprintDoc = (dk) => {
-    const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi };
-    const text = dk.jenis === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
-    const label = dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    if (!printDoc(label, text, dk.sig)) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); }
+    const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi, pembahasan: dk.pembahasan, kesepakatan: dk.kesepakatan };
+    const { gen, label } = docMeta(dk.jenis);
+    const text = gen(i, s, f);
+    const sigArg = dk.jenis === "mom" ? { SIGN1: dk.sig, SIGN2: dk.sig2 } : dk.sig;
+    if (!printDoc(label, text, sigArg)) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); }
   };
 
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
@@ -2223,20 +2280,36 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               </button>
               {showDoc && (
                 <div className="mt-2 rounded-lg p-2.5" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                  <div className="mb-2 flex gap-1.5">
-                    <button onClick={() => setDocType("pernyataan")} className="flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
-                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    <button onClick={() => setDocType("pernyataan")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
+                    <button onClick={() => setDocType("mom")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "mom" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>MOM / Visit Report</button>
+                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
                   </div>
                   {docType === "pernyataan" ? (
                     <div className="grid grid-cols-2 gap-2">
                       <input value={grpID(dForm.jumlah)} onChange={(e) => setDForm({ ...dForm, jumlah: onlyDigits(e.target.value) })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
                       <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
                     </div>
+                  ) : docType === "mom" ? (
+                    <div className="space-y-2 sub-fade">
+                      <textarea value={dForm.pembahasan} onChange={(e) => setDForm({ ...dForm, pembahasan: e.target.value })} rows={2} placeholder="Hasil pembahasan / poin pertemuan…" className={inputCls} style={inputSt} />
+                      <textarea value={dForm.kesepakatan} onChange={(e) => setDForm({ ...dForm, kesepakatan: e.target.value })} rows={2} placeholder="Kesepakatan / tindak lanjut…" className={inputCls} style={inputSt} />
+                      <div>
+                        <p className="mb-1 text-[11px] font-medium" style={{ color: T.sub }}>Target penyelesaian (opsional)</p>
+                        <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
+                      </div>
+                    </div>
                   ) : (
                     <input value={dForm.kondisi} onChange={(e) => setDForm({ ...dForm, kondisi: e.target.value })} placeholder="Kondisi / kelengkapan unit" className={inputCls} style={inputSt} />
                   )}
-                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan debitur</p>
+                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan {docType === "mom" ? "debitur / customer" : "debitur"}</p>
                   <SignaturePad onChange={setDsig} />
+                  {docType === "mom" && (
+                    <>
+                      <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan petugas / atasan</p>
+                      <SignaturePad onChange={setDsig2} />
+                    </>
+                  )}
                   <button onClick={createDoc} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Buat &amp; cetak (PDF)</button>
                 </div>
               )}
@@ -2252,8 +2325,9 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                     {i.dokumen.map((dk, idx) => (
                       <div key={idx} className="flex items-center gap-2 rounded-lg p-2 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         {dk.sig && <img src={dk.sig} alt="ttd" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
+                        {dk.jenis === "mom" && dk.sig2 && <img src={dk.sig2} alt="ttd petugas" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold" style={{ color: T.ink }}>{dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan"}</p>
+                          <p className="font-semibold" style={{ color: T.ink }}>{dk.jenis === "mom" ? "MOM / Visit Report" : dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan"}</p>
                           <p className="text-[11px]" style={{ color: T.sub }}>{fmtWaktu(dk.waktu)}</p>
                         </div>
                         <button onClick={() => reprintDoc(dk)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-white" style={{ background: T.brand2 }}>Cetak ulang</button>
