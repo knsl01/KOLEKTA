@@ -509,28 +509,38 @@ ${jabatan}`;
 // Format surat resmi: A4, Times New Roman 12pt, margin atas/kiri 4cm — kanan/bawah 3cm,
 // spasi 1,5, paragraf justify dengan indent baris pertama 1cm & jarak antar-paragraf 6pt.
 const DOC_STYLE = `@page{size:A4;margin:4cm 3cm 3cm 4cm}
+html,body{width:100%}
 body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.5;color:#111;margin:0}
-p{margin:0}
-.title{text-align:center;font-weight:bold;margin:0 0 10pt;line-height:1.3;text-transform:uppercase}
-.subhead{font-weight:bold;margin:8pt 0 2pt}
+p{margin:0;orphans:2;widows:2}
+.title{text-align:center;font-weight:bold;margin:0 0 10pt;line-height:1.3;text-transform:uppercase;page-break-after:avoid;break-after:avoid}
+.subhead{font-weight:bold;margin:8pt 0 2pt;page-break-after:avoid;break-after:avoid}
 .body{text-align:justify;text-indent:1cm;margin:0 0 6pt}
 .line{margin:0 0 1pt}
 .listline{margin:0 0 1pt;padding-left:1cm;text-indent:-1cm}
-.gap{height:8pt}
-table.kv{border-collapse:collapse;margin:2pt 0 6pt}
+.gap{height:6pt}
+table.kv{border-collapse:collapse;margin:2pt 0 6pt;page-break-inside:avoid;break-inside:avoid}
 table.kv td{vertical-align:top;padding:0 0 1pt}
 table.kv td.k{white-space:nowrap;padding-right:8px}
 table.kv td.c{padding-right:8px}
-.sigblock{display:inline-block;margin:6pt 0 0;text-align:center}
+.sigblock{display:inline-block;margin:8pt 0 0;text-align:center;page-break-inside:avoid;break-inside:avoid}
 .sigblock .ttd-img{height:60px;display:block;margin:0 auto -1px}
 .sigblock .ttd-space{height:52px}
 .sigblock .ttd-rule{width:5cm;border-bottom:1px solid #111;margin:0 auto}
-.sigblock .ttd-name{margin-top:2pt;font-weight:600;line-height:1.3}`;
+.sigblock .ttd-name{margin-top:2pt;font-weight:600;line-height:1.3}
+table.siggrid{width:100%;border-collapse:collapse;margin-top:12pt;page-break-inside:avoid;break-inside:avoid}
+table.siggrid td{width:50%;vertical-align:top;text-align:center;padding:0 8pt}
+table.siggrid .sgcap{margin-bottom:2pt}
+table.siggrid .sgimg{height:60px;display:block;margin:0 auto -1px}
+table.siggrid .sgspace{height:54px}
+table.siggrid .sgrule{width:5cm;border-bottom:1px solid #111;margin:0 auto}
+table.siggrid .sgname{margin-top:2pt;font-weight:600;line-height:1.3}`;
 function printViaIframe(label, bodyHtml) {
   try {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
-    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;";
+    // Beri iframe lebar A4 nyata (di luar layar) agar tata letak cetak benar —
+    // iframe 0px membuat teks membungkus per beberapa huruf & terpotong antar-halaman.
+    iframe.style.cssText = "position:fixed;left:-9999px;top:0;width:794px;height:1123px;border:0;opacity:0;";
     document.body.appendChild(iframe);
     const cw = iframe.contentWindow;
     let removed = false;
@@ -589,6 +599,29 @@ function renderDocHtml(text, sigMap = {}) {
     if (/^\(?_{5,}\)?$/.test(t)) return { img: null };
     return null;
   };
+  // Blok tanda tangan dua pihak (kiri & kanan). Baris: "tipe|kiri|kanan", tipe = cap|sig|name.
+  const renderSigGrid = (rows) => {
+    const cols = [{ cap: "", tok: "", names: [] }, { cap: "", tok: "", names: [] }];
+    for (const r of rows) {
+      const parts = r.split("|");
+      const type = (parts[0] || "").trim();
+      [parts[1] || "", parts[2] || ""].forEach((c, idx) => {
+        const v = c.trim();
+        if (type === "cap") cols[idx].cap = v;
+        else if (type === "sig") cols[idx].tok = v;
+        else if (type === "name" && v) cols[idx].names.push(v);
+      });
+    }
+    const cell = (col) => {
+      const sig = col.tok && sigMap[col.tok]
+        ? `<img class="sgimg" src="${sigMap[col.tok]}" alt="tanda tangan"/>`
+        : `<div class="sgspace"></div>`;
+      const cap = col.cap ? `<div class="sgcap">${esc(col.cap)}</div>` : "";
+      const names = col.names.map((n) => `<div class="sgname">${esc(n)}</div>`).join("");
+      return `<td>${cap}${sig}<div class="sgrule"></div>${names}</td>`;
+    };
+    return `<table class="siggrid"><tr>${cell(cols[0])}${cell(cols[1])}</tr></table>`;
+  };
   const textLine = (t) => {
     const allCaps = /[A-Z]/.test(t) && !/[a-z]/.test(t);
     if (allCaps && t.length <= 70 && !/^(PT|CV|UD)\b/.test(t)) {
@@ -600,8 +633,18 @@ function renderDocHtml(text, sigMap = {}) {
     return `<p class="body">${esc(t)}</p>`;
   };
 
-  for (const raw of lines) {
+  for (let idx = 0; idx < lines.length; idx++) {
+    const raw = lines[idx];
     const ln = raw.replace(/\s+$/, "");
+    if (ln.trim() === "[[SIGGRID]]") {
+      flushFields(); flushSig();
+      const rows = [];
+      while (idx + 1 < lines.length && lines[idx + 1].trim() !== "[[/SIGGRID]]") { rows.push(lines[++idx]); }
+      idx++; // lewati penanda penutup
+      if (blankPending) { gap(); blankPending = false; }
+      out.push(renderSigGrid(rows));
+      continue;
+    }
     if (ln.trim() === "") { flushFields(); flushSig(); blankPending = true; continue; }
     const anc = sigAnchor(ln);
     if (anc) {
@@ -684,18 +727,14 @@ Sehubungan dengan kewajiban atas ${i.noInvoice} sebesar ${rp(i.total)} yang belu
 
 Demikian berita acara ini dibuat dengan sebenarnya untuk dipergunakan sebagaimana mestinya.
 
-Pihak Pertama (yang menyerahkan),
+${ttdKota}
 
-[[SIGN]]
-${i.customer}
-
-
-Pihak Kedua (yang menerima),
-
-
-
-(__________________________)
-${jabatan}`;
+[[SIGGRID]]
+cap|Pihak Pertama (yang menyerahkan),|Pihak Kedua (yang menerima),
+sig|SIGN1|SIGN2
+name|${i.customer}|${p}
+name||${jabatan}
+[[/SIGGRID]]`;
 }
 function momKunjungan(i, s, f) {
   const { p, jabatan, ttdKota } = fieldBase(s);
@@ -728,17 +767,12 @@ Demikian berita acara kunjungan ini dibuat dengan sebenarnya dan disetujui oleh 
 
 ${ttdKota}
 
-Pihak Debitur,
-
-[[SIGN1]]
-${i.customer}
-
-
-Pihak Penagih,
-
-[[SIGN2]]
-${petugas}
-${p}`;
+[[SIGGRID]]
+cap|Pihak Debitur,|Pihak Penagih,
+sig|SIGN1|SIGN2
+name|${i.customer}|${petugas}
+name||${p}
+[[/SIGGRID]]`;
 }
 
 function printLetter(label, text) {
@@ -2205,12 +2239,21 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
     : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
     : { gen: suratPernyataan, label: "Surat Pernyataan" };
-  const stripSign = (t) => (t || "").replace(/\[\[SIGN\d?\]\]/g, "(__________________________)");
+  const stripSign = (t) => (t || "")
+    .replace(/\[\[SIGN\d?\]\]/g, "(__________________________)")
+    .replace(/\[\[\/?SIGGRID\]\]\n?/g, "")
+    .replace(/^cap\|(.*)\|(.*)$/gm, "$1\t\t$2")
+    .replace(/^sig\|.*$/gm, "")
+    .replace(/^name\|(.*)\|(.*)$/gm, "$1\t\t$2");
+  const sigMapFor = (jenis, a, b) =>
+    jenis === "mom" ? { SIGN1: a, SIGN2: b }
+    : jenis === "bast" ? { SIGN1: a }
+    : { SIGN: a };
   const createDoc = () => {
     const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi, pembahasan: dForm.pembahasan, kesepakatan: dForm.kesepakatan };
     const { gen, label } = docMeta(docType);
     const text = gen(i, s, f);
-    const sigArg = docType === "mom" ? { SIGN1: dsig, SIGN2: dsig2 } : dsig;
+    const sigArg = sigMapFor(docType, dsig, dsig2);
     const ok = printDoc(label, text, sigArg);
     patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, sig2: dsig2 || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi, pembahasan: f.pembahasan, kesepakatan: f.kesepakatan }, ...(x.dokumen || [])] }));
     if (!ok) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
@@ -2220,7 +2263,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi, pembahasan: dk.pembahasan, kesepakatan: dk.kesepakatan };
     const { gen, label } = docMeta(dk.jenis);
     const text = gen(i, s, f);
-    const sigArg = dk.jenis === "mom" ? { SIGN1: dk.sig, SIGN2: dk.sig2 } : dk.sig;
+    const sigArg = sigMapFor(dk.jenis, dk.sig, dk.sig2);
     if (!printDoc(label, text, sigArg)) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); }
   };
 
