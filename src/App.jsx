@@ -282,8 +282,8 @@ function debtorBlock(i) {
   const alamat = i.alamat?.trim();
   const pic = i.pic?.trim();
   const baris = alamat ? alamat + "\n" : "";
-  if (isPerorangan(i)) return `Yth. Sdr./Sdri. ${i.customer}\n${baris}di Tempat`;
-  return `Yth. Manajemen ${i.customer}\n${pic ? "u.p. " + pic + "\n" : ""}${baris}di Tempat`;
+  if (isPerorangan(i)) return `Kepada Yth.\nSdr./Sdri. ${i.customer}\n${baris}di Tempat`;
+  return `Kepada Yth.\nManajemen ${i.customer}\n${pic ? "u.p. Bapak/Ibu " + pic + "\n" : ""}${baris}di Tempat`;
 }
 function sapaanWA(i) {
   const pic = i.pic?.trim();
@@ -333,160 +333,177 @@ Mohon pembayaran diselesaikan paling lambat 3 (tiga) hari kerja ke depan untuk m
 Terima kasih.
 — ${p}`;
 
+  const rincian = `No. Invoice/Tagihan : ${i.noInvoice}
+Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
+Lama Keterlambatan  : ${i.daysOverdue} hari
+Pokok / AR          : ${rp(pokok)}${barisBayar}
+Denda Keterlambatan : ${rp(i.denda)}
+Total Kewajiban     : ${rp(i.total)}`;
+
   const sp = `SURAT PERINGATAN
-Nomor: ${noSurat("SP")}
-Perihal: Peringatan Keterlambatan Pembayaran
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("SP")}
+Lampiran : -
+Hal      : Peringatan Keterlambatan Pembayaran
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Berdasarkan catatan kami, ${sebutan} memiliki kewajiban pembayaran yang telah melewati tanggal jatuh tempo, dengan rincian sebagai berikut:
+Sehubungan dengan kedudukan kami selaku ${p} (selanjutnya disebut "Kreditur") dan Saudara selaku pihak yang berkewajiban (selanjutnya disebut "Debitur"), perkenankan kami menyampaikan peringatan atas kewajiban pembayaran Saudara yang telah melewati tanggal jatuh tempo, dengan rincian sebagai berikut:
 
-No. Invoice/Tagihan : ${i.noInvoice}
-Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
-Lama Keterlambatan  : ${i.daysOverdue} hari
-Pokok Kewajiban     : ${rp(pokok)}${barisBayar}
-Denda Keterlambatan : ${rp(i.denda)}
-Total Kewajiban     : ${rp(i.total)}
+${rincian}
 
-Sehubungan dengan hal tersebut, kami menyampaikan PERINGATAN agar ${sebutan} segera menyelesaikan seluruh kewajiban di atas selambat-lambatnya 7 (tujuh) hari kalender sejak surat ini diterima.${jaminanKlausa(i)}
+Bahwa berdasarkan Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata, kewajiban yang telah jatuh tempo dan dapat ditagih namun tidak dipenuhi menempatkan Debitur dalam keadaan lalai (wanprestasi).${jaminanKlausa(i)}
 
-Apabila sampai dengan batas waktu tersebut pembayaran belum kami terima, kami berhak menempuh upaya penagihan lebih lanjut sesuai ketentuan yang berlaku, termasuk pengenaan denda berjalan dan langkah hukum.
+Untuk itu, dengan ini kami menyampaikan PERINGATAN agar Saudara menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} selambat-lambatnya dalam waktu 7 (tujuh) hari kalender terhitung sejak surat ini diterima.
 
-Demikian surat peringatan ini kami sampaikan untuk menjadi perhatian.
+Apabila sampai dengan batas waktu tersebut pembayaran belum kami terima, kami berhak menempuh upaya penagihan lebih lanjut sesuai ketentuan yang berlaku, termasuk pengenaan denda berjalan, penyampaian somasi, hingga langkah hukum, dengan segala biaya yang timbul menjadi beban Saudara.
 
-${ttdKota}
+Demikian surat peringatan ini kami sampaikan untuk menjadi perhatian dan dilaksanakan sebagaimana mestinya.
+
 Hormat kami,
 ${p}
-
 
 
 (__________________________)
 ${jabatan}`;
 
   const somasi = `SOMASI
+
+[[RIGHT]]${ttdKota}
+
 Nomor    : ${noSurat("SOM")}
 Lampiran : -
-Perihal  : Teguran/Somasi atas Tunggakan Pembayaran
+Hal      : Somasi (Teguran) atas Tunggakan Pembayaran
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Perkenankan kami, ${p}, menyampaikan teguran (somasi) sehubungan dengan adanya kewajiban ${sebutan} yang telah jatuh tempo namun hingga saat ini belum dipenuhi, dengan rincian:
+Kami, ${p} (selanjutnya disebut "Kreditur"), dengan ini menyampaikan SOMASI (teguran) kepada Saudara selaku Debitur sehubungan dengan kewajiban pembayaran yang telah jatuh tempo namun hingga saat ini belum diselesaikan, dengan dasar dan uraian sebagai berikut:
 
-No. Invoice/Tagihan : ${i.noInvoice}
-Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
-Lama Keterlambatan  : ${i.daysOverdue} hari
-Pokok Kewajiban     : ${rp(pokok)}${barisBayar}
-Denda Keterlambatan : ${rp(i.denda)}
-Total Kewajiban     : ${rp(i.total)}
+1. Bahwa antara Kreditur dan Debitur terdapat hubungan hukum utang-piutang yang sah berdasarkan tagihan ${i.noInvoice}, sehingga Debitur berkewajiban melakukan pembayaran kepada Kreditur;
 
-Bahwa berdasarkan perikatan yang telah disepakati, ${sebutan} berkewajiban melakukan pembayaran tepat pada waktunya. Tidak dipenuhinya kewajiban yang telah jatuh tempo tersebut merupakan suatu kelalaian (wanprestasi) sebagaimana dimaksud dalam Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata.${jaminanKlausa(i)}
+2. Bahwa kewajiban Debitur tersebut telah jatuh tempo dan dapat ditagih (opeisbaar), dengan rincian sebagai berikut:
 
-Berdasarkan hal tersebut, kami MENEGUR dan meminta ${sebutan} untuk segera melunasi seluruh kewajiban di atas dalam waktu 7 (tujuh) hari kalender terhitung sejak somasi ini diterima.
+${rincian}
 
-Apabila dalam tenggang waktu tersebut ${sebutan} tetap tidak memenuhi kewajiban, dengan sangat menyesal kami akan menempuh upaya hukum yang diperlukan untuk melindungi hak kami — baik melalui gugatan perdata, eksekusi jaminan, maupun mekanisme penyelesaian sengketa lain sesuai ketentuan yang berlaku — dengan segala biaya yang timbul menjadi tanggungan ${sebutan}.
+3. Bahwa sampai dengan tanggal Somasi ini Debitur belum memenuhi kewajibannya, sehingga Debitur berada dalam keadaan lalai (wanprestasi) sebagaimana dimaksud dalam Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata.${jaminanKlausa(i)}
 
-Demikian somasi ini kami sampaikan. Atas perhatian dan penyelesaiannya, kami ucapkan terima kasih.
+Berdasarkan hal-hal tersebut, kami MENEGUR dan meminta Saudara untuk melunasi seluruh kewajiban sebesar ${rp(i.total)} dalam waktu 7 (tujuh) hari kalender terhitung sejak Somasi ini diterima.
 
-${ttdKota}
+Apabila dalam tenggang waktu tersebut Saudara tetap tidak memenuhi kewajiban, maka dengan sangat menyesal kami akan menempuh segala upaya hukum yang diperlukan guna melindungi hak kami, baik melalui gugatan perdata, eksekusi jaminan, maupun mekanisme penyelesaian sengketa lainnya sesuai ketentuan yang berlaku, dengan segala biaya yang timbul menjadi tanggungan Saudara.
+
+Demikian Somasi ini kami sampaikan dengan itikad baik untuk dilaksanakan sebagaimana mestinya.
+
 Hormat kami,
 ${p}
-
 
 
 (__________________________)
 ${jabatan}`;
 
-  const rincian = `No. Invoice/Tagihan : ${i.noInvoice}
-Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
-Lama Keterlambatan  : ${i.daysOverdue} hari
-Pokok Kewajiban     : ${rp(pokok)}${barisBayar}
-Denda Keterlambatan : ${rp(i.denda)}
-Total Kewajiban     : ${rp(i.total)}`;
-
   let tarik = null;
   if (i.jaminanTipe === "fidusia") {
     tarik = `SURAT PEMBERITAHUAN PENARIKAN OBJEK JAMINAN FIDUSIA
-Nomor: ${noSurat("FID")}
-Perihal: Pemberitahuan Penarikan Objek Jaminan Fidusia
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("FID")}
+Lampiran : -
+Hal      : Pemberitahuan Penarikan/Eksekusi Objek Jaminan Fidusia
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Menunjuk perjanjian pembiayaan beserta Akta Jaminan Fidusia, dan setelah surat peringatan/somasi kami sampaikan, ${sebutan} masih belum memenuhi kewajiban berikut:
+Menunjuk perjanjian pembiayaan/utang-piutang beserta Akta Jaminan Fidusia atas objek jaminan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p} selaku Penerima Fidusia, menyampaikan hal-hal sebagai berikut:
+
+1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
 
 ${rincian}
 
-Sehubungan dengan kelalaian (wanprestasi) tersebut, sesuai Undang-Undang Nomor 42 Tahun 1999 tentang Jaminan Fidusia juncto Putusan Mahkamah Konstitusi Nomor 18/PUU-XVII/2019, kami memberitahukan rencana penarikan/eksekusi atas objek jaminan fidusia berupa:
+2. Bahwa kelalaian Debitur memenuhi kewajiban tersebut merupakan wanprestasi yang memberikan hak kepada Penerima Fidusia untuk melakukan eksekusi atas objek jaminan fidusia berupa:
 ${i.jaminan || "(uraian objek jaminan)"}
 
-Sesuai putusan tersebut, penarikan/eksekusi dilakukan atas dasar adanya kesepakatan mengenai telah terjadinya cidera janji dan kesediaan menyerahkan objek jaminan secara sukarela. Apabila kesepakatan tidak tercapai, eksekusi ditempuh melalui penetapan Pengadilan Negeri.
+3. Bahwa eksekusi Jaminan Fidusia dilaksanakan berdasarkan Undang-Undang Nomor 42 Tahun 1999 tentang Jaminan Fidusia juncto Putusan Mahkamah Konstitusi Nomor 18/PUU-XVII/2019 dan Nomor 2/PUU-XIX/2021, yang mensyaratkan adanya kesepakatan mengenai telah terjadinya cidera janji dan kesediaan Debitur menyerahkan objek jaminan secara sukarela; apabila tidak tercapai kesepakatan, eksekusi ditempuh melalui permohonan eksekusi pada Pengadilan Negeri.
 
-Oleh karena itu, kami mengimbau ${sebutan} dalam waktu 3 (tiga) hari kalender sejak surat ini untuk: (a) melunasi seluruh kewajiban; atau (b) menyerahkan objek jaminan secara sukarela kepada kami guna penyelesaian. Penyerahan sukarela akan dituangkan dalam Berita Acara Serah Terima.
+Oleh karena itu, kami mengimbau Saudara dalam waktu 3 (tiga) hari kalender sejak surat ini untuk: (a) melunasi seluruh kewajiban sebesar ${rp(i.total)}; atau (b) menyerahkan objek jaminan secara sukarela kepada kami guna penyelesaian kewajiban, yang akan dituangkan dalam Berita Acara Serah Terima.
 
-Demikian disampaikan untuk menjadi perhatian.
+Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
 
-${ttdKota}
 Hormat kami,
 ${p}
-
 
 
 (__________________________)
 ${jabatan}`;
   } else if (i.jaminanTipe === "tanah") {
     tarik = `SURAT PEMBERITAHUAN RENCANA LELANG EKSEKUSI HAK TANGGUNGAN
-Nomor: ${noSurat("HT")}
-Perihal: Pemberitahuan Rencana Lelang Eksekusi Hak Tanggungan
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("HT")}
+Lampiran : -
+Hal      : Pemberitahuan Rencana Lelang Eksekusi Hak Tanggungan
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Setelah somasi/peringatan kami sampaikan, ${sebutan} masih belum memenuhi kewajiban berikut:
+Menunjuk perjanjian utang-piutang beserta Akta Pemberian Hak Tanggungan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p} selaku pemegang Hak Tanggungan, menyampaikan hal-hal sebagai berikut:
+
+1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
 
 ${rincian}
 
-Sehubungan dengan kelalaian tersebut, dan sesuai Undang-Undang Nomor 4 Tahun 1996 tentang Hak Tanggungan, khususnya hak pemegang Hak Tanggungan untuk menjual objek jaminan atas kekuasaan sendiri (parate eksekusi), kami memberitahukan rencana pelaksanaan lelang eksekusi melalui Kantor Pelayanan Kekayaan Negara dan Lelang (KPKNL) atas objek jaminan berupa:
+2. Bahwa atas kelalaian (wanprestasi) tersebut, sesuai Pasal 6 Undang-Undang Nomor 4 Tahun 1996 tentang Hak Tanggungan, pemegang Hak Tanggungan pertama berhak menjual objek Hak Tanggungan atas kekuasaan sendiri (parate eksekusi) melalui pelelangan umum;
+
+3. Bahwa kami memberitahukan rencana pelaksanaan lelang eksekusi melalui Kantor Pelayanan Kekayaan Negara dan Lelang (KPKNL) atas objek jaminan berupa:
 ${i.jaminan || "(uraian objek jaminan)"}
 
-Kami mengimbau ${sebutan} dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban guna menghindari pelaksanaan lelang dimaksud.
+Sehubungan dengan itu, kami mengimbau Saudara dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} guna menghindari pelaksanaan lelang dimaksud.
 
-Demikian disampaikan untuk menjadi perhatian.
+Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
 
-${ttdKota}
 Hormat kami,
 ${p}
-
 
 
 (__________________________)
 ${jabatan}`;
   } else if (i.jaminanTipe && i.jaminanTipe !== "none") {
-    tarik = `SURAT PEMBERITAHUAN EKSEKUSI JAMINAN
-Nomor: ${noSurat("EKS")}
-Perihal: Pemberitahuan Eksekusi atas Objek Jaminan
+    tarik = `SURAT PEMBERITAHUAN EKSEKUSI OBJEK JAMINAN
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("EKS")}
+Lampiran : -
+Hal      : Pemberitahuan Eksekusi atas Objek Jaminan
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Setelah somasi/peringatan kami sampaikan, ${sebutan} masih belum memenuhi kewajiban berikut:
+Menunjuk perjanjian utang-piutang beserta pengikatan jaminan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p}, menyampaikan hal-hal sebagai berikut:
+
+1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
 
 ${rincian}
 
-Sehubungan dengan kelalaian tersebut, kami memberitahukan rencana tindak lanjut atas objek jaminan berupa ${i.jaminan || "(uraian objek jaminan)"} sesuai ketentuan perjanjian dan peraturan yang berlaku. Kami mengimbau ${sebutan} dalam waktu 7 (tujuh) hari kalender untuk menyelesaikan kewajiban.
+2. Bahwa atas kelalaian (wanprestasi) tersebut, kami memberitahukan rencana tindak lanjut/eksekusi atas objek jaminan berupa:
+${i.jaminan || "(uraian objek jaminan)"}
+sesuai ketentuan perjanjian dan peraturan perundang-undangan yang berlaku.
 
-Demikian disampaikan untuk menjadi perhatian.
+Sehubungan dengan itu, kami mengimbau Saudara dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} guna menghindari pelaksanaan tindak lanjut dimaksud.
 
-${ttdKota}
+Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
+
 Hormat kami,
 ${p}
-
 
 
 (__________________________)
@@ -515,6 +532,7 @@ p{margin:0;orphans:2;widows:2}
 .title{text-align:center;font-weight:bold;margin:0 0 10pt;line-height:1.3;text-transform:uppercase;page-break-after:avoid;break-after:avoid}
 .subhead{font-weight:bold;margin:8pt 0 2pt;page-break-after:avoid;break-after:avoid}
 .body{text-align:justify;text-indent:1cm;margin:0 0 6pt}
+.right{text-align:right;margin:0 0 6pt}
 .line{margin:0 0 1pt}
 .listline{margin:0 0 1pt;padding-left:1cm;text-indent:-1cm}
 .gap{height:6pt}
@@ -645,6 +663,12 @@ function renderDocHtml(text, sigMap = {}) {
       out.push(renderSigGrid(rows));
       continue;
     }
+    if (ln.trim().startsWith("[[RIGHT]]")) {
+      flushFields(); flushSig();
+      if (blankPending) { gap(); blankPending = false; }
+      out.push(`<p class="right">${esc(ln.trim().slice(9).trim())}</p>`);
+      continue;
+    }
     if (ln.trim() === "") { flushFields(); flushSig(); blankPending = true; continue; }
     const anc = sigAnchor(ln);
     if (anc) {
@@ -682,21 +706,29 @@ function fieldBase(s) {
 }
 function suratPernyataan(i, s, f) {
   const { p, ttdKota } = fieldBase(s);
+  const ar = i.sisaPokok ?? i.nominal;
   return `SURAT PERNYATAAN KESANGGUPAN PEMBAYARAN
 
 Yang bertanda tangan di bawah ini:
-Nama   : ${i.customer}
-Alamat : ${i.alamat || "-"}
+Nama    : ${i.customer}
+Alamat  : ${i.alamat || "-"}${i.pic ? `\nJabatan : ${i.pic}` : ""}
 
-Dengan ini menyatakan dengan sebenarnya bahwa saya memiliki kewajiban pembayaran kepada ${p} atas:
+dalam hal ini bertindak untuk dan atas nama diri sendiri/badan usaha tersebut di atas (selanjutnya disebut "Pihak yang Menyatakan"), dengan ini menyatakan dengan sebenarnya dan tanpa paksaan dari pihak manapun, sebagai berikut:
+
+1. Bahwa Pihak yang Menyatakan mengakui memiliki kewajiban pembayaran kepada ${p} dengan rincian:
+
 No. Tagihan     : ${i.noInvoice}
+Pokok / AR      : ${rp(ar)}
+Denda           : ${rp(i.denda)}
 Total Kewajiban : ${rp(i.total)}
 
-Saya menyatakan SANGGUP menyelesaikan kewajiban tersebut sebesar ${rp(f.jumlah || i.total)} selambat-lambatnya pada tanggal ${fmtTgl(f.tgl)}.
+2. Bahwa Pihak yang Menyatakan SANGGUP dan BERJANJI menyelesaikan kewajiban tersebut sebesar ${rp(f.jumlah || i.total)} selambat-lambatnya pada tanggal ${fmtTgl(f.tgl)};
 
-Apabila saya tidak memenuhi pernyataan ini, saya bersedia menanggung segala konsekuensi sesuai ketentuan perjanjian dan peraturan yang berlaku.
+3. Bahwa apabila Pihak yang Menyatakan lalai memenuhi pernyataan ini, Pihak yang Menyatakan bersedia menanggung denda keterlambatan dan/atau penyerahan jaminan serta menerima segala upaya hukum sesuai ketentuan perjanjian dan peraturan perundang-undangan yang berlaku;
 
-Demikian pernyataan ini saya buat dengan sadar dan tanpa paksaan dari pihak manapun.
+4. Bahwa Surat Pernyataan ini dibuat sebagai pengakuan utang sekaligus alat bukti yang sah dan dapat dipergunakan sebagaimana mestinya.
+
+Demikian Surat Pernyataan ini dibuat dengan penuh kesadaran dan tanggung jawab, dibubuhi meterai secukupnya.
 
 ${ttdKota}
 Yang Menyatakan,
@@ -708,24 +740,27 @@ function bastPenarikan(i, s, f) {
   const { p, jabatan, ttdKota } = fieldBase(s);
   return `BERITA ACARA SERAH TERIMA OBJEK JAMINAN
 
-Pada hari ini, ${ttdKota}, telah dilakukan serah terima objek jaminan antara:
+Pada hari ini, ${ttdKota}, yang bertanda tangan di bawah ini telah sepakat melakukan serah terima objek jaminan, masing-masing:
 
-Pihak Pertama (yang menyerahkan):
-Nama   : ${i.customer}
-Alamat : ${i.alamat || "-"}
+A. PARA PIHAK
+1. ${i.customer}, beralamat di ${i.alamat || "-"}, selanjutnya disebut "Pihak Pertama" (yang menyerahkan);
+2. ${p}, selanjutnya disebut "Pihak Kedua" (yang menerima).
 
-Pihak Kedua (yang menerima):
-Nama   : ${p}
+B. OBJEK DAN DASAR
+1. Bahwa Pihak Pertama memiliki kewajiban kepada Pihak Kedua atas tagihan ${i.noInvoice} sebesar ${rp(i.total)} yang telah jatuh tempo dan belum diselesaikan;
 
-Objek jaminan yang diserahterimakan:
+2. Bahwa untuk penyelesaian kewajiban tersebut, Pihak Pertama dengan ini menyerahkan secara sukarela objek jaminan berupa:
 ${i.jaminan || "(uraian objek jaminan)"}
+dengan kondisi/kelengkapan: ${f.kondisi || "-"}.
 
-Kondisi / kelengkapan:
-${f.kondisi || "-"}
+C. KETENTUAN
+1. Bahwa penyerahan objek jaminan dilakukan secara sukarela tanpa paksaan dari pihak manapun;
 
-Sehubungan dengan kewajiban atas ${i.noInvoice} sebesar ${rp(i.total)} yang belum diselesaikan, Pihak Pertama menyerahkan objek jaminan di atas kepada Pihak Kedua secara sukarela untuk diproses sesuai ketentuan yang berlaku.
+2. Bahwa Pihak Kedua berhak memproses objek jaminan untuk penyelesaian kewajiban sesuai ketentuan yang berlaku, dan hasil bersih penjualannya diperhitungkan dengan kewajiban Pihak Pertama;
 
-Demikian berita acara ini dibuat dengan sebenarnya untuk dipergunakan sebagaimana mestinya.
+3. Bahwa apabila terdapat kelebihan hasil penjualan setelah dikurangi seluruh kewajiban dan biaya, akan dikembalikan kepada Pihak Pertama; sebaliknya, kekurangannya tetap menjadi kewajiban Pihak Pertama.
+
+Demikian Berita Acara ini dibuat dengan sebenarnya dan ditandatangani oleh Para Pihak dalam keadaan sadar tanpa adanya paksaan.
 
 ${ttdKota}
 
@@ -740,30 +775,31 @@ function momKunjungan(i, s, f) {
   const { p, jabatan, ttdKota } = fieldBase(s);
   const petugas = (s.petugasAktif && s.petugasAktif.trim()) || jabatan;
   const ar = i.sisaPokok ?? i.nominal;
-  return `MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN
+  return `MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN PENAGIHAN
 
 Hari / Tanggal : ${ttdKota}
-Perihal        : Kunjungan penagihan & pembahasan penyelesaian kewajiban
+Tempat         : ${i.alamat || "-"}
+Perihal        : Pembahasan penyelesaian kewajiban yang telah jatuh tempo
 
-A. PARA PIHAK
+A. PESERTA / PARA PIHAK
 1. Pihak Penagih : ${petugas} — ${p}
-2. Pihak Debitur : ${i.customer}${i.pic ? ` (PIC: ${i.pic})` : ""}
-   Alamat        : ${i.alamat || "-"}
+2. Pihak Debitur : ${i.customer}${i.pic ? ` (u.p. ${i.pic})` : ""}
 
 B. DATA KEWAJIBAN
 No. Tagihan     : ${i.noInvoice}
-AR / Pokok      : ${rp(ar)}
+Pokok / AR      : ${rp(ar)}
 Denda           : ${rp(i.denda)}
 Total Kewajiban : ${rp(i.total)}
 Jatuh Tempo     : ${fmtTgl(i.tglJatuhTempo)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hari)` : ""}
 
-C. HASIL PEMBAHASAN
-1. Konfirmasi posisi tunggakan saat kunjungan — AR/pokok ${rp(ar)} + denda ${rp(i.denda)} = total kewajiban ${rp(i.total)}.${f.pembahasan ? "\n" + f.pembahasan : ""}
+C. POKOK PEMBAHASAN
+1. Konfirmasi posisi tunggakan saat kunjungan — Pokok/AR ${rp(ar)} + denda ${rp(i.denda)} = total kewajiban ${rp(i.total)}.${f.pembahasan ? "\n2. " + f.pembahasan : ""}
 
-D. KESEPAKATAN / TINDAK LANJUT
+D. KESEPAKATAN / RENCANA TINDAK LANJUT
 ${f.kesepakatan || "-"}${f.tgl ? `\n\nTarget penyelesaian : ${fmtTgl(f.tgl)}` : ""}
 
-Demikian berita acara kunjungan ini dibuat dengan sebenarnya dan disetujui oleh kedua belah pihak tanpa adanya paksaan, untuk dipergunakan sebagaimana mestinya.
+E. PENUTUP
+Demikian Berita Acara/Minutes of Meeting ini dibuat dengan sebenarnya berdasarkan hasil pertemuan, dan disetujui serta ditandatangani oleh Para Pihak tanpa adanya paksaan, untuk dipergunakan sebagaimana mestinya.
 
 ${ttdKota}
 
