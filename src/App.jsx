@@ -1583,7 +1583,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {/* Nav (HP) */}
         <nav className="sticky top-2 z-20 mt-4 flex gap-1 rounded-xl p-1 shadow-sm lg:hidden"
           style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-          {NAV.filter((n) => n.id !== "set").map((n) => (
+          {NAV.filter((n) => n.id !== "set" && n.id !== "riwayat").map((n) => (
             <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
           ))}
         </nav>
