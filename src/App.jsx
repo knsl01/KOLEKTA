@@ -4,7 +4,7 @@ import {
   Wallet, Bell, RotateCcw, X, MessageCircle, ChevronDown, FileText, Scale,
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
-  LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete,
+  LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -45,6 +45,7 @@ const NAV = [
   { id: "tagihan", icon: Wallet, label: "Tagihan" },
   { id: "analitik", icon: BarChart3, label: "Analitik" },
   { id: "heatmap", icon: Flame, label: "Heat Map" },
+  { id: "riwayat", icon: History, label: "Riwayat" },
   { id: "set", icon: Settings, label: "Pengaturan" },
 ];
 
@@ -618,6 +619,66 @@ function exportExcel(rows, s) {
   ws2["!cols"] = [{ wch: 32 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, ws2, "Ringkasan");
   XLSX.writeFile(wb, `Kolekta_Tagihan_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+/* ---------- Riwayat eskalasi (label, daftar, rekap) ---------- */
+const ESK_LABELS = { reminder: "Reminder", tegas: "Reminder Tegas", sp: "Surat Peringatan", somasi: "Somasi" };
+function eskLabel(level, jaminanTipe) {
+  if (level === "tarik") return jaminanTipe === "fidusia" ? "Surat Penarikan" : jaminanTipe === "tanah" ? "Lelang HT" : "Eksekusi Jaminan";
+  return ESK_LABELS[level] || level;
+}
+// Gabung semua entri eskalasi dari seluruh tagihan -> urut terbaru dulu
+function eskalasiRows(rows) {
+  const out = [];
+  (rows || []).forEach((i) => (i.eskalasi || []).forEach((e) => out.push({
+    ts: e.ts,
+    id: i.id,
+    customer: i.customer,
+    noInvoice: i.noInvoice,
+    level: e.level,
+    tindakan: eskLabel(e.level, i.jaminanTipe),
+    petugas: i.assignedTo || "",
+    total: i.total,
+    status: stLabel(i.status),
+  })));
+  return out.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+}
+
+function exportEskalasiExcel(list, s) {
+  const data = list.map((r) => ({
+    Tanggal: r.ts,
+    Customer: r.customer,
+    "No. Invoice": r.noInvoice,
+    Tindakan: r.tindakan,
+    Petugas: r.petugas || "",
+    "Total Tagihan": r.total,
+    Status: r.status,
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data.length ? data : [{ Tanggal: "", Customer: "", "No. Invoice": "", Tindakan: "", Petugas: "", "Total Tagihan": "", Status: "" }]);
+  ws["!cols"] = [13, 24, 16, 20, 16, 16, 16].map((w) => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, ws, "Riwayat Eskalasi");
+  XLSX.writeFile(wb, `Kolekta_Riwayat_Eskalasi_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+function printEskalasiRekap(list, s) {
+  const w = window.open("", "_blank");
+  if (!w) return false;
+  const esc = (x) => String(x ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const body = list.map((r) =>
+    `<tr><td>${esc(fmtTgl(r.ts))}</td><td>${esc(r.customer)}</td><td>${esc(r.noInvoice)}</td><td>${esc(r.tindakan)}</td><td>${esc(r.petugas || "-")}</td><td style="text-align:right">${esc(rp(r.total))}</td></tr>`
+  ).join("");
+  w.document.write(
+    `<!doctype html><html><head><meta charset="utf-8"><title>Rekap Riwayat Eskalasi</title>` +
+    `<style>@page{size:A4;margin:1.8cm}body{font-family:'Times New Roman',Georgia,serif;font-size:11pt;color:#111}h1{font-size:15pt;margin:0 0 2px}p.sub{margin:0 0 14px;color:#555;font-size:10pt}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}th{background:#eee;font-size:10pt}</style>` +
+    `</head><body><h1>Rekap Riwayat Eskalasi</h1>` +
+    `<p class="sub">${esc(s.perusahaan || "Kolekta")} — dicetak ${esc(new Date().toLocaleString("id-ID"))} — ${list.length} tindakan</p>` +
+    `<table><thead><tr><th>Tanggal</th><th>Customer</th><th>No. Invoice</th><th>Tindakan</th><th>Petugas</th><th>Total Tagihan</th></tr></thead>` +
+    `<tbody>${body || '<tr><td colspan="6">Belum ada riwayat eskalasi.</td></tr>'}</tbody></table>` +
+    `<script>window.onload=function(){window.print()}<\/script></body></html>`
+  );
+  w.document.close();
+  return true;
 }
 
 /* ---------- Statement of Account per debitur ---------- */
@@ -1610,6 +1671,12 @@ AKTIVITAS HARI INI
             onOpen={(id) => { setTab("tagihan"); setOpenId(id); }} />
         )}
 
+        {/* ---------- RIWAYAT ESKALASI ---------- */}
+        {tab === "riwayat" && (
+          <RiwayatTab rows={enriched} s={s} flash={flash}
+            onOpen={(id) => { setTab("tagihan"); setOpenId(id); }} />
+        )}
+
         {/* ---------- PENGATURAN ---------- */}
         {tab === "set" && (
           <Settingstab data={data} setData={setData} flash={flash} copy={copy}
@@ -1959,6 +2026,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [lunasAsk, setLunasAsk] = useState(false);
   const [lunasCode, setLunasCode] = useState("");
   const [openRiwayat, setOpenRiwayat] = useState(false);
+  const [openEsk, setOpenEsk] = useState(false);
   const [openArsip, setOpenArsip] = useState(false);
   const [editing, setEditing] = useState(false);
   const [ed, setEd] = useState({ customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo });
@@ -2317,15 +2385,21 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
 
               {i.eskalasi?.length > 0 && (
                 <div className="mt-3">
-                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Riwayat eskalasi</p>
-                  <div className="space-y-1">
-                    {i.eskalasi.map((e, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-xs">
-                        <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{docs.find((d) => d.key === e.level)?.label || e.level}</span>
-                        <span style={{ color: T.sub }}>terkirim {fmtTgl(e.ts)}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <button onClick={() => setOpenEsk((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
+                    <ChevronDown size={14} style={{ transform: openEsk ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                    Riwayat eskalasi
+                    <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{i.eskalasi.length}</span>
+                  </button>
+                  {openEsk && (
+                    <div className="space-y-1 pl-5">
+                      {i.eskalasi.map((e, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-xs">
+                          <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{docs.find((d) => d.key === e.level)?.label || e.level}</span>
+                          <span style={{ color: T.sub }}>terkirim {fmtTgl(e.ts)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2908,6 +2982,100 @@ function HeatMapView({ rows, allRows, s, onOpen }) {
       {view === "geo" && <div className="sub-fade"><GeoHeat rows={rows} /></div>}
       {view === "kalender" && <div className="sub-fade"><CalHeat rows={rows} onOpen={onOpen} /></div>}
       {view === "matriks" && <div className="sub-fade"><MatrixHeat rows={allRows} s={s} /></div>}
+    </div>
+  );
+}
+
+/* ---------- Tab Riwayat: daftar semua eskalasi + rekap Excel/PDF ---------- */
+function RiwayatTab({ rows, s, flash, onOpen }) {
+  const [q, setQ] = useState("");
+  const [fPetugas, setFPetugas] = useState("");
+  const [fLevel, setFLevel] = useState("");
+  const [dari, setDari] = useState("");
+  const [sampai, setSampai] = useState("");
+
+  const all = useMemo(() => eskalasiRows(rows), [rows]);
+  const petugasOpts = useMemo(() => [...new Set(all.map((r) => r.petugas).filter(Boolean))].sort(), [all]);
+  const levelOpts = useMemo(() => {
+    const seen = new Map();
+    all.forEach((r) => { if (!seen.has(r.level)) seen.set(r.level, r.tindakan); });
+    return [...seen.entries()];
+  }, [all]);
+
+  const list = useMemo(() => {
+    const ql = q.trim().toLowerCase();
+    return all.filter((r) => {
+      if (ql && !(`${r.customer} ${r.noInvoice}`.toLowerCase().includes(ql))) return false;
+      if (fPetugas && (r.petugas || "") !== fPetugas) return false;
+      if (fLevel && r.level !== fLevel) return false;
+      if (dari && r.ts < dari) return false;
+      if (sampai && r.ts > sampai) return false;
+      return true;
+    });
+  }, [all, q, fPetugas, fLevel, dari, sampai]);
+
+  const sel = inputCls, st = inputSt;
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold">Riwayat eskalasi</h3>
+            <p className="text-xs" style={{ color: T.sub }}>{list.length} tindakan{list.length !== all.length ? ` dari ${all.length}` : ""} di seluruh tagihan</p>
+          </div>
+          <div className="flex gap-1.5">
+            <button onClick={() => { if (!list.length) return flash("Belum ada riwayat untuk direkap"); exportEskalasiExcel(list, s); flash("Excel diunduh"); }}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white" style={{ background: T.green }}>
+              <FileSpreadsheet size={14} /> Excel
+            </button>
+            <button onClick={() => { if (!list.length) return flash("Belum ada riwayat untuk direkap"); if (!printEskalasiRekap(list, s)) flash("Popup diblokir — izinkan popup untuk PDF"); }}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white" style={{ background: T.brand2 }}>
+              <Printer size={14} /> PDF
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari customer / no. invoice" className={sel} style={st} />
+          <select value={fPetugas} onChange={(e) => setFPetugas(e.target.value)} className={sel} style={st}>
+            <option value="">Semua petugas</option>
+            {petugasOpts.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={fLevel} onChange={(e) => setFLevel(e.target.value)} className={sel} style={st}>
+            <option value="">Semua tindakan</option>
+            {levelOpts.map(([lv, lbl]) => <option key={lv} value={lv}>{lbl}</option>)}
+          </select>
+          <div className="flex items-center gap-1.5">
+            <input type="date" value={dari} onChange={(e) => setDari(e.target.value)} className={sel} style={st} title="Dari tanggal" />
+            <span className="text-xs" style={{ color: T.sub }}>s/d</span>
+            <input type="date" value={sampai} onChange={(e) => setSampai(e.target.value)} className={sel} style={st} title="Sampai tanggal" />
+          </div>
+        </div>
+        {(q || fPetugas || fLevel || dari || sampai) && (
+          <button onClick={() => { setQ(""); setFPetugas(""); setFLevel(""); setDari(""); setSampai(""); }} className="mt-2 text-[11px] font-semibold" style={{ color: T.brand2 }}>Reset filter</button>
+        )}
+      </div>
+
+      <div className="rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        {list.length === 0 ? (
+          <p className="p-6 text-center text-sm" style={{ color: T.sub }}>Belum ada riwayat eskalasi.</p>
+        ) : (
+          <div className="divide-y" style={{ borderColor: T.line }}>
+            {list.map((r, idx) => (
+              <button key={idx} onClick={() => onOpen(r.id)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-black/5">
+                <span className="w-20 shrink-0 text-xs" style={{ color: T.sub, fontFamily: MONO }}>{fmtTgl(r.ts)}</span>
+                <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{r.tindakan}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium" style={{ color: T.ink }}>{r.customer}</span>
+                  <span className="block truncate text-[11px]" style={{ color: T.sub }}>{r.noInvoice}{r.petugas ? ` · ${r.petugas}` : ""}</span>
+                </span>
+                <span className="shrink-0 text-xs font-semibold" style={{ fontFamily: MONO, color: T.ink }}>{rpc(r.total)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
