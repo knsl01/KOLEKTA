@@ -5,18 +5,44 @@ import {
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
+  Moon, Sun,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
 
 /* ---------- Tema (inline style, bukan arbitrary Tailwind) ---------- */
+/* Tiap tema punya varian terang (light) & gelap (dark); mode gelap berlaku untuk semua tema. */
 const THEMES = {
-  hutan: { name: "Hutan", bg: "#EEF1ED", surface: "#FFFFFF", ink: "#16241E", sub: "#5E6E66", brand: "#0C3B2E", brand2: "#15564A", brass: "#BE863A", line: "#DDE3DD", green: "#2F7D5B", amber: "#C0822A", red: "#B0463A", slate: "#6C7B73", toast: "#16241E" },
-  tinta: { name: "Tinta Malam", bg: "#0E1A16", surface: "#16241F", ink: "#E7EFE9", sub: "#93A39B", brand: "#2E8B6F", brand2: "#38A083", brass: "#D6A24A", line: "#26352E", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#8A9A91", toast: "#05100C" },
-  baja: { name: "Baja", bg: "#EDF0F4", surface: "#FFFFFF", ink: "#18222E", sub: "#5C6675", brand: "#1B3A5B", brand2: "#2C5C82", brass: "#B07A3C", line: "#DBE1EA", green: "#2E7D63", amber: "#B97F2A", red: "#B0463F", slate: "#66707E", toast: "#18222E" },
-  arsip: { name: "Arsip", bg: "#F1EADB", surface: "#FBF6EC", ink: "#2A2317", sub: "#6E6450", brand: "#5A3D22", brand2: "#7A5A33", brass: "#A9762E", line: "#E2D7C2", green: "#4E7A4A", amber: "#A9761F", red: "#9E4A35", slate: "#7A6E55", toast: "#2A2317" },
+  hutan: {
+    name: "Hutan",
+    light: { bg: "#EEF1ED", surface: "#FFFFFF", ink: "#16241E", sub: "#5E6E66", brand: "#0C3B2E", brand2: "#15564A", brass: "#BE863A", line: "#DDE3DD", green: "#2F7D5B", amber: "#C0822A", red: "#B0463A", slate: "#6C7B73", toast: "#16241E" },
+    dark: { bg: "#0E1A16", surface: "#16241F", ink: "#E7EFE9", sub: "#93A39B", brand: "#2E8B6F", brand2: "#38A083", brass: "#D6A24A", line: "#26352E", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#8A9A91", toast: "#05100C" },
+  },
+  baja: {
+    name: "Baja",
+    light: { bg: "#EDF0F4", surface: "#FFFFFF", ink: "#18222E", sub: "#5C6675", brand: "#1B3A5B", brand2: "#2C5C82", brass: "#B07A3C", line: "#DBE1EA", green: "#2E7D63", amber: "#B97F2A", red: "#B0463F", slate: "#66707E", toast: "#18222E" },
+    dark: { bg: "#0E1722", surface: "#172533", ink: "#E5EDF6", sub: "#8E9BAD", brand: "#3F73A4", brand2: "#5288BE", brass: "#CE9E54", line: "#263444", green: "#46A883", amber: "#D79E45", red: "#DE6E63", slate: "#7E8B9C", toast: "#060E16" },
+  },
+  arsip: {
+    name: "Arsip",
+    light: { bg: "#F1EADB", surface: "#FBF6EC", ink: "#2A2317", sub: "#6E6450", brand: "#5A3D22", brand2: "#7A5A33", brass: "#A9762E", line: "#E2D7C2", green: "#4E7A4A", amber: "#A9761F", red: "#9E4A35", slate: "#7A6E55", toast: "#2A2317" },
+    dark: { bg: "#1A150E", surface: "#251E13", ink: "#F0E7D6", sub: "#AB9C80", brand: "#A07E4C", brand2: "#B98F54", brass: "#CFA040", line: "#352A1B", green: "#7FA060", amber: "#CFA040", red: "#C56A4D", slate: "#9A8D71", toast: "#0E0A05" },
+  },
+  pink: {
+    name: "Pink",
+    light: { bg: "#FCEEF4", surface: "#FFFFFF", ink: "#2C141F", sub: "#7E5E6B", brand: "#9E2A5E", brand2: "#C24A7C", brass: "#BE7C42", line: "#F2DBE5", green: "#2F7D5B", amber: "#C0822A", red: "#C0413E", slate: "#8C6976", toast: "#2C141F" },
+    dark: { bg: "#1C0E15", surface: "#28141E", ink: "#F6E4ED", sub: "#B98FA2", brand: "#D75A91", brand2: "#E771A4", brass: "#E0A65C", line: "#3A2230", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#A98C98", toast: "#0E0509" },
+  },
 };
-let T = THEMES.hutan;
+// Pemetaan tema lama → keluarga + mode (kompatibilitas data tersimpan).
+const LEGACY_TEMA = { tinta: { base: "hutan", gelap: true } };
+function themePalette(key, gelap) {
+  const leg = LEGACY_TEMA[key];
+  if (leg) { key = leg.base; gelap = leg.gelap; }
+  const fam = THEMES[key] || THEMES.hutan;
+  return fam[gelap ? "dark" : "light"];
+}
+let T = themePalette("hutan", false);
 const MONO = "ui-monospace, 'SF Mono', 'Roboto Mono', 'DejaVu Sans Mono', monospace";
 const SANS = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
@@ -257,8 +283,8 @@ function debtorBlock(i) {
   const alamat = i.alamat?.trim();
   const pic = i.pic?.trim();
   const baris = alamat ? alamat + "\n" : "";
-  if (isPerorangan(i)) return `Yth. Sdr./Sdri. ${i.customer}\n${baris}di Tempat`;
-  return `Yth. Manajemen ${i.customer}\n${pic ? "u.p. " + pic + "\n" : ""}${baris}di Tempat`;
+  if (isPerorangan(i)) return `Kepada Yth.\nSdr./Sdri. ${i.customer}\n${baris}di Tempat`;
+  return `Kepada Yth.\nManajemen ${i.customer}\n${pic ? "u.p. Bapak/Ibu " + pic + "\n" : ""}${baris}di Tempat`;
 }
 function sapaanWA(i) {
   const pic = i.pic?.trim();
@@ -308,160 +334,182 @@ Mohon pembayaran diselesaikan paling lambat 3 (tiga) hari kerja ke depan untuk m
 Terima kasih.
 — ${p}`;
 
-  const sp = `SURAT PERINGATAN
-Nomor: ${noSurat("SP")}
-Perihal: Peringatan Keterlambatan Pembayaran
-
-${debtorBlock(i)}
-
-Dengan hormat,
-
-Berdasarkan catatan kami, ${sebutan} memiliki kewajiban pembayaran yang telah melewati tanggal jatuh tempo, dengan rincian sebagai berikut:
-
-No. Invoice/Tagihan : ${i.noInvoice}
-Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
-Lama Keterlambatan  : ${i.daysOverdue} hari
-Pokok Kewajiban     : ${rp(pokok)}${barisBayar}
-Denda Keterlambatan : ${rp(i.denda)}
-Total Kewajiban     : ${rp(i.total)}
-
-Sehubungan dengan hal tersebut, kami menyampaikan PERINGATAN agar ${sebutan} segera menyelesaikan seluruh kewajiban di atas selambat-lambatnya 7 (tujuh) hari kalender sejak surat ini diterima.${jaminanKlausa(i)}
-
-Apabila sampai dengan batas waktu tersebut pembayaran belum kami terima, kami berhak menempuh upaya penagihan lebih lanjut sesuai ketentuan yang berlaku, termasuk pengenaan denda berjalan dan langkah hukum.
-
-Demikian surat peringatan ini kami sampaikan untuk menjadi perhatian.
-
-${ttdKota}
-Hormat kami,
-${p}
-
-
-
-(__________________________)
-${jabatan}`;
-
-  const somasi = `SOMASI
-Nomor    : ${noSurat("SOM")}
-Lampiran : -
-Perihal  : Teguran/Somasi atas Tunggakan Pembayaran
-
-${debtorBlock(i)}
-
-Dengan hormat,
-
-Perkenankan kami, ${p}, menyampaikan teguran (somasi) sehubungan dengan adanya kewajiban ${sebutan} yang telah jatuh tempo namun hingga saat ini belum dipenuhi, dengan rincian:
-
-No. Invoice/Tagihan : ${i.noInvoice}
-Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
-Lama Keterlambatan  : ${i.daysOverdue} hari
-Pokok Kewajiban     : ${rp(pokok)}${barisBayar}
-Denda Keterlambatan : ${rp(i.denda)}
-Total Kewajiban     : ${rp(i.total)}
-
-Bahwa berdasarkan perikatan yang telah disepakati, ${sebutan} berkewajiban melakukan pembayaran tepat pada waktunya. Tidak dipenuhinya kewajiban yang telah jatuh tempo tersebut merupakan suatu kelalaian (wanprestasi) sebagaimana dimaksud dalam Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata.${jaminanKlausa(i)}
-
-Berdasarkan hal tersebut, kami MENEGUR dan meminta ${sebutan} untuk segera melunasi seluruh kewajiban di atas dalam waktu 7 (tujuh) hari kalender terhitung sejak somasi ini diterima.
-
-Apabila dalam tenggang waktu tersebut ${sebutan} tetap tidak memenuhi kewajiban, dengan sangat menyesal kami akan menempuh upaya hukum yang diperlukan untuk melindungi hak kami — baik melalui gugatan perdata, eksekusi jaminan, maupun mekanisme penyelesaian sengketa lain sesuai ketentuan yang berlaku — dengan segala biaya yang timbul menjadi tanggungan ${sebutan}.
-
-Demikian somasi ini kami sampaikan. Atas perhatian dan penyelesaiannya, kami ucapkan terima kasih.
-
-${ttdKota}
-Hormat kami,
-${p}
-
-
-
-(__________________________)
-${jabatan}`;
-
   const rincian = `No. Invoice/Tagihan : ${i.noInvoice}
 Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
 Lama Keterlambatan  : ${i.daysOverdue} hari
-Pokok Kewajiban     : ${rp(pokok)}${barisBayar}
+Pokok / AR          : ${rp(pokok)}${barisBayar}
 Denda Keterlambatan : ${rp(i.denda)}
 Total Kewajiban     : ${rp(i.total)}`;
 
-  let tarik = null;
-  if (i.jaminanTipe === "fidusia") {
-    tarik = `SURAT PEMBERITAHUAN PENARIKAN OBJEK JAMINAN FIDUSIA
-Nomor: ${noSurat("FID")}
-Perihal: Pemberitahuan Penarikan Objek Jaminan Fidusia
+  const sp = `${kopLine(s)}
+SURAT PERINGATAN
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("SP")}
+Lampiran : -
+Hal      : Peringatan Keterlambatan Pembayaran
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Menunjuk perjanjian pembiayaan beserta Akta Jaminan Fidusia, dan setelah surat peringatan/somasi kami sampaikan, ${sebutan} masih belum memenuhi kewajiban berikut:
+Sehubungan dengan kedudukan kami selaku ${p} (selanjutnya disebut "Kreditur") dan Saudara selaku pihak yang berkewajiban (selanjutnya disebut "Debitur"), perkenankan kami menyampaikan peringatan atas kewajiban pembayaran Saudara yang telah melewati tanggal jatuh tempo, dengan rincian sebagai berikut:
 
 ${rincian}
 
-Sehubungan dengan kelalaian (wanprestasi) tersebut, sesuai Undang-Undang Nomor 42 Tahun 1999 tentang Jaminan Fidusia juncto Putusan Mahkamah Konstitusi Nomor 18/PUU-XVII/2019, kami memberitahukan rencana penarikan/eksekusi atas objek jaminan fidusia berupa:
-${i.jaminan || "(uraian objek jaminan)"}
+Bahwa berdasarkan Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata, kewajiban yang telah jatuh tempo dan dapat ditagih namun tidak dipenuhi menempatkan Debitur dalam keadaan lalai (wanprestasi).${jaminanKlausa(i)}
 
-Sesuai putusan tersebut, penarikan/eksekusi dilakukan atas dasar adanya kesepakatan mengenai telah terjadinya cidera janji dan kesediaan menyerahkan objek jaminan secara sukarela. Apabila kesepakatan tidak tercapai, eksekusi ditempuh melalui penetapan Pengadilan Negeri.
+Untuk itu, dengan ini kami menyampaikan PERINGATAN agar Saudara menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} selambat-lambatnya dalam waktu 7 (tujuh) hari kalender terhitung sejak surat ini diterima.
 
-Oleh karena itu, kami mengimbau ${sebutan} dalam waktu 3 (tiga) hari kalender sejak surat ini untuk: (a) melunasi seluruh kewajiban; atau (b) menyerahkan objek jaminan secara sukarela kepada kami guna penyelesaian. Penyerahan sukarela akan dituangkan dalam Berita Acara Serah Terima.
+Apabila sampai dengan batas waktu tersebut pembayaran belum kami terima, kami berhak menempuh upaya penagihan lebih lanjut sesuai ketentuan yang berlaku, termasuk pengenaan denda berjalan, penyampaian somasi, hingga langkah hukum, dengan segala biaya yang timbul menjadi beban Saudara.
 
-Demikian disampaikan untuk menjadi perhatian.
+Demikian surat peringatan ini kami sampaikan untuk menjadi perhatian dan dilaksanakan sebagaimana mestinya.
 
-${ttdKota}
 Hormat kami,
 ${p}
 
+
+(__________________________)
+${jabatan}`;
+
+  const somasi = `${kopLine(s)}
+SOMASI
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("SOM")}
+Lampiran : -
+Hal      : Somasi (Teguran) atas Tunggakan Pembayaran
+
+${debtorBlock(i)}
+
+Dengan hormat,
+
+Kami, ${p} (selanjutnya disebut "Kreditur"), dengan ini menyampaikan SOMASI (teguran) kepada Saudara selaku Debitur sehubungan dengan kewajiban pembayaran yang telah jatuh tempo namun hingga saat ini belum diselesaikan, dengan dasar dan uraian sebagai berikut:
+
+1. Bahwa antara Kreditur dan Debitur terdapat hubungan hukum utang-piutang yang sah berdasarkan tagihan ${i.noInvoice}, sehingga Debitur berkewajiban melakukan pembayaran kepada Kreditur;
+
+2. Bahwa kewajiban Debitur tersebut telah jatuh tempo dan dapat ditagih (opeisbaar), dengan rincian sebagai berikut:
+
+${rincian}
+
+3. Bahwa sampai dengan tanggal Somasi ini Debitur belum memenuhi kewajibannya, sehingga Debitur berada dalam keadaan lalai (wanprestasi) sebagaimana dimaksud dalam Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata.${jaminanKlausa(i)}
+
+Berdasarkan hal-hal tersebut, kami MENEGUR dan meminta Saudara untuk melunasi seluruh kewajiban sebesar ${rp(i.total)} dalam waktu 7 (tujuh) hari kalender terhitung sejak Somasi ini diterima.
+
+Apabila dalam tenggang waktu tersebut Saudara tetap tidak memenuhi kewajiban, maka dengan sangat menyesal kami akan menempuh segala upaya hukum yang diperlukan guna melindungi hak kami, baik melalui gugatan perdata, eksekusi jaminan, maupun mekanisme penyelesaian sengketa lainnya sesuai ketentuan yang berlaku, dengan segala biaya yang timbul menjadi tanggungan Saudara.
+
+Demikian Somasi ini kami sampaikan dengan itikad baik untuk dilaksanakan sebagaimana mestinya.
+
+Hormat kami,
+${p}
+
+
+(__________________________)
+${jabatan}`;
+
+  let tarik = null;
+  if (i.jaminanTipe === "fidusia") {
+    tarik = `${kopLine(s)}
+SURAT PEMBERITAHUAN PENARIKAN OBJEK JAMINAN FIDUSIA
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("FID")}
+Lampiran : -
+Hal      : Pemberitahuan Penarikan/Eksekusi Objek Jaminan Fidusia
+
+${debtorBlock(i)}
+
+Dengan hormat,
+
+Menunjuk perjanjian pembiayaan/utang-piutang beserta Akta Jaminan Fidusia atas objek jaminan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p} selaku Penerima Fidusia, menyampaikan hal-hal sebagai berikut:
+
+1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
+
+${rincian}
+
+2. Bahwa kelalaian Debitur memenuhi kewajiban tersebut merupakan wanprestasi yang memberikan hak kepada Penerima Fidusia untuk melakukan eksekusi atas objek jaminan fidusia berupa:
+${i.jaminan || "(uraian objek jaminan)"}
+
+3. Bahwa eksekusi Jaminan Fidusia dilaksanakan berdasarkan Undang-Undang Nomor 42 Tahun 1999 tentang Jaminan Fidusia juncto Putusan Mahkamah Konstitusi Nomor 18/PUU-XVII/2019 dan Nomor 2/PUU-XIX/2021, yang mensyaratkan adanya kesepakatan mengenai telah terjadinya cidera janji dan kesediaan Debitur menyerahkan objek jaminan secara sukarela; apabila tidak tercapai kesepakatan, eksekusi ditempuh melalui permohonan eksekusi pada Pengadilan Negeri.
+
+Oleh karena itu, kami mengimbau Saudara dalam waktu 3 (tiga) hari kalender sejak surat ini untuk: (a) melunasi seluruh kewajiban sebesar ${rp(i.total)}; atau (b) menyerahkan objek jaminan secara sukarela kepada kami guna penyelesaian kewajiban, yang akan dituangkan dalam Berita Acara Serah Terima.
+
+Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
+
+Hormat kami,
+${p}
 
 
 (__________________________)
 ${jabatan}`;
   } else if (i.jaminanTipe === "tanah") {
-    tarik = `SURAT PEMBERITAHUAN RENCANA LELANG EKSEKUSI HAK TANGGUNGAN
-Nomor: ${noSurat("HT")}
-Perihal: Pemberitahuan Rencana Lelang Eksekusi Hak Tanggungan
+    tarik = `${kopLine(s)}
+SURAT PEMBERITAHUAN RENCANA LELANG EKSEKUSI HAK TANGGUNGAN
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("HT")}
+Lampiran : -
+Hal      : Pemberitahuan Rencana Lelang Eksekusi Hak Tanggungan
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Setelah somasi/peringatan kami sampaikan, ${sebutan} masih belum memenuhi kewajiban berikut:
+Menunjuk perjanjian utang-piutang beserta Akta Pemberian Hak Tanggungan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p} selaku pemegang Hak Tanggungan, menyampaikan hal-hal sebagai berikut:
+
+1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
 
 ${rincian}
 
-Sehubungan dengan kelalaian tersebut, dan sesuai Undang-Undang Nomor 4 Tahun 1996 tentang Hak Tanggungan, khususnya hak pemegang Hak Tanggungan untuk menjual objek jaminan atas kekuasaan sendiri (parate eksekusi), kami memberitahukan rencana pelaksanaan lelang eksekusi melalui Kantor Pelayanan Kekayaan Negara dan Lelang (KPKNL) atas objek jaminan berupa:
+2. Bahwa atas kelalaian (wanprestasi) tersebut, sesuai Pasal 6 Undang-Undang Nomor 4 Tahun 1996 tentang Hak Tanggungan, pemegang Hak Tanggungan pertama berhak menjual objek Hak Tanggungan atas kekuasaan sendiri (parate eksekusi) melalui pelelangan umum;
+
+3. Bahwa kami memberitahukan rencana pelaksanaan lelang eksekusi melalui Kantor Pelayanan Kekayaan Negara dan Lelang (KPKNL) atas objek jaminan berupa:
 ${i.jaminan || "(uraian objek jaminan)"}
 
-Kami mengimbau ${sebutan} dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban guna menghindari pelaksanaan lelang dimaksud.
+Sehubungan dengan itu, kami mengimbau Saudara dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} guna menghindari pelaksanaan lelang dimaksud.
 
-Demikian disampaikan untuk menjadi perhatian.
+Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
 
-${ttdKota}
 Hormat kami,
 ${p}
-
 
 
 (__________________________)
 ${jabatan}`;
   } else if (i.jaminanTipe && i.jaminanTipe !== "none") {
-    tarik = `SURAT PEMBERITAHUAN EKSEKUSI JAMINAN
-Nomor: ${noSurat("EKS")}
-Perihal: Pemberitahuan Eksekusi atas Objek Jaminan
+    tarik = `${kopLine(s)}
+SURAT PEMBERITAHUAN EKSEKUSI OBJEK JAMINAN
+
+[[RIGHT]]${ttdKota}
+
+Nomor    : ${noSurat("EKS")}
+Lampiran : -
+Hal      : Pemberitahuan Eksekusi atas Objek Jaminan
 
 ${debtorBlock(i)}
 
 Dengan hormat,
 
-Setelah somasi/peringatan kami sampaikan, ${sebutan} masih belum memenuhi kewajiban berikut:
+Menunjuk perjanjian utang-piutang beserta pengikatan jaminan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p}, menyampaikan hal-hal sebagai berikut:
+
+1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
 
 ${rincian}
 
-Sehubungan dengan kelalaian tersebut, kami memberitahukan rencana tindak lanjut atas objek jaminan berupa ${i.jaminan || "(uraian objek jaminan)"} sesuai ketentuan perjanjian dan peraturan yang berlaku. Kami mengimbau ${sebutan} dalam waktu 7 (tujuh) hari kalender untuk menyelesaikan kewajiban.
+2. Bahwa atas kelalaian (wanprestasi) tersebut, kami memberitahukan rencana tindak lanjut/eksekusi atas objek jaminan berupa:
+${i.jaminan || "(uraian objek jaminan)"}
+sesuai ketentuan perjanjian dan peraturan perundang-undangan yang berlaku.
 
-Demikian disampaikan untuk menjadi perhatian.
+Sehubungan dengan itu, kami mengimbau Saudara dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} guna menghindari pelaksanaan tindak lanjut dimaksud.
 
-${ttdKota}
+Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
+
 Hormat kami,
 ${p}
-
 
 
 (__________________________)
@@ -478,28 +526,207 @@ ${jabatan}`;
   return out;
 }
 
+/* Cetak via iframe tersembunyi — tetap di dalam aplikasi sehingga pengguna
+   tidak "nyantol" di tab/penampil PDF baru (penting untuk PWA standalone iOS).
+   Setelah dialog cetak ditutup, iframe otomatis dibuang dan user kembali ke app. */
+// Format surat resmi (standar dokumen hukum): A4, Times New Roman 12pt,
+// margin atas/kiri 4cm — kanan/bawah 3cm, spasi 1,5, justify, indent baris pertama 1cm,
+// jarak antar-paragraf 6pt. Fallback metric-compatible TNR (Tinos/Liberation Serif) untuk PDF.
+const DOC_STYLE = `@page{size:A4;margin:4cm 3cm 3cm 4cm}
+html,body{width:100%}
+body{font-family:'Times New Roman','Tinos','Liberation Serif','Nimbus Roman',Georgia,'DejaVu Serif',serif;font-size:12pt;line-height:1.5;color:#000;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+p{margin:0;orphans:2;widows:2}
+.kop{text-align:center;border-bottom:2.5pt double #000;padding-bottom:6pt;margin-bottom:12pt}
+.kop .kopname{font-weight:bold;font-size:15pt;letter-spacing:.3px;text-transform:uppercase;line-height:1.2}
+.kop .kopline{font-size:10.5pt;line-height:1.35}
+.title{text-align:center;font-weight:bold;margin:0 0 10pt;line-height:1.3;text-transform:uppercase;letter-spacing:.5px;text-decoration:underline;page-break-after:avoid;break-after:avoid}
+.subhead{font-weight:bold;margin:8pt 0 2pt;page-break-after:avoid;break-after:avoid}
+.body{text-align:justify;text-indent:1cm;margin:0 0 6pt}
+.right{text-align:right;margin:0 0 6pt}
+.line{margin:0 0 1pt}
+.listline{margin:0 0 1pt;padding-left:1cm;text-indent:-1cm}
+.gap{height:6pt}
+table.kv{border-collapse:collapse;margin:2pt 0 6pt;page-break-inside:avoid;break-inside:avoid}
+table.kv td{vertical-align:top;padding:0 0 1pt}
+table.kv td.k{white-space:nowrap;padding-right:8px}
+table.kv td.c{padding-right:8px}
+.sigblock{display:inline-block;margin:8pt 0 0;text-align:center;page-break-inside:avoid;break-inside:avoid}
+.sigblock .ttd-img{height:60px;display:block;margin:0 auto -1px}
+.sigblock .ttd-space{height:52px}
+.sigblock .ttd-rule{width:5cm;border-bottom:1px solid #111;margin:0 auto}
+.sigblock .ttd-name{margin-top:2pt;font-weight:600;line-height:1.3}
+table.siggrid{width:100%;border-collapse:collapse;margin-top:12pt;page-break-inside:avoid;break-inside:avoid}
+table.siggrid td{width:50%;vertical-align:top;text-align:center;padding:0 8pt}
+table.siggrid .sgcap{margin-bottom:2pt}
+table.siggrid .sgimg{height:60px;display:block;margin:0 auto -1px}
+table.siggrid .sgspace{height:54px}
+table.siggrid .sgrule{width:5cm;border-bottom:1px solid #111;margin:0 auto}
+table.siggrid .sgname{margin-top:2pt;font-weight:600;line-height:1.3}`;
+function printViaIframe(label, bodyHtml) {
+  try {
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    // Beri iframe lebar A4 nyata (di luar layar) agar tata letak cetak benar —
+    // iframe 0px membuat teks membungkus per beberapa huruf & terpotong antar-halaman.
+    iframe.style.cssText = "position:fixed;left:-9999px;top:0;width:794px;height:1123px;border:0;opacity:0;";
+    document.body.appendChild(iframe);
+    const cw = iframe.contentWindow;
+    let removed = false;
+    const cleanup = () => { if (removed) return; removed = true; setTimeout(() => { try { iframe.remove(); } catch (_) {} }, 500); };
+    cw.onafterprint = cleanup;
+    const doc = cw.document;
+    doc.open();
+    doc.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title><style>${DOC_STYLE}</style></head>` +
+      `<body>${bodyHtml}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},150)}<\/script></body></html>`
+    );
+    doc.close();
+    setTimeout(cleanup, 5 * 60 * 1000); // pengaman bila onafterprint tak terpicu
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/* Ubah teks dokumen polos → HTML rapi (paragraf justify, tabel "label : nilai",
+   blok tanda tangan). sigMap memetakan token tanda tangan ke gambar data-URL:
+   { SIGN, SIGN1, SIGN2 }. Token tanpa gambar / placeholder "(____)" jadi ruang ttd manual. */
+function renderDocHtml(text, sigMap = {}) {
+  const esc = (str) => (str == null ? "" : String(str)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lines = (text || "").replace(/\r/g, "").split("\n");
+  const out = [];
+  let fieldRun = [];
+  let pendingSig = null;
+  let seenTitle = false;
+  let blankPending = false;
+
+  const gap = () => { if (out.length) out.push(`<div class="gap"></div>`); };
+  const flushFields = () => {
+    if (!fieldRun.length) return;
+    const rows = fieldRun.map((f) => `<tr><td class="k">${esc(f.k)}</td><td class="c">:</td><td class="v">${esc(f.v)}</td></tr>`).join("");
+    out.push(`<table class="kv">${rows}</table>`);
+    fieldRun = [];
+  };
+  const flushSig = () => {
+    if (!pendingSig) return;
+    const inner = pendingSig.img
+      ? `<img class="ttd-img" src="${pendingSig.img}" alt="tanda tangan"/>`
+      : `<div class="ttd-space"></div>`;
+    const names = pendingSig.names.map((n) => `<div class="ttd-name">${esc(n)}</div>`).join("");
+    out.push(`<div class="sigblock">${inner}<div class="ttd-rule"></div>${names}</div>`);
+    pendingSig = null;
+  };
+  const fieldMatch = (ln) => {
+    const m = ln.match(/^([^:]{1,22}?) *: +(\S.*)$/);
+    return m ? { k: m[1].trim(), v: m[2] } : null;
+  };
+  const sigAnchor = (ln) => {
+    const t = ln.trim();
+    const m = t.match(/^\[\[SIGN([12]?)\]\]$/);
+    if (m) return { img: sigMap["SIGN" + (m[1] || "")] || null };
+    if (/^\(?_{5,}\)?$/.test(t)) return { img: null };
+    return null;
+  };
+  // Blok tanda tangan dua pihak (kiri & kanan). Baris: "tipe|kiri|kanan", tipe = cap|sig|name.
+  const renderSigGrid = (rows) => {
+    const cols = [{ cap: "", tok: "", names: [] }, { cap: "", tok: "", names: [] }];
+    for (const r of rows) {
+      const parts = r.split("|");
+      const type = (parts[0] || "").trim();
+      [parts[1] || "", parts[2] || ""].forEach((c, idx) => {
+        const v = c.trim();
+        if (type === "cap") cols[idx].cap = v;
+        else if (type === "sig") cols[idx].tok = v;
+        else if (type === "name" && v) cols[idx].names.push(v);
+      });
+    }
+    const cell = (col) => {
+      const sig = col.tok && sigMap[col.tok]
+        ? `<img class="sgimg" src="${sigMap[col.tok]}" alt="tanda tangan"/>`
+        : `<div class="sgspace"></div>`;
+      const cap = col.cap ? `<div class="sgcap">${esc(col.cap)}</div>` : "";
+      const names = col.names.map((n) => `<div class="sgname">${esc(n)}</div>`).join("");
+      return `<td>${cap}${sig}<div class="sgrule"></div>${names}</td>`;
+    };
+    return `<table class="siggrid"><tr>${cell(cols[0])}${cell(cols[1])}</tr></table>`;
+  };
+  const textLine = (t) => {
+    const allCaps = /[A-Z]/.test(t) && !/[a-z]/.test(t);
+    if (allCaps && t.length <= 70 && !/^(PT|CV|UD)\b/.test(t)) {
+      if (!seenTitle) { seenTitle = true; return `<p class="title">${esc(t)}</p>`; }
+      return `<p class="subhead">${esc(t)}</p>`;
+    }
+    if (/^[-•]\s+/.test(t)) return `<p class="listline">${esc(t)}</p>`;
+    if (t.length <= 55) return `<p class="line">${esc(t)}</p>`;
+    return `<p class="body">${esc(t)}</p>`;
+  };
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const raw = lines[idx];
+    const ln = raw.replace(/\s+$/, "");
+    if (ln.trim() === "[[SIGGRID]]") {
+      flushFields(); flushSig();
+      const rows = [];
+      while (idx + 1 < lines.length && lines[idx + 1].trim() !== "[[/SIGGRID]]") { rows.push(lines[++idx]); }
+      idx++; // lewati penanda penutup
+      if (blankPending) { gap(); blankPending = false; }
+      out.push(renderSigGrid(rows));
+      continue;
+    }
+    const kopM = ln.trim().match(/^\[\[KOP\|(.*)\]\]$/);
+    if (kopM) {
+      const [name = "", addr = "", contact = ""] = kopM[1].split("|");
+      const ln2 = (c) => (c.trim() ? `<div class="kopline">${esc(c.trim())}</div>` : "");
+      out.push(`<div class="kop"><div class="kopname">${esc(name.trim())}</div>${ln2(addr)}${ln2(contact)}</div>`);
+      blankPending = false;
+      continue;
+    }
+    if (ln.trim().startsWith("[[RIGHT]]")) {
+      flushFields(); flushSig();
+      if (blankPending) { gap(); blankPending = false; }
+      out.push(`<p class="right">${esc(ln.trim().slice(9).trim())}</p>`);
+      continue;
+    }
+    if (ln.trim() === "") { flushFields(); flushSig(); blankPending = true; continue; }
+    const anc = sigAnchor(ln);
+    if (anc) {
+      flushFields(); flushSig();
+      if (blankPending) { gap(); blankPending = false; }
+      pendingSig = { img: anc.img, names: [] };
+      continue;
+    }
+    if (pendingSig) { pendingSig.names.push(ln.trim()); continue; }
+    const fm = fieldMatch(ln);
+    if (fm) {
+      if (blankPending) { gap(); blankPending = false; }
+      fieldRun.push(fm);
+      continue;
+    }
+    flushFields();
+    if (blankPending) { gap(); blankPending = false; }
+    out.push(textLine(ln.trim()));
+  }
+  flushFields(); flushSig();
+  return out.join("");
+}
+
 function printDoc(label, text, sig) {
-  const w = window.open("", "_blank");
-  if (!w) return false;
-  const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // Tempatkan tanda tangan tepat di atas garis nama lewat token [[SIGN]]
-  const sigBox = sig
-    ? `<span class="sig"><img src="${sig}" alt="tanda tangan"/></span>`
-    : `<span class="sigline"></span>`;
-  const body = esc.replace(/\[\[SIGN\]\]/g, sigBox);
-  w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
-    `<style>@page{size:A4;margin:2.5cm}` +
-    `body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.6;color:#111}` +
-    `.doc{white-space:pre-wrap}` +
-    `.sig{display:inline-block;min-width:230px;border-bottom:1px solid #111;text-align:center;vertical-align:bottom}` +
-    `.sig img{height:80px;display:block;margin:0 auto 2px}` +
-    `.sigline{display:inline-block;min-width:230px;height:74px;border-bottom:1px solid #111;vertical-align:bottom}` +
-    `</style>` +
-    `</head><body><div class="doc">${body}</div><script>window.onload=function(){window.print()}<\/script></body></html>`
-  );
-  w.document.close();
-  return true;
+  const sigMap = sig && typeof sig === "object" ? sig : { SIGN: sig };
+  return printViaIframe(label, renderDocHtml(text, sigMap));
+}
+
+// Versi teks polos (untuk disalin ke clipboard / WA) — buang penanda tata letak.
+function docToPlain(text) {
+  return (text || "")
+    .replace(/^\[\[KOP\|(.*)\]\]$/gm, (_, g) => g.split("|").filter(Boolean).join("\n"))
+    .replace(/^\[\[RIGHT\]\]/gm, "")
+    .replace(/\[\[\/?SIGGRID\]\]\n?/g, "")
+    .replace(/^cap\|(.*)\|(.*)$/gm, (_, a, b) => `${a}\t\t${b}`)
+    .replace(/^sig\|.*$/gm, "")
+    .replace(/^name\|(.*)\|(.*)$/gm, (_, a, b) => `${a}\t\t${b}`)
+    .replace(/\[\[SIGN\d?\]\]/g, "(__________________________)")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function fieldBase(s) {
@@ -509,23 +736,38 @@ function fieldBase(s) {
   const tgl = fmtTgl(today0().toISOString().slice(0, 10));
   return { p, jabatan, ttdKota: `${kota ? kota + ", " : ""}${tgl}` };
 }
+// Kop surat (letterhead) dari profil institusi. Pakai "/" pengganti "|" agar parser aman.
+function kopLine(s) {
+  const p = (s.perusahaan?.trim() || "[Nama Perusahaan Anda]").replace(/\|/g, "/");
+  const alamat = (s.alamatKantor?.trim() || "").replace(/\|/g, "/");
+  const kontak = (s.kontakKantor?.trim() || "").replace(/\|/g, "/");
+  return `[[KOP|${p}|${alamat}|${kontak}]]`;
+}
 function suratPernyataan(i, s, f) {
   const { p, ttdKota } = fieldBase(s);
+  const ar = i.sisaPokok ?? i.nominal;
   return `SURAT PERNYATAAN KESANGGUPAN PEMBAYARAN
 
 Yang bertanda tangan di bawah ini:
-Nama   : ${i.customer}
-Alamat : ${i.alamat || "-"}
+Nama    : ${i.customer}
+Alamat  : ${i.alamat || "-"}${i.pic ? `\nJabatan : ${i.pic}` : ""}
 
-Dengan ini menyatakan dengan sebenarnya bahwa saya memiliki kewajiban pembayaran kepada ${p} atas:
+dalam hal ini bertindak untuk dan atas nama diri sendiri/badan usaha tersebut di atas (selanjutnya disebut "Pihak yang Menyatakan"), dengan ini menyatakan dengan sebenarnya dan tanpa paksaan dari pihak manapun, sebagai berikut:
+
+1. Bahwa Pihak yang Menyatakan mengakui memiliki kewajiban pembayaran kepada ${p} dengan rincian:
+
 No. Tagihan     : ${i.noInvoice}
+Pokok / AR      : ${rp(ar)}
+Denda           : ${rp(i.denda)}
 Total Kewajiban : ${rp(i.total)}
 
-Saya menyatakan SANGGUP menyelesaikan kewajiban tersebut sebesar ${rp(f.jumlah || i.total)} selambat-lambatnya pada tanggal ${fmtTgl(f.tgl)}.
+2. Bahwa Pihak yang Menyatakan SANGGUP dan BERJANJI menyelesaikan kewajiban tersebut sebesar ${rp(f.jumlah || i.total)} selambat-lambatnya pada tanggal ${fmtTgl(f.tgl)};
 
-Apabila saya tidak memenuhi pernyataan ini, saya bersedia menanggung segala konsekuensi sesuai ketentuan perjanjian dan peraturan yang berlaku.
+3. Bahwa apabila Pihak yang Menyatakan lalai memenuhi pernyataan ini, Pihak yang Menyatakan bersedia menanggung denda keterlambatan dan/atau penyerahan jaminan serta menerima segala upaya hukum sesuai ketentuan perjanjian dan peraturan perundang-undangan yang berlaku;
 
-Demikian pernyataan ini saya buat dengan sadar dan tanpa paksaan dari pihak manapun.
+4. Bahwa Surat Pernyataan ini dibuat sebagai pengakuan utang sekaligus alat bukti yang sah dan dapat dipergunakan sebagaimana mestinya.
+
+Demikian Surat Pernyataan ini dibuat dengan penuh kesadaran dan tanggung jawab, dibubuhi meterai secukupnya.
 
 ${ttdKota}
 Yang Menyatakan,
@@ -535,52 +777,83 @@ ${i.customer}`;
 }
 function bastPenarikan(i, s, f) {
   const { p, jabatan, ttdKota } = fieldBase(s);
-  return `BERITA ACARA SERAH TERIMA OBJEK JAMINAN
+  return `${kopLine(s)}
+BERITA ACARA SERAH TERIMA OBJEK JAMINAN
 
-Pada hari ini, ${ttdKota}, telah dilakukan serah terima objek jaminan antara:
+Pada hari ini, ${ttdKota}, yang bertanda tangan di bawah ini telah sepakat melakukan serah terima objek jaminan, masing-masing:
 
-Pihak Pertama (yang menyerahkan):
-Nama   : ${i.customer}
-Alamat : ${i.alamat || "-"}
+A. PARA PIHAK
+1. ${i.customer}, beralamat di ${i.alamat || "-"}, selanjutnya disebut "Pihak Pertama" (yang menyerahkan);
+2. ${p}, selanjutnya disebut "Pihak Kedua" (yang menerima).
 
-Pihak Kedua (yang menerima):
-Nama   : ${p}
+B. OBJEK DAN DASAR
+1. Bahwa Pihak Pertama memiliki kewajiban kepada Pihak Kedua atas tagihan ${i.noInvoice} sebesar ${rp(i.total)} yang telah jatuh tempo dan belum diselesaikan;
 
-Objek jaminan yang diserahterimakan:
+2. Bahwa untuk penyelesaian kewajiban tersebut, Pihak Pertama dengan ini menyerahkan secara sukarela objek jaminan berupa:
 ${i.jaminan || "(uraian objek jaminan)"}
+dengan kondisi/kelengkapan: ${f.kondisi || "-"}.
 
-Kondisi / kelengkapan:
-${f.kondisi || "-"}
+C. KETENTUAN
+1. Bahwa penyerahan objek jaminan dilakukan secara sukarela tanpa paksaan dari pihak manapun;
 
-Sehubungan dengan kewajiban atas ${i.noInvoice} sebesar ${rp(i.total)} yang belum diselesaikan, Pihak Pertama menyerahkan objek jaminan di atas kepada Pihak Kedua secara sukarela untuk diproses sesuai ketentuan yang berlaku.
+2. Bahwa Pihak Kedua berhak memproses objek jaminan untuk penyelesaian kewajiban sesuai ketentuan yang berlaku, dan hasil bersih penjualannya diperhitungkan dengan kewajiban Pihak Pertama;
 
-Demikian berita acara ini dibuat dengan sebenarnya untuk dipergunakan sebagaimana mestinya.
+3. Bahwa apabila terdapat kelebihan hasil penjualan setelah dikurangi seluruh kewajiban dan biaya, akan dikembalikan kepada Pihak Pertama; sebaliknya, kekurangannya tetap menjadi kewajiban Pihak Pertama.
 
-Pihak Pertama (yang menyerahkan),
+Demikian Berita Acara ini dibuat dengan sebenarnya dan ditandatangani oleh Para Pihak dalam keadaan sadar tanpa adanya paksaan.
 
-[[SIGN]]
-${i.customer}
+${ttdKota}
 
+[[SIGGRID]]
+cap|Pihak Pertama (yang menyerahkan),|Pihak Kedua (yang menerima),
+sig|SIGN1|SIGN2
+name|${i.customer}|${p}
+name||${jabatan}
+[[/SIGGRID]]`;
+}
+function momKunjungan(i, s, f) {
+  const { p, jabatan, ttdKota } = fieldBase(s);
+  const petugas = (s.petugasAktif && s.petugasAktif.trim()) || jabatan;
+  const ar = i.sisaPokok ?? i.nominal;
+  return `${kopLine(s)}
+MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN PENAGIHAN
 
-Pihak Kedua (yang menerima),
+Hari / Tanggal : ${ttdKota}
+Tempat         : ${i.alamat || "-"}
+Perihal        : Pembahasan penyelesaian kewajiban yang telah jatuh tempo
 
+A. PESERTA / PARA PIHAK
+1. Pihak Penagih : ${petugas} — ${p}
+2. Pihak Debitur : ${i.customer}${i.pic ? ` (u.p. ${i.pic})` : ""}
 
+B. DATA KEWAJIBAN
+No. Tagihan     : ${i.noInvoice}
+Pokok / AR      : ${rp(ar)}
+Denda           : ${rp(i.denda)}
+Total Kewajiban : ${rp(i.total)}
+Jatuh Tempo     : ${fmtTgl(i.tglJatuhTempo)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hari)` : ""}
 
-(__________________________)
-${jabatan}`;
+C. POKOK PEMBAHASAN
+1. Konfirmasi posisi tunggakan saat kunjungan — Pokok/AR ${rp(ar)} + denda ${rp(i.denda)} = total kewajiban ${rp(i.total)}.${f.pembahasan ? "\n2. " + f.pembahasan : ""}
+
+D. KESEPAKATAN / RENCANA TINDAK LANJUT
+${f.kesepakatan || "-"}${f.tgl ? `\n\nTarget penyelesaian : ${fmtTgl(f.tgl)}` : ""}
+
+E. PENUTUP
+Demikian Berita Acara/Minutes of Meeting ini dibuat dengan sebenarnya berdasarkan hasil pertemuan, dan disetujui serta ditandatangani oleh Para Pihak tanpa adanya paksaan, untuk dipergunakan sebagaimana mestinya.
+
+${ttdKota}
+
+[[SIGGRID]]
+cap|Pihak Debitur,|Pihak Penagih,
+sig|SIGN1|SIGN2
+name|${i.customer}|${petugas}
+name||${p}
+[[/SIGGRID]]`;
 }
 
 function printLetter(label, text) {
-  const w = window.open("", "_blank");
-  if (!w) return false;
-  const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
-    `<style>@page{size:A4;margin:2.5cm}body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.55;color:#111}.doc{white-space:pre-wrap}</style>` +
-    `</head><body><div class="doc">${esc}</div><script>window.onload=function(){window.print()}<\/script></body></html>`
-  );
-  w.document.close();
-  return true;
+  return printViaIframe(label, renderDocHtml(text, {}));
 }
 
 function exportExcel(rows, s) {
@@ -662,52 +935,69 @@ function exportEskalasiExcel(list, s) {
 }
 
 function printEskalasiRekap(list, s) {
-  const w = window.open("", "_blank");
-  if (!w) return false;
   const esc = (x) => String(x ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const body = list.map((r) =>
     `<tr><td>${esc(fmtTgl(r.ts))}</td><td>${esc(r.customer)}</td><td>${esc(r.noInvoice)}</td><td>${esc(r.tindakan)}</td><td>${esc(r.petugas || "-")}</td><td style="text-align:right">${esc(rp(r.total))}</td></tr>`
   ).join("");
-  w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>Rekap Riwayat Eskalasi</title>` +
-    `<style>@page{size:A4;margin:1.8cm}body{font-family:'Times New Roman',Georgia,serif;font-size:11pt;color:#111}h1{font-size:15pt;margin:0 0 2px}p.sub{margin:0 0 14px;color:#555;font-size:10pt}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}th{background:#eee;font-size:10pt}</style>` +
-    `</head><body><h1>Rekap Riwayat Eskalasi</h1>` +
+  const html =
+    `<style>.rk{font-family:'Times New Roman',Georgia,serif;color:#111}.rk h1{font-size:15pt;margin:0 0 2px}.rk .sub{margin:0 0 14px;color:#555;font-size:10pt}.rk table{width:100%;border-collapse:collapse;font-size:11pt}.rk th,.rk td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}.rk th{background:#eee;font-size:10pt}</style>` +
+    `<div class="rk"><h1>Rekap Riwayat Eskalasi</h1>` +
     `<p class="sub">${esc(s.perusahaan || "Kolekta")} — dicetak ${esc(new Date().toLocaleString("id-ID"))} — ${list.length} tindakan</p>` +
     `<table><thead><tr><th>Tanggal</th><th>Customer</th><th>No. Invoice</th><th>Tindakan</th><th>Petugas</th><th>Total Tagihan</th></tr></thead>` +
-    `<tbody>${body || '<tr><td colspan="6">Belum ada riwayat eskalasi.</td></tr>'}</tbody></table>` +
-    `<script>window.onload=function(){window.print()}<\/script></body></html>`
-  );
-  w.document.close();
-  return true;
+    `<tbody>${body || '<tr><td colspan="6">Belum ada riwayat eskalasi.</td></tr>'}</tbody></table></div>`;
+  return printViaIframe("Rekap Riwayat Eskalasi", html);
 }
 
 /* ---------- Statement of Account per debitur ---------- */
 function statementText(name, list, s) {
-  const p = s.perusahaan?.trim() || "[Nama Perusahaan Anda]";
-  const kota = s.kota?.trim();
-  const tgl = fmtTgl(today0().toISOString().slice(0, 10));
+  const { p, jabatan, ttdKota } = fieldBase(s);
+  const now = new Date();
+  const tgl = fmtTgl(now.toISOString().slice(0, 10));
+  const noSOA = `......./SOA/${ROMAN[now.getMonth()]}/${now.getFullYear()}`;
   const rows = list.filter((i) => i.customer.trim().toLowerCase() === name.trim().toLowerCase());
   const totOut = rows.filter((i) => i.status !== "lunas").reduce((a, i) => a + i.total, 0);
   const totBayar = rows.reduce((a, i) => a + (i.terbayar || 0), 0);
+  const totTagih = rows.reduce((a, i) => a + i.total, 0);
   const lines = rows.map((i) =>
-    `- ${i.noInvoice} | JT ${fmtTgl(i.tglJatuhTempo)} | Pokok ${rp(i.nominal)} | Dibayar ${rp(i.terbayar || 0)} | Sisa+denda ${rp(i.total)} | ${stLabel(i.status)}`
+    `- ${i.noInvoice} | JT ${fmtTgl(i.tglJatuhTempo)} | Pokok ${rp(i.nominal)} | Dibayar ${rp(i.terbayar || 0)} | Sisa+Denda ${rp(i.total)} | ${stLabel(i.status)}`
   ).join("\n");
-  return `STATEMENT OF ACCOUNT
-${p}${kota ? " — " + kota : ""}
-Per ${tgl}
+  return `${kopLine(s)}
+STATEMENT OF ACCOUNT
 
-Debitur : ${name}
-Jumlah invoice : ${rows.length}
+[[RIGHT]]${ttdKota}
+
+Nomor : ${noSOA}
+Hal   : Statement of Account (Rincian Posisi Tagihan)
+
+Kepada Yth.
+${name}
+di Tempat
+
+Dengan hormat,
+
+Bersama ini kami sampaikan ringkasan posisi tagihan (Statement of Account) atas nama Saudara per tanggal ${tgl}, sebagai berikut:
+
+Debitur        : ${name}
+Jumlah Invoice : ${rows.length}
 
 RINCIAN TAGIHAN
 ${lines || "-"}
 
 RINGKASAN
-Total dibayar      : ${rp(totBayar)}
-Total outstanding  : ${rp(totOut)}
+Total Tagihan      : ${rp(totTagih)}
+Total Dibayar      : ${rp(totBayar)}
+Total Outstanding  : ${rp(totOut)}
 
-Dokumen ini merupakan ringkasan posisi tagihan per tanggal di atas.
-— Dibuat via Kolekta`;
+Mohon Saudara berkenan mencocokkan data di atas dengan catatan Saudara. Apabila terdapat perbedaan, mohon konfirmasi kepada kami selambat-lambatnya dalam waktu 7 (tujuh) hari kerja sejak Statement ini diterima; apabila tidak terdapat konfirmasi, maka data di atas dianggap telah sesuai dan disetujui.
+
+Demikian kami sampaikan. Atas perhatian dan kerja samanya, kami ucapkan terima kasih.
+
+Hormat kami,
+${p}
+
+
+(__________________________)
+${jabatan}`;
 }
 
 /* ---------- Backup JSON ---------- */
@@ -773,6 +1063,7 @@ const sbAdminCreate = async (secret, name, atasanCode, petugasCode) => {
   return a && a[0] ? a[0] : null;
 };
 const sbAdminList = async (secret) => (await sbRpc("kolekta_admin_list_tenants", { p_admin: secret })) || [];
+const sbAdminDelete = (secret, tenantId) => sbRpc("kolekta_admin_delete_tenant", { p_admin: secret, p_tenant_id: tenantId });
 
 function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; } }
 function saveAuth(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch {} }
@@ -834,7 +1125,7 @@ const sampleData = () => {
   const t = today0();
   const d = (off) => { const x = new Date(t); x.setDate(x.getDate() + off); return x.toISOString().slice(0, 10); };
   return {
-    settings: { perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", cloudUrl: "", cloudKey: "", cloudId: "", peran: "atasan", petugasAktif: "", petugas: ["Andi", "Rudi"], targets: { Andi: 50000000, Rudi: 50000000 } },
+    settings: { perusahaan: "", kota: "", alamatKantor: "", kontakKantor: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, cloudUrl: "", cloudKey: "", cloudId: "", peran: "atasan", petugasAktif: "", petugas: ["Andi", "Rudi"], targets: { Andi: 50000000, Rudi: 50000000 } },
     invoices: [
       { id: uid(), customer: "PT Karya Bangun Persada", tipe: "perusahaan", assignedTo: "Andi", alamat: "Jl. Industri Raya No. 12, Surabaya", noInvoice: "INV-2026-0188", nominal: 145000000, tglJatuhTempo: d(-42), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "none", jaminan: "", aktivitas: [], dibuat: d(-72) },
       { id: uid(), customer: "Budi Santoso", tipe: "perorangan", assignedTo: "Andi", alamat: "Perum Griya Asri Blok C-7, Gresik", noInvoice: "INV-2026-0203", nominal: 38500000, tglJatuhTempo: d(-23), status: "belum_dihubungi", lastFollowUp: null, janjiBayar: null, jaminanTipe: "fidusia", jaminan: "BPKB Toyota Avanza tahun 2021, Nopol W 1234 ABC a.n. Budi Santoso", pic: "Budi Santoso", telp: "081234567890", pembayaran: [{ ts: d(-5), jumlah: 10000000 }], eskalasi: [{ ts: d(-1), level: "tegas" }], aktivitas: [], dibuat: d(-39) },
@@ -847,7 +1138,7 @@ const sampleData = () => {
 };
 
 const KEY = "kolekta:v1";
-const defaultSettings = () => ({ perusahaan: "", kota: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", peran: "atasan", petugasAktif: "", petugas: [], targets: {} });
+const defaultSettings = () => ({ perusahaan: "", kota: "", alamatKantor: "", kontakKantor: "", jabatan: "Bagian Penagihan / Kuasa Hukum", dendaRatePct: 0.1, followUpDays: 7, tema: "hutan", gelap: false, peran: "atasan", petugasAktif: "", petugas: [], targets: {} });
 const emptyData = () => ({ settings: defaultSettings(), invoices: [] });
 
 /* ---------- Logo ---------- */
@@ -1053,32 +1344,32 @@ export default function KolektaApp() {
     const tgl = fmtTgl(today0().toISOString().slice(0, 10));
     const a = analytics;
     const top = prioritas.slice(0, 5).map((i, n) => `${n + 1}. ${i.customer} — ${rp(i.total)} (telat ${i.daysOverdue} hari)`).join("\n") || "-";
-    return `LAPORAN PENAGIHAN — ${tgl}
+    return `LAPORAN PENAGIHAN
 ${s?.perusahaan || "Kolekta"}
 
-RINGKASAN
-- Piutang aktif    : ${rp(a.outstanding)} (${stats.nAktif} invoice)
-- Overdue          : ${rp(a.overdueAmt)} (${stats.nOverdue} invoice, ${a.pctOverdue}%)
-- DSO              : ~${a.dso} hari
-- Tertagih bln ini : ${rp(a.tertagihBulanIni)}
+[[RIGHT]]Per ${tgl}
 
-KOLEKTIBILITAS (OJK)
-${a.kolBreak.map((k) => `- Kol ${k.no} ${k.label.padEnd(13)}: ${rp(k.amount)} (${k.count})`).join("\n")}
-- Bermasalah (Kol 3-5): ${rp(a.macet)}
+A. RINGKASAN
+Piutang Aktif     : ${rp(a.outstanding)} (${stats.nAktif} invoice)
+Overdue           : ${rp(a.overdueAmt)} (${stats.nOverdue} invoice — ${a.pctOverdue}%)
+DSO               : ~${a.dso} hari
+Tertagih Bln Ini  : ${rp(a.tertagihBulanIni)}
 
-PERLU TINDAK LANJUT
-- Belum dihubungi     : ${panels.belum.length}
-- Perlu ditagih ulang : ${panels.perlu.length}
+B. KOLEKTIBILITAS (OJK)
+${a.kolBreak.map((k) => `Kol ${k.no} : ${k.label} — ${rp(k.amount)} (${k.count})`).join("\n")}
+Bermasalah (Kol 3-5) : ${rp(a.macet)}
 
-PRIORITAS TERATAS
+C. PERLU TINDAK LANJUT
+Belum Dihubungi     : ${panels.belum.length}
+Perlu Ditagih Ulang : ${panels.perlu.length}
+
+D. PRIORITAS TERATAS
 ${top}
 
-AKTIVITAS HARI INI
-- Follow-up dilakukan  : ${a.fuToday}
-- Pembayaran masuk     : ${rp(a.payToday)} (${a.payTodayN} transaksi)
-- Surat/eskalasi kirim : ${a.eskToday}
-
-— Dibuat via Kolekta`;
+E. AKTIVITAS HARI INI
+Follow-up Dilakukan  : ${a.fuToday}
+Pembayaran Masuk     : ${rp(a.payToday)} (${a.payTodayN} transaksi)
+Surat/Eskalasi Kirim : ${a.eskToday}`;
   }, [analytics, panels, prioritas, stats, s]);
 
   const filtered = useMemo(() => {
@@ -1154,7 +1445,7 @@ AKTIVITAS HARI INI
   if (!data)
     return <div className="flex h-screen items-center justify-center" style={{ background: T.bg, color: T.sub, fontFamily: SANS }}>Memuat Kolekta…</div>;
 
-  T = THEMES[data.settings.tema] || THEMES.hutan;
+  T = themePalette(data.settings.tema, data.settings.gelap);
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => {
     const active = tab === id;
@@ -1233,11 +1524,15 @@ AKTIVITAS HARI INI
 .sub-fade{animation:kolektaFade .2s cubic-bezier(.22,.61,.36,1)}
 .kpress{transition:transform .09s ease}
 .kpress:active{transform:scale(.96)}
+@keyframes kolektaExpand{from{opacity:0;transform:translateY(-8px) scaleY(.97)}to{opacity:1;transform:none}}
+.filter-anim{animation:kolektaExpand .26s cubic-bezier(.22,.61,.36,1);transform-origin:top}
+.chip{transition:background-color .18s ease,color .18s ease,border-color .18s ease,transform .09s ease}
+.chip:active{transform:scale(.94)}
 @keyframes kolektaOv{from{opacity:0}to{opacity:1}}
 @keyframes kolektaSlide{from{transform:translateX(-100%)}to{transform:none}}
 .drawer-ov{animation:kolektaOv .2s ease}
 .drawer-pn{animation:kolektaSlide .26s cubic-bezier(.2,.7,.2,1)}
-@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade{animation:none}.kpress:active{transform:none}}
+@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim{animation:none}.kpress:active,.chip:active{transform:none}}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
@@ -1337,10 +1632,10 @@ AKTIVITAS HARI INI
                   <div className="ml-auto flex gap-1">
                     <button onClick={() => { if (!printLetter("Laporan Penagihan", laporanText)) flash("Popup diblokir — pakai Salin"); }}
                       className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand2 }}><Printer size={12} /> PDF</button>
-                    <button onClick={() => copy(laporanText)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}><Copy size={12} /> Salin</button>
+                    <button onClick={() => copy(docToPlain(laporanText))} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}><Copy size={12} /> Salin</button>
                   </div>
                 </div>
-                <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: MONO }}>{laporanText}</pre>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: MONO }}>{docToPlain(laporanText)}</pre>
               </div>
             )}
 
@@ -1457,8 +1752,8 @@ AKTIVITAS HARI INI
                   className="w-full bg-transparent py-2.5 text-sm outline-none" />
               </div>
               <button onClick={() => setShowFilter((v) => !v)}
-                className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
-                style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} /></button>
+                className="chip flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
+                style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} style={{ transition: "transform .2s ease", transform: showFilter ? "rotate(90deg)" : "none" }} /></button>
               <button onClick={() => fileRef.current?.click()}
                 className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><Upload size={16} /><span className="hidden sm:inline">Impor</span></button>
@@ -1471,11 +1766,11 @@ AKTIVITAS HARI INI
             </div>
 
             {showFilter && (
-              <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <div className="filter-anim rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                 <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Status</p>
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {[["all", "Semua"], ...STATUS_ORDER.map((st) => [st, stLabel(st)])].map(([v, lbl]) => (
-                    <button key={v} onClick={() => setFStatus(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                    <button key={v} onClick={() => setFStatus(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                       style={fStatus === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                   ))}
                 </div>
@@ -1484,7 +1779,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Petugas</p>
                     <div className="mb-2 flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["_none", "Belum ditugaskan"], ...s.petugas.map((nm) => [nm, nm])].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFPetugas(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFPetugas(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fPetugas === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1495,7 +1790,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Tipe</p>
                     <div className="flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["perusahaan", "PT/CV"], ["perorangan", "Perorangan"]].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFTipe(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFTipe(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fTipe === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1504,7 +1799,7 @@ AKTIVITAS HARI INI
                     <p className="mb-1.5 text-[11px] font-semibold" style={{ color: T.sub }}>Jaminan</p>
                     <div className="flex flex-wrap gap-1.5">
                       {[["all", "Semua"], ["ada", "Ada"], ["tanpa", "Tanpa"]].map(([v, lbl]) => (
-                        <button key={v} onClick={() => setFJaminan(v)} className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        <button key={v} onClick={() => setFJaminan(v)} className="chip rounded-full px-2.5 py-1 text-xs font-medium"
                           style={fJaminan === v ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
                       ))}
                     </div>
@@ -1531,7 +1826,7 @@ AKTIVITAS HARI INI
               {filtered.map((i) => (
                 <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
                   onToggle={() => setOpenId(openId === i.id ? null : i.id)}
-                  onStatement={(name) => { const t = statementText(name, enriched, s); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(t); flash("Popup diblokir — statement disalin"); } }}
+                  onStatement={(name) => { const t = statementText(name, enriched, s); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
                   patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} />
               ))}
               {filtered.length === 0 && (
@@ -2020,8 +2315,9 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [showDoc, setShowDoc] = useState(false);
   const [sub, setSub] = useState("tagih");
   const [docType, setDocType] = useState("pernyataan");
-  const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "" });
+  const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   const [dsig, setDsig] = useState(null);
+  const [dsig2, setDsig2] = useState(null);
   const [tindakLanjut, setTindakLanjut] = useState(i.tindakLanjut || "");
   const [lunasAsk, setLunasAsk] = useState(false);
   const [lunasCode, setLunasCode] = useState("");
@@ -2100,20 +2396,31 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     catch { flash("Lokasi tidak tersedia / izin ditolak"); }
     setBusyLoc(false);
   };
+  const docMeta = (jenis) =>
+    jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
+    : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
+    : { gen: suratPernyataan, label: "Surat Pernyataan" };
+  const stripSign = docToPlain;
+  const sigMapFor = (jenis, a, b) =>
+    jenis === "mom" ? { SIGN1: a, SIGN2: b }
+    : jenis === "bast" ? { SIGN1: a }
+    : { SIGN: a };
   const createDoc = () => {
-    const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi };
-    const text = docType === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
-    const label = docType === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    const ok = printDoc(label, text, dsig);
-    patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi }, ...(x.dokumen || [])] }));
-    if (!ok) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
-    setShowDoc(false); setDsig(null); setDForm({ jumlah: "", tgl: "", kondisi: "" });
+    const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi, pembahasan: dForm.pembahasan, kesepakatan: dForm.kesepakatan };
+    const { gen, label } = docMeta(docType);
+    const text = gen(i, s, f);
+    const sigArg = sigMapFor(docType, dsig, dsig2);
+    const ok = printDoc(label, text, sigArg);
+    patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, sig2: dsig2 || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi, pembahasan: f.pembahasan, kesepakatan: f.kesepakatan }, ...(x.dokumen || [])] }));
+    if (!ok) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
+    setShowDoc(false); setDsig(null); setDsig2(null); setDForm({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   };
   const reprintDoc = (dk) => {
-    const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi };
-    const text = dk.jenis === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
-    const label = dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    if (!printDoc(label, text, dk.sig)) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); }
+    const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi, pembahasan: dk.pembahasan, kesepakatan: dk.kesepakatan };
+    const { gen, label } = docMeta(dk.jenis);
+    const text = gen(i, s, f);
+    const sigArg = sigMapFor(dk.jenis, dk.sig, dk.sig2);
+    if (!printDoc(label, text, sigArg)) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); }
   };
 
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
@@ -2291,20 +2598,36 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               </button>
               {showDoc && (
                 <div className="mt-2 rounded-lg p-2.5" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                  <div className="mb-2 flex gap-1.5">
-                    <button onClick={() => setDocType("pernyataan")} className="flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
-                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    <button onClick={() => setDocType("pernyataan")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
+                    <button onClick={() => setDocType("mom")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "mom" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>MOM / Visit Report</button>
+                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
                   </div>
                   {docType === "pernyataan" ? (
                     <div className="grid grid-cols-2 gap-2">
                       <input value={grpID(dForm.jumlah)} onChange={(e) => setDForm({ ...dForm, jumlah: onlyDigits(e.target.value) })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
                       <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
                     </div>
+                  ) : docType === "mom" ? (
+                    <div className="space-y-2 sub-fade">
+                      <textarea value={dForm.pembahasan} onChange={(e) => setDForm({ ...dForm, pembahasan: e.target.value })} rows={2} placeholder="Hasil pembahasan / poin pertemuan…" className={inputCls} style={inputSt} />
+                      <textarea value={dForm.kesepakatan} onChange={(e) => setDForm({ ...dForm, kesepakatan: e.target.value })} rows={2} placeholder="Kesepakatan / tindak lanjut…" className={inputCls} style={inputSt} />
+                      <div>
+                        <p className="mb-1 text-[11px] font-medium" style={{ color: T.sub }}>Target penyelesaian (opsional)</p>
+                        <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
+                      </div>
+                    </div>
                   ) : (
                     <input value={dForm.kondisi} onChange={(e) => setDForm({ ...dForm, kondisi: e.target.value })} placeholder="Kondisi / kelengkapan unit" className={inputCls} style={inputSt} />
                   )}
-                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan debitur</p>
+                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan {docType === "mom" ? "debitur / customer" : "debitur"}</p>
                   <SignaturePad onChange={setDsig} />
+                  {docType === "mom" && (
+                    <>
+                      <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan petugas / atasan</p>
+                      <SignaturePad onChange={setDsig2} />
+                    </>
+                  )}
                   <button onClick={createDoc} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Buat &amp; cetak (PDF)</button>
                 </div>
               )}
@@ -2320,8 +2643,9 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                     {i.dokumen.map((dk, idx) => (
                       <div key={idx} className="flex items-center gap-2 rounded-lg p-2 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         {dk.sig && <img src={dk.sig} alt="ttd" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
+                        {dk.jenis === "mom" && dk.sig2 && <img src={dk.sig2} alt="ttd petugas" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold" style={{ color: T.ink }}>{dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan"}</p>
+                          <p className="font-semibold" style={{ color: T.ink }}>{dk.jenis === "mom" ? "MOM / Visit Report" : dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan"}</p>
                           <p className="text-[11px]" style={{ color: T.sub }}>{fmtWaktu(dk.waktu)}</p>
                         </div>
                         <button onClick={() => reprintDoc(dk)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-white" style={{ background: T.brand2 }}>Cetak ulang</button>
@@ -2368,17 +2692,17 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                           <Printer size={12} /> PDF
                         </button>
                       )}
-                      <button onClick={() => copy(sel.text)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}>
+                      <button onClick={() => copy(docToPlain(sel.text))} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}>
                         <Copy size={12} /> Salin
                       </button>
                     </div>
                   </div>
-                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: SANS }}>{sel.text}</pre>
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: SANS }}>{docToPlain(sel.text)}</pre>
                   <button onClick={() => { logEskalasi(sel.key); flash(`${sel.label} dicatat terkirim`); }}
                     className="mt-2 flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold" style={{ background: T.brass + "1A", color: T.brass }}>
                     <Send size={11} /> Tandai sudah dikirim
                   </button>
-                  {!sel.wa && <p className="mt-1.5 text-[11px]" style={{ color: T.sub }}>Salin ke kop surat resmi, lalu tanda tangani pejabat berwenang sebelum dikirim.</p>}
+                  {!sel.wa && <p className="mt-1.5 text-[11px]" style={{ color: T.sub }}>Cetak PDF (sudah memuat kop & format resmi), lalu tanda tangani pejabat berwenang sebelum dikirim. Lengkapi alamat & kontak kantor di Profil agar kop tampil penuh.</p>}
                   {sel.wa && !waLink(i.telp, sel.text) && <p className="mt-1.5 text-[11px]" style={{ color: T.sub }}>Isi & simpan No. WA di tab Profil untuk tombol kirim langsung.</p>}
                 </div>
               )}
@@ -3090,8 +3414,9 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <h2 className="mb-3 text-sm font-semibold">Tema tampilan</h2>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {Object.entries(THEMES).map(([key, th]) => {
+          {Object.entries(THEMES).map(([key, fam]) => {
             const active = s.tema === key;
+            const th = fam[s.gelap ? "dark" : "light"];
             return (
               <button key={key} onClick={() => upd("tema", key)}
                 className="rounded-lg p-2.5 text-left transition-colors"
@@ -3102,19 +3427,40 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
                   <span className="h-4 w-4 rounded-full" style={{ background: th.surface, border: `1px solid ${th.line}` }} />
                 </div>
                 <span className="flex items-center gap-1 text-xs font-semibold" style={{ color: th.ink }}>
-                  {th.name}{active && <Check size={12} style={{ color: th.brand }} />}
+                  {fam.name}{active && <Check size={12} style={{ color: th.brand }} />}
                 </span>
               </button>
             );
           })}
+        </div>
+        <div className="mt-3 flex items-center justify-between rounded-lg p-3" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: s.gelap ? T.brand2 + "1A" : T.brass + "1A", color: s.gelap ? T.brand2 : T.brass }}>
+              {s.gelap ? <Moon size={16} /> : <Sun size={16} />}
+            </span>
+            <div>
+              <p className="text-xs font-semibold">Mode gelap</p>
+              <p className="text-[11px]" style={{ color: T.sub }}>Berlaku untuk semua tema di atas</p>
+            </div>
+          </div>
+          <button onClick={() => upd("gelap", !s.gelap)} role="switch" aria-checked={s.gelap} aria-label="Mode gelap"
+            className="relative h-6 w-11 shrink-0 rounded-full transition-colors" style={{ background: s.gelap ? T.brand2 : T.line }}>
+            <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white" style={{ left: 2, transform: s.gelap ? "translateX(20px)" : "none", transition: "transform .2s cubic-bezier(.22,.61,.36,1)", boxShadow: "0 1px 3px rgba(0,0,0,.35)" }} />
+          </button>
         </div>
       </section>
 
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <h2 className="mb-3 text-sm font-semibold">Profil</h2>
         <div className="space-y-3">
-          <Field label="Nama perusahaan (muncul di surat & reminder)">
+          <Field label="Nama perusahaan (kop & nama di surat)">
             <input className={inputCls} style={inputSt} value={s.perusahaan} onChange={(e) => upd("perusahaan", e.target.value)} placeholder="mis. PT …" />
+          </Field>
+          <Field label="Alamat kantor (kop surat)">
+            <input className={inputCls} style={inputSt} value={s.alamatKantor || ""} onChange={(e) => upd("alamatKantor", e.target.value)} placeholder="mis. Jl. Pemuda No. 10, Surabaya 60271" />
+          </Field>
+          <Field label="Kontak kantor (kop surat — telp/email)">
+            <input className={inputCls} style={inputSt} value={s.kontakKantor || ""} onChange={(e) => upd("kontakKantor", e.target.value)} placeholder="mis. Telp (031) 123456 · legal@perusahaan.co.id" />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Kota (tanda tangan surat)">
@@ -3231,7 +3577,7 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
 
 /* ---------- Layar Login (gerbang sebelum app) ---------- */
 function LoginScreen({ onLogin }) {
-  const th = THEMES.hutan;
+  const th = themePalette("hutan", false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -3298,13 +3644,32 @@ function AdminPanel({ th, onBack }) {
   const [rows, setRows] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [delId, setDelId] = useState("");   // tenant yang sedang dikonfirmasi hapus
+  const [delCode, setDelCode] = useState(""); // input kode konfirmasi (harus 12345)
+
+  const DELETE_CODE = "12345";
 
   const errText = (m) => {
     if (/code_taken/.test(m)) return "Kode sudah dipakai institusi lain.";
     if (/both_codes_required/.test(m)) return "Isi kode atasan dan petugas.";
     if (/codes_must_differ/.test(m)) return "Kode atasan dan petugas harus berbeda.";
     if (/invalid_admin/.test(m)) return "Rahasia / kode admin salah.";
+    if (/tenant_required/.test(m)) return "Institusi tidak ditemukan.";
     return "Gagal: " + m;
+  };
+
+  const askDelete = (id) => { setDelId(id); setDelCode(""); setMsg(""); };
+  const cancelDelete = () => { setDelId(""); setDelCode(""); };
+  const confirmDelete = async (t) => {
+    if (delCode.trim() !== DELETE_CODE) return setMsg("Kode hapus salah. Ketik 12345 untuk menghapus.");
+    setBusy(true); setMsg("");
+    try {
+      await sbAdminDelete(secret, t.tenant_id);
+      setRows(await sbAdminList(secret));
+      cancelDelete();
+      setMsg(`Institusi "${t.name}" dihapus ✓`);
+    } catch (e) { setMsg(errText(e.message)); }
+    setBusy(false);
   };
 
   const open = async () => {
@@ -3356,7 +3721,7 @@ function AdminPanel({ th, onBack }) {
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <input value={cAtasan} onChange={(e) => setCAtasan(e.target.value)} placeholder="Kode atasan"
                   className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
-                <input value={cPetugas} onChange={(e) => setCPetugas(e.target.value)} placeholder="Kode petugas"
+                <input value={cPetugas} onChange={(e) => setCPetugas(e.target.value)} placeholder="Kode petugas (bawahan)"
                   className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
               </div>
             )}
@@ -3368,11 +3733,37 @@ function AdminPanel({ th, onBack }) {
             {rows.length === 0 && <p className="text-xs" style={{ color: th.sub }}>Belum ada institusi.</p>}
             {rows.map((t) => (
               <div key={t.tenant_id} className="rounded-lg p-2.5" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
-                <p className="mb-1 text-sm font-semibold" style={{ color: th.ink }}>{t.name}</p>
+                <div className="mb-1 flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold" style={{ color: th.ink }}>{t.name}</p>
+                  {delId !== t.tenant_id && (
+                    <button onClick={() => askDelete(t.tenant_id)} title="Hapus institusi"
+                      className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}`, background: th.surface }}>
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]" style={{ fontFamily: MONO }}>
                   <div><span style={{ color: th.sub }}>Atasan</span><br /><span style={{ color: th.brand, fontWeight: 600 }}>{t.atasan_code}</span></div>
                   <div><span style={{ color: th.sub }}>Petugas</span><br /><span style={{ color: th.brand2, fontWeight: 600 }}>{t.petugas_code}</span></div>
                 </div>
+                {delId === t.tenant_id && (
+                  <div className="mt-2 rounded-lg p-2.5" style={{ background: th.surface, border: `1px solid ${th.red}` }}>
+                    <p className="mb-2 text-[12px]" style={{ color: th.red }}>
+                      Hapus <b>{t.name}</b> permanen beserta seluruh datanya? Ketik kode <b style={{ fontFamily: MONO }}>12345</b> untuk konfirmasi.
+                    </p>
+                    <input value={delCode} onChange={(e) => setDelCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmDelete(t)}
+                      inputMode="numeric" placeholder="Kode hapus" autoFocus
+                      className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button disabled={busy} onClick={cancelDelete}
+                        className="rounded-lg py-2 text-xs font-semibold" style={{ background: th.bg, color: th.ink, border: `1px solid ${th.line}` }}>Batal</button>
+                      <button disabled={busy || delCode.trim() !== DELETE_CODE} onClick={() => confirmDelete(t)}
+                        className="rounded-lg py-2 text-xs font-semibold text-white" style={{ background: th.red, opacity: busy || delCode.trim() !== DELETE_CODE ? 0.5 : 1 }}>
+                        {busy ? "Menghapus…" : "Hapus permanen"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
