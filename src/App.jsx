@@ -856,6 +856,24 @@ function printLetter(label, text) {
   return printViaIframe(label, renderDocHtml(text, {}));
 }
 
+/* Metadata dokumen lapangan (dipakai arsip & detail riwayat untuk cetak ulang). */
+function docMetaG(jenis) {
+  return jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
+    : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
+    : { gen: suratPernyataan, label: "Surat Pernyataan" };
+}
+function sigMapG(jenis, a, b) {
+  return jenis === "mom" ? { SIGN1: a, SIGN2: b }
+    : jenis === "bast" ? { SIGN1: a }
+    : { SIGN: a };
+}
+// Cetak ulang satu dokumen arsip (dk) untuk tagihan i.
+function reprintDokumen(i, s, dk) {
+  const { gen, label } = docMetaG(dk.jenis);
+  const text = gen(i, s, { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi, pembahasan: dk.pembahasan, kesepakatan: dk.kesepakatan });
+  return { ok: printDoc(label, text, sigMapG(dk.jenis, dk.sig, dk.sig2)), text, label };
+}
+
 function exportExcel(rows, s) {
   const jl = { fidusia: "BPKB/Fidusia", tanah: "Tanah/Hak Tanggungan", lainnya: "Lainnya" };
   const data = rows.map((i) => ({
@@ -1968,7 +1986,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
         {/* ---------- RIWAYAT ESKALASI ---------- */}
         {tab === "riwayat" && (
-          <RiwayatTab rows={enriched} s={s} flash={flash}
+          <RiwayatTab rows={enriched} s={s} flash={flash} copy={copy}
             onOpen={(id) => { setTab("tagihan"); setOpenId(id); }} />
         )}
 
@@ -3311,12 +3329,14 @@ function HeatMapView({ rows, allRows, s, onOpen }) {
 }
 
 /* ---------- Tab Riwayat: daftar semua eskalasi + rekap Excel/PDF ---------- */
-function RiwayatTab({ rows, s, flash, onOpen }) {
+function RiwayatTab({ rows, s, flash, copy, onOpen }) {
   const [q, setQ] = useState("");
   const [fPetugas, setFPetugas] = useState("");
   const [fLevel, setFLevel] = useState("");
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
+  const [detailId, setDetailId] = useState(null);
+  const detailInv = useMemo(() => (detailId ? rows.find((x) => x.id === detailId) : null), [detailId, rows]);
 
   const all = useMemo(() => eskalasiRows(rows), [rows]);
   const petugasOpts = useMemo(() => [...new Set(all.map((r) => r.petugas).filter(Boolean))].sort(), [all]);
@@ -3387,7 +3407,7 @@ function RiwayatTab({ rows, s, flash, onOpen }) {
         ) : (
           <div className="divide-y" style={{ borderColor: T.line }}>
             {list.map((r, idx) => (
-              <button key={idx} onClick={() => onOpen(r.id)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-black/5">
+              <button key={idx} onClick={() => setDetailId(r.id)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-black/5">
                 <span className="w-20 shrink-0 text-xs" style={{ color: T.sub, fontFamily: MONO }}>{fmtTgl(r.ts)}</span>
                 <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{r.tindakan}</span>
                 <span className="min-w-0 flex-1">
@@ -3400,6 +3420,129 @@ function RiwayatTab({ rows, s, flash, onOpen }) {
           </div>
         )}
       </div>
+
+      {detailInv && (
+        <RiwayatDetail inv={detailInv} s={s} flash={flash} copy={copy}
+          onClose={() => setDetailId(null)}
+          onOpen={() => { const id = detailInv.id; setDetailId(null); onOpen(id); }} />
+      )}
+    </div>
+  );
+}
+
+/* ---------- Detail satu tagihan dari Riwayat: surat terkirim + file + bukti foto ---------- */
+function RiwayatDetail({ inv, s, flash, copy, onClose, onOpen }) {
+  const [fotoView, setFotoView] = useState(null);
+  const docs = useMemo(() => escalationDocs(inv, s), [inv, s]);
+  const fotos = (inv.aktivitas || []).filter((a) => a.foto);
+  const esk = inv.eskalasi || [];
+  const dokumen = inv.dokumen || [];
+
+  const lihatSurat = (level) => {
+    const d = docs.find((x) => x.key === level);
+    if (!d) return flash("File surat tidak tersedia");
+    if (!printLetter(d.label, d.text)) { copy(docToPlain(d.text)); flash("Popup diblokir — teks disalin"); }
+  };
+  const cetakDok = (dk) => {
+    const { ok, text } = reprintDokumen(inv, s, dk);
+    if (!ok) { copy(docToPlain(text)); flash("Popup diblokir — teks disalin"); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" onClick={onClose}>
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
+      <div onClick={(e) => e.stopPropagation()}
+        className="relative flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl shadow-xl"
+        style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="flex items-start gap-2 border-b p-4" style={{ borderColor: T.line }}>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-semibold" style={{ color: T.ink }}>{inv.customer}</h3>
+            <p className="truncate text-xs" style={{ color: T.sub }}>{inv.noInvoice} · {rp(inv.total)} · {stLabel(inv.status)}</p>
+          </div>
+          <button onClick={onClose} className="shrink-0 rounded-md p-1 hover:bg-black/5"><X size={18} style={{ color: T.sub }} /></button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          {/* Surat / pesan terkirim */}
+          <section>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold" style={{ color: T.sub }}>
+              <Send size={13} /> Surat / pesan terkirim
+              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{esk.length}</span>
+            </p>
+            {esk.length === 0 ? (
+              <p className="text-xs" style={{ color: T.sub }}>Belum ada surat/pesan terkirim.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {esk.map((e, idx) => (
+                  <div key={idx} className="flex items-center gap-2 rounded-lg p-2 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                    <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{eskLabel(e.level, inv.jaminanTipe)}</span>
+                    <span className="flex-1" style={{ color: T.sub }}>terkirim {fmtTgl(e.ts)}</span>
+                    <button onClick={() => lihatSurat(e.level)} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-white" style={{ background: T.brand2 }}>
+                      <FileText size={11} /> Lihat file
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Dokumen / file bertanda tangan */}
+          {dokumen.length > 0 && (
+            <section>
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold" style={{ color: T.sub }}>
+                <FileSignature size={13} /> Dokumen / file
+                <span className="rounded-full px-1.5 py-0.5 text-[10px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{dokumen.length}</span>
+              </p>
+              <div className="space-y-1.5">
+                {dokumen.map((dk, idx) => (
+                  <div key={idx} className="flex items-center gap-2 rounded-lg p-2 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                    {dk.sig && <img src={dk.sig} alt="ttd" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
+                    {dk.jenis === "mom" && dk.sig2 && <img src={dk.sig2} alt="ttd petugas" className="h-8 w-12 shrink-0 rounded object-contain" style={{ background: "#fff", border: `1px solid ${T.line}` }} />}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold" style={{ color: T.ink }}>{docMetaG(dk.jenis).label}</p>
+                      <p className="text-[11px]" style={{ color: T.sub }}>{fmtWaktu(dk.waktu)}</p>
+                    </div>
+                    <button onClick={() => cetakDok(dk)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-white" style={{ background: T.brand2 }}>Buka file</button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Bukti foto / screenshot */}
+          <section>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold" style={{ color: T.sub }}>
+              <Camera size={13} /> Bukti foto / screenshot
+              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{fotos.length}</span>
+            </p>
+            {fotos.length === 0 ? (
+              <p className="text-xs" style={{ color: T.sub }}>Belum ada foto bukti. Tambahkan dari tab Lapangan saat kunjungan.</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                {fotos.map((a, idx) => (
+                  <button key={idx} onClick={() => setFotoView(a.foto)} className="overflow-hidden rounded-lg" style={{ border: `1px solid ${T.line}` }}>
+                    <img src={a.foto} alt={a.note || "bukti"} className="h-24 w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="border-t p-3" style={{ borderColor: T.line }}>
+          <button onClick={onOpen} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: T.brand }}>
+            <Wallet size={15} /> Buka di Tagihan
+          </button>
+        </div>
+      </div>
+
+      {fotoView && (
+        <div onClick={(e) => { e.stopPropagation(); setFotoView(null); }} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
+          <button onClick={(e) => { e.stopPropagation(); setFotoView(null); }} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
+          <img src={fotoView} alt="Bukti" className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
+          <a href={fotoView} download={`bukti-${inv.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
+        </div>
+      )}
     </div>
   );
 }
