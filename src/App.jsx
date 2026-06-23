@@ -1280,6 +1280,41 @@ function Pill({ status }) {
   );
 }
 
+/* ---------- util chat ---------- */
+const CHAT_NAME_COLORS = ["#2563eb", "#dc2626", "#7c3aed", "#0891b2", "#ea580c", "#0d9488", "#c026d3", "#65a30d", "#db2777", "#4f46e5"];
+const chatColor = (name) => {
+  let h = 0; const s = name || "";
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return CHAT_NAME_COLORS[h % CHAT_NAME_COLORS.length];
+};
+const chatSameDay = (a, b) => {
+  const da = new Date(a), db = new Date(b);
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+};
+const chatDayLabel = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso), now = new Date(), yest = new Date(); yest.setDate(now.getDate() - 1);
+  if (chatSameDay(d, now)) return "Hari ini";
+  if (chatSameDay(d, yest)) return "Kemarin";
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+};
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/* Render isi pesan + sorot mention @nama */
+const renderChatBody = (body, names, mine, T) => {
+  if (!body) return null;
+  const valid = (names || []).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!valid.length) return body;
+  const re = new RegExp("@(?:" + valid.map(reEscape).join("|") + ")(?![\\p{L}\\p{N}_])", "gu");
+  const out = []; let last = 0, m, k = 0;
+  while ((m = re.exec(body))) {
+    if (m.index > last) out.push(body.slice(last, m.index));
+    out.push(<span key={"mn" + k++} style={{ fontWeight: 700, color: mine ? "#d6f0ff" : T.brand2 }}>{m[0]}</span>);
+    last = m.index + m[0].length;
+  }
+  if (last < body.length) out.push(body.slice(last));
+  return out;
+};
+
 /* ---------- Panel Chat (grup PT + japri atasan↔petugas) ---------- */
 function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread }) {
   const [openConv, setOpenConv] = useState(null);
@@ -1291,11 +1326,20 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
   const [sending, setSending] = useState(false);
   const [busyAtt, setBusyAtt] = useState(false);
   const [err, setErr] = useState("");
+  const [mention, setMention] = useState(null); // { query, start } saat mengetik @
   const lastIdRef = useRef(0);
   const pollRef = useRef(null);
-  const bottomRef = useRef(null);
+  const scrollerRef = useRef(null);
+  const taRef = useRef(null);
   const imgInputRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  /* Nama yang bisa di-mention / disorot */
+  const allNames = useMemo(() => ["Atasan", ...(petugasNames || [])].filter(Boolean), [petugasNames]);
+  const mentionList = useMemo(() => {
+    if (!mention || openConv !== "group") return [];
+    return allNames.filter((n) => n !== meName).filter((n) => n.toLowerCase().includes(mention.query)).slice(0, 6);
+  }, [mention, allNames, openConv, meName]);
 
   const convList = useMemo(() => {
     const list = [{ conv: "group", title: ptName ? `Tim ${ptName}` : "Tim", kind: "group" }];
@@ -1351,7 +1395,30 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
     return () => { alive = false; clearTimeout(pollRef.current); };
   }, [openConv, auth.code, meRole, meName]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ block: "end" }); }, [msgs]);
+  /* reset komposer saat pindah percakapan */
+  useEffect(() => { setText(""); setAtts([]); setMention(null); }, [openConv]);
+  /* auto-scroll hanya di area pesan (bukan seluruh halaman) */
+  useEffect(() => { const el = scrollerRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs, openConv]);
+  /* kotak ketik tumbuh otomatis */
+  const autoGrow = () => { const el = taRef.current; if (!el) return; el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; };
+  useEffect(() => { autoGrow(); }, [text]);
+
+  const onText = (e) => {
+    const v = e.target.value; setText(v);
+    const caret = e.target.selectionStart ?? v.length;
+    const mm = v.slice(0, caret).match(/@(\w*)$/);
+    if (mm && openConv === "group") setMention({ query: mm[1].toLowerCase(), start: caret - mm[0].length });
+    else setMention(null);
+  };
+  const pickMention = (name) => {
+    setText((v) => {
+      const start = mention ? mention.start : v.length;
+      const after = v.slice(start + 1 + (mention ? mention.query.length : 0));
+      return v.slice(0, start) + "@" + name + " " + after;
+    });
+    setMention(null);
+    requestAnimationFrame(() => { taRef.current?.focus(); autoGrow(); });
+  };
 
   const addImages = async (files) => {
     setBusyAtt(true);
@@ -1381,7 +1448,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
     setSending(true);
     try {
       await sbChatSend(auth.code, meName, meRole, openConv, body, atts);
-      setText(""); setAtts([]);
+      setText(""); setAtts([]); setMention(null);
       const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
       if (incoming.length) {
         lastIdRef.current = incoming[incoming.length - 1].id;
@@ -1401,7 +1468,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
   const activeTitle = openConv ? (convList.find((c) => c.conv === openConv)?.title || "Chat") : null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
+    <div className="chat-panel fixed inset-0 z-[70] flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: T.surface, borderBottom: `1px solid ${T.line}` }}>
         {openConv ? (
@@ -1412,7 +1479,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {openConv && (openConv === "group"
             ? <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ background: T.brand2 + "1A", color: T.brand2 }}><Users size={18} /></span>
-            : <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{(activeTitle || "?").slice(0, 1).toUpperCase()}</span>)}
+            : <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold text-white" style={{ background: chatColor(activeTitle) }}>{(activeTitle || "?").slice(0, 1).toUpperCase()}</span>)}
           <div className="min-w-0">
             <h2 className="truncate text-base font-bold" style={{ color: T.ink }}>{openConv ? activeTitle : "Chat"}</h2>
             <p className="truncate text-[11px]" style={{ color: T.sub }}>{openConv ? (openConv === "group" ? "Grup tim · semua anggota PT" : "Japri") : (ptName || "")}</p>
@@ -1424,7 +1491,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
 
       {!openConv ? (
         /* ---- Daftar percakapan ---- */
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className="chat-list flex-1 overflow-y-auto p-3">
           <div className="mx-auto max-w-2xl space-y-2">
             {convList.map((c) => {
               const sm = sumOf(c.conv);
@@ -1433,7 +1500,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
                   className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                   {c.kind === "group"
                     ? <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full" style={{ background: T.brand2 + "1A", color: T.brand2 }}><Users size={20} /></span>
-                    : <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-base font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{c.title.slice(0, 1).toUpperCase()}</span>}
+                    : <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-base font-bold text-white" style={{ background: chatColor(c.title) }}>{c.title.slice(0, 1).toUpperCase()}</span>}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-semibold" style={{ color: T.ink }}>{c.title}</span>
@@ -1455,47 +1522,73 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
       ) : (
         /* ---- Ruang percakapan ---- */
         <>
-          <div className="flex-1 overflow-y-auto px-3 py-4" style={{ background: T.bg }}>
-            <div className="mx-auto flex max-w-2xl flex-col gap-2">
+          <div ref={scrollerRef} className="chat-room flex-1 overflow-y-auto px-3 py-4" style={{ background: T.bg }}>
+            <div className="mx-auto flex max-w-2xl flex-col" style={{ color: T.line }}>
               {msgs.length === 0 && <p className="py-10 text-center text-xs" style={{ color: T.sub }}>Belum ada pesan. Mulai percakapan.</p>}
-              {msgs.map((m) => {
+              {msgs.map((m, i) => {
                 const mine = m.sender === meName;
+                const prev = msgs[i - 1], next = msgs[i + 1];
+                const newDay = !prev || !chatSameDay(prev.created_at, m.created_at);
+                const firstOfGroup = newDay || prev.sender !== m.sender;
+                const lastOfGroup = !next || !chatSameDay(next.created_at, m.created_at) || next.sender !== m.sender;
                 const rc = mine ? readByOthers(m.id) : 0;
+                const grp = openConv === "group";
+                const sc = chatColor(m.sender);
                 return (
-                  <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                    <div className="max-w-[82%] rounded-2xl px-3 py-2 shadow-sm" style={{ background: mine ? T.brand2 : T.surface, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderBottomRightRadius: mine ? 4 : 16, borderBottomLeftRadius: mine ? 16 : 4 }}>
-                      {!mine && openConv === "group" && <p className="mb-0.5 text-[11px] font-bold" style={{ color: T.brand2 }}>{m.sender}{m.sender_role === "atasan" ? " · Atasan" : ""}</p>}
-                      {(m.attachments || []).length > 0 && (
-                        <div className="mb-1 flex flex-col gap-1.5">
-                          {m.attachments.map((att, idx) => att.type === "image" ? (
-                            <img key={idx} src={att.data} alt={att.name} onClick={() => openAtt(att)} className="max-h-52 w-auto cursor-pointer rounded-lg object-cover" style={{ maxWidth: 240 }} />
-                          ) : (
-                            <button key={idx} onClick={() => openAtt(att)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left" style={{ background: mine ? "rgba(255,255,255,.18)" : T.bg, border: `1px solid ${mine ? "rgba(255,255,255,.25)" : T.line}` }}>
-                              <FileText size={16} style={{ color: mine ? "#fff" : T.brand2 }} />
-                              <span className="min-w-0 flex-1 truncate text-xs font-medium">{att.name}</span>
-                              <span className="shrink-0 text-[10px] opacity-80">{humanSize(att.size || 0)}</span>
-                            </button>
-                          ))}
+                  <div key={m.id}>
+                    {newDay && (
+                      <div className="my-3 flex justify-center">
+                        <span className="rounded-full px-3 py-1 text-[11px] font-semibold shadow-sm" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>{chatDayLabel(m.created_at)}</span>
+                      </div>
+                    )}
+                    <div className="msg-in flex items-end gap-1.5" style={{ marginTop: firstOfGroup ? 8 : 2, justifyContent: mine ? "flex-end" : "flex-start" }}>
+                      {!mine && grp && (lastOfGroup
+                        ? <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: sc }}>{(m.sender || "?").slice(0, 1).toUpperCase()}</span>
+                        : <span className="h-7 w-7 shrink-0" />)}
+                      <div className="max-w-[80%] px-3 py-2 shadow-sm" style={{ background: mine ? T.brand2 : T.surface, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 16, borderBottomRightRadius: mine && lastOfGroup ? 5 : 16, borderTopRightRadius: mine && !firstOfGroup ? 7 : 16, borderBottomLeftRadius: !mine && lastOfGroup ? 5 : 16, borderTopLeftRadius: !mine && !firstOfGroup ? 7 : 16 }}>
+                        {!mine && grp && firstOfGroup && <p className="mb-0.5 text-[11px] font-bold" style={{ color: sc }}>{m.sender}{m.sender_role === "atasan" ? " · Atasan" : ""}</p>}
+                        {(m.attachments || []).length > 0 && (
+                          <div className="mb-1 flex flex-col gap-1.5">
+                            {m.attachments.map((att, idx) => att.type === "image" ? (
+                              <img key={idx} src={att.data} alt={att.name} onClick={() => openAtt(att)} className="max-h-52 w-auto cursor-pointer rounded-lg object-cover" style={{ maxWidth: 240 }} />
+                            ) : (
+                              <button key={idx} onClick={() => openAtt(att)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left" style={{ background: mine ? "rgba(255,255,255,.18)" : T.bg, border: `1px solid ${mine ? "rgba(255,255,255,.25)" : T.line}` }}>
+                                <FileText size={16} style={{ color: mine ? "#fff" : T.brand2 }} />
+                                <span className="min-w-0 flex-1 truncate text-xs font-medium">{att.name}</span>
+                                <span className="shrink-0 text-[10px] opacity-80">{humanSize(att.size || 0)}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {m.body && <p className="whitespace-pre-wrap break-words text-sm leading-snug">{renderChatBody(m.body, allNames, mine, T)}</p>}
+                        <div className="mt-0.5 flex items-center justify-end gap-1">
+                          <span className="text-[10px]" style={{ color: mine ? "rgba(255,255,255,.75)" : T.sub }}>{fmtWaktu(m.created_at)}</span>
+                          {mine && (rc > 0
+                            ? <span className="inline-flex items-center gap-0.5 text-[10px]" style={{ color: "#bfe3ff" }}><CheckCheck size={13} />{grp && rc > 1 ? rc : ""}</span>
+                            : <Check size={13} style={{ color: "rgba(255,255,255,.7)" }} />)}
                         </div>
-                      )}
-                      {m.body && <p className="whitespace-pre-wrap break-words text-sm leading-snug">{m.body}</p>}
-                      <div className="mt-0.5 flex items-center justify-end gap-1">
-                        <span className="text-[10px]" style={{ color: mine ? "rgba(255,255,255,.75)" : T.sub }}>{fmtWaktu(m.created_at)}</span>
-                        {mine && (rc > 0
-                          ? <span className="inline-flex items-center gap-0.5 text-[10px]" style={{ color: "#bfe3ff" }}><CheckCheck size={13} />{openConv === "group" && rc > 1 ? rc : ""}</span>
-                          : <Check size={13} style={{ color: "rgba(255,255,255,.7)" }} />)}
                       </div>
                     </div>
                   </div>
                 );
               })}
-              <div ref={bottomRef} />
             </div>
           </div>
 
           {/* Komposer */}
           <div className="px-3 py-2.5" style={{ background: T.surface, borderTop: `1px solid ${T.line}` }}>
-            <div className="mx-auto max-w-2xl">
+            <div className="relative mx-auto max-w-2xl">
+              {mention && mentionList.length > 0 && (
+                <div className="mention-pop absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl shadow-lg" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                  <p className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Sebut anggota</p>
+                  {mentionList.map((n) => (
+                    <button key={n} onClick={() => pickMention(n)} className="kpress flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-black/5">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: chatColor(n) }}>{n.slice(0, 1).toUpperCase()}</span>
+                      <span className="truncate text-sm font-medium" style={{ color: T.ink }}>{n}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {atts.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {atts.map((a, idx) => (
@@ -1512,8 +1605,12 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
                 <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { addFiles([...e.target.files]); e.target.value = ""; }} />
                 <button onClick={() => imgInputRef.current?.click()} disabled={busyAtt} className="kpress shrink-0 rounded-full p-2" style={{ color: T.brand2 }} aria-label="Kirim foto"><Camera size={20} /></button>
                 <button onClick={() => fileInputRef.current?.click()} disabled={busyAtt} className="kpress shrink-0 rounded-full p-2" style={{ color: T.brand2 }} aria-label="Lampirkan file"><Paperclip size={20} /></button>
-                <textarea value={text} onChange={(e) => setText(e.target.value)} rows={1} placeholder="Tulis pesan…"
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
+                <textarea ref={taRef} value={text} onChange={onText} rows={1} placeholder="Tulis pesan… (sebut dengan @)"
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape" && mention) { setMention(null); return; }
+                    if (mention && mentionList.length > 0 && (e.key === "Enter" || e.key === "Tab")) { e.preventDefault(); pickMention(mentionList[0]); return; }
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+                  }}
                   className="max-h-28 min-h-[40px] min-w-0 flex-1 resize-none rounded-2xl px-3 py-2 text-sm outline-none" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }} />
                 <button onClick={sendMsg} disabled={sending || busyAtt || (!text.trim() && atts.length === 0)} className="kpress grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: T.brand2, color: "#fff", opacity: sending || (!text.trim() && atts.length === 0) ? 0.5 : 1 }} aria-label="Kirim"><Send size={18} /></button>
               </div>
@@ -1960,7 +2057,15 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 .drawer-pn{animation:kolektaSlide .26s cubic-bezier(.2,.7,.2,1)}
 @keyframes kolektaSlideR{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
 .lapor-step{animation:kolektaSlideR .3s cubic-bezier(.22,.61,.36,1)}
-@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step{animation:none}.kpress:active,.chip:active{transform:none}}
+@keyframes kolektaUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.chat-panel{animation:kolektaUp .26s cubic-bezier(.22,.61,.36,1)}
+.chat-room{animation:kolektaSlideR .28s cubic-bezier(.22,.61,.36,1)}
+.chat-list{animation:kolektaFade .24s cubic-bezier(.22,.61,.36,1)}
+@keyframes kolektaPop{from{opacity:0;transform:translateY(7px) scale(.97)}to{opacity:1;transform:none}}
+.msg-in{animation:kolektaPop .22s cubic-bezier(.22,.61,.36,1)}
+.mention-pop{animation:kolektaExpand .16s cubic-bezier(.22,.61,.36,1);transform-origin:bottom}
+.chat-bg{background-image:radial-gradient(currentColor 1px,transparent 1px);background-size:22px 22px}
+@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step,.chat-panel,.chat-room,.chat-list,.msg-in,.mention-pop{animation:none}.kpress:active,.chip:active{transform:none}}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
