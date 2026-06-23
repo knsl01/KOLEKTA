@@ -608,7 +608,7 @@ function printViaIframe(label, bodyHtml) {
     doc.open();
     doc.write(
       `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title><style>${DOC_STYLE}</style></head>` +
-      `<body>${bodyHtml}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},150)}<\/script></body></html>`
+      `<body>${bodyHtml}<script>(function(){var d=false;function go(){if(d)return;d=true;try{window.focus();window.print();}catch(e){}}function ready(){var g=document.images,n=g.length,c=0;if(!n){go();return;}function t(){if(++c>=n)go();}for(var k=0;k<n;k++){var m=g[k];if(m.complete)t();else{m.onload=t;m.onerror=t;}}setTimeout(go,1500);}if(document.readyState==="complete")ready();else window.addEventListener("load",ready);setTimeout(ready,300);})();<\/script></body></html>`
     );
     doc.close();
     setTimeout(cleanup, 5 * 60 * 1000); // pengaman bila onafterprint tak terpicu
