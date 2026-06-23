@@ -477,16 +477,60 @@ ${jabatan}`;
   return out;
 }
 
+/* Skrip pemicu cetak yang ditanam di dalam dokumen. Tak bergantung pada
+   window.onload (yang sering tak terpicu pada tab hasil document.write),
+   menunggu gambar (mis. tanda tangan) selesai dimuat, lalu memanggil
+   window.print() sekali. */
+const PRINT_TRIGGER =
+  '<' + 'script>(function(){var done=false;function go(){if(done)return;done=true;try{window.focus();window.print();}catch(e){}}' +
+  'function ready(){var imgs=document.images,n=imgs.length,c=0;if(!n){go();return;}' +
+  'function tick(){if(++c>=n)go();}for(var k=0;k<n;k++){var im=imgs[k];if(im.complete)tick();else{im.onload=tick;im.onerror=tick;}}' +
+  'setTimeout(go,1500);}if(document.readyState==="complete")ready();else window.addEventListener("load",ready);setTimeout(ready,500);})();<' + '/script>';
+
+/* Cetak / Simpan-PDF. Utama: buka tab baru (andal merender & mencetak; tak
+   diblokir saat dipicu dari klik). Cadangan: iframe tersembunyi bila popup
+   diblokir (mis. sebagian browser HP). Mengembalikan false hanya bila keduanya
+   gagal, sehingga pemanggil bisa menyalin teks sebagai fallback terakhir. */
+function printHTML(html) {
+  const withTrigger = html.replace(/<\/body>/i, PRINT_TRIGGER + "</body>");
+  try {
+    const w = window.open("", "_blank");
+    if (w) {
+      w.document.open();
+      w.document.write(withTrigger);
+      w.document.close();
+      w.focus();
+      return true;
+    }
+  } catch {}
+  try {
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;";
+    iframe.onload = () => {
+      const cw = iframe.contentWindow;
+      if (!cw) return;
+      const remove = () => { try { iframe.remove(); } catch {} };
+      try { cw.onafterprint = remove; } catch {}
+      try { cw.focus(); cw.print(); } catch {}
+      setTimeout(remove, 60000);
+    };
+    document.body.appendChild(iframe);
+    iframe.srcdoc = withTrigger;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function printDoc(label, text, sig) {
-  const w = window.open("", "_blank");
-  if (!w) return false;
   const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   // Tempatkan tanda tangan tepat di atas garis nama lewat token [[SIGN]]
   const sigBox = sig
     ? `<span class="sig"><img src="${sig}" alt="tanda tangan"/></span>`
     : `<span class="sigline"></span>`;
   const body = esc.replace(/\[\[SIGN\]\]/g, sigBox);
-  w.document.write(
+  return printHTML(
     `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
     `<style>@page{size:A4;margin:2.5cm}` +
     `body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.6;color:#111}` +
@@ -495,10 +539,8 @@ function printDoc(label, text, sig) {
     `.sig img{height:80px;display:block;margin:0 auto 2px}` +
     `.sigline{display:inline-block;min-width:230px;height:74px;border-bottom:1px solid #111;vertical-align:bottom}` +
     `</style>` +
-    `</head><body><div class="doc">${body}</div><script>window.onload=function(){window.print()}<\/script></body></html>`
+    `</head><body><div class="doc">${body}</div></body></html>`
   );
-  w.document.close();
-  return true;
 }
 
 function fieldBase(s) {
@@ -570,16 +612,12 @@ ${jabatan}`;
 }
 
 function printLetter(label, text) {
-  const w = window.open("", "_blank");
-  if (!w) return false;
   const esc = (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  w.document.write(
+  return printHTML(
     `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title>` +
     `<style>@page{size:A4;margin:2.5cm}body{font-family:'Times New Roman',Georgia,serif;font-size:12pt;line-height:1.55;color:#111}.doc{white-space:pre-wrap}</style>` +
-    `</head><body><div class="doc">${esc}</div><script>window.onload=function(){window.print()}<\/script></body></html>`
+    `</head><body><div class="doc">${esc}</div></body></html>`
   );
-  w.document.close();
-  return true;
 }
 
 function exportExcel(rows, s) {
@@ -1274,7 +1312,7 @@ AKTIVITAS HARI INI
                 <div className="mb-2 flex items-center gap-2">
                   <span className="text-sm font-semibold">Laporan untuk atasan</span>
                   <div className="ml-auto flex gap-1">
-                    <button onClick={() => { if (!printLetter("Laporan Penagihan", laporanText)) flash("Popup diblokir — pakai Salin"); }}
+                    <button onClick={() => { if (!printLetter("Laporan Penagihan", laporanText)) flash("Gagal membuka cetak — pakai Salin"); }}
                       className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand2 }}><Printer size={12} /> PDF</button>
                     <button onClick={() => copy(laporanText)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand }}><Copy size={12} /> Salin</button>
                   </div>
@@ -1470,7 +1508,7 @@ AKTIVITAS HARI INI
               {filtered.map((i) => (
                 <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
                   onToggle={() => setOpenId(openId === i.id ? null : i.id)}
-                  onStatement={(name) => { const t = statementText(name, enriched, s); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(t); flash("Popup diblokir — statement disalin"); } }}
+                  onStatement={(name) => { const t = statementText(name, enriched, s); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(t); flash("Gagal membuka cetak — statement disalin"); } }}
                   patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} />
               ))}
               {filtered.length === 0 && (
@@ -2038,14 +2076,14 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     const label = docType === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
     const ok = printDoc(label, text, dsig);
     patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi }, ...(x.dokumen || [])] }));
-    if (!ok) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
+    if (!ok) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Gagal membuka cetak — teks disalin"); } else flash(label + " dibuat");
     setShowDoc(false); setDsig(null); setDForm({ jumlah: "", tgl: "", kondisi: "" });
   };
   const reprintDoc = (dk) => {
     const f = { jumlah: dk.jumlah, tgl: dk.tgl, kondisi: dk.kondisi };
     const text = dk.jenis === "bast" ? bastPenarikan(i, s, f) : suratPernyataan(i, s, f);
     const label = dk.jenis === "bast" ? "BAST Penarikan" : "Surat Pernyataan";
-    if (!printDoc(label, text, dk.sig)) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Popup diblokir — teks disalin"); }
+    if (!printDoc(label, text, dk.sig)) { copy(text.replace(/\[\[SIGN\]\]/g, "(__________________________)")); flash("Gagal membuka cetak — teks disalin"); }
   };
 
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
@@ -2295,7 +2333,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                         </button>
                       )}
                       {!sel.wa && (
-                        <button onClick={() => { if (printLetter(sel.label, sel.text)) logEskalasi(sel.key); else flash("Popup diblokir — pakai Salin"); }}
+                        <button onClick={() => { if (printLetter(sel.label, sel.text)) logEskalasi(sel.key); else flash("Gagal membuka cetak — pakai Salin"); }}
                           className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white" style={{ background: T.brand2 }}>
                           <Printer size={12} /> PDF
                         </button>
