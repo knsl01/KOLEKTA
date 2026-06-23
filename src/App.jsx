@@ -131,6 +131,26 @@ function readFileData(file) {
   });
 }
 const humanSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+/* Buka bukti (data URL) lewat blob URL — browser memblokir navigasi langsung ke data: URL
+   yang besar (PDF tak terbuka). Blob URL bisa dibuka tab baru / diunduh. */
+function dataUrlToBlob(dataUrl) {
+  const [head, b64] = String(dataUrl).split(",");
+  const mime = (head.match(/data:([^;]+)/) || [])[1] || "application/octet-stream";
+  const bin = atob(b64 || "");
+  const arr = new Uint8Array(bin.length);
+  for (let n = 0; n < bin.length; n++) arr[n] = bin.charCodeAt(n);
+  return new Blob([arr], { type: mime });
+}
+function openBukti(b) {
+  try {
+    if (!b?.data) return;
+    if (!/^data:/.test(b.data)) { window.open(b.data, "_blank", "noopener"); return; }
+    const url = URL.createObjectURL(dataUrlToBlob(b.data));
+    const w = window.open(url, "_blank", "noopener");
+    if (!w) { const a = document.createElement("a"); a.href = url; a.download = b.name || "bukti"; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (_) {}
+}
 function getLoc() {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error("no geo"));
@@ -1083,15 +1103,14 @@ async function sbRpc(fn, body) {
 const sbLogin = async (code) => { const a = await sbRpc("kolekta_login", { p_code: code }); return a && a[0] ? a[0] : null; };
 const sbPull = async (code) => { const a = await sbRpc("kolekta_pull", { p_code: code }); return a && a[0] ? a[0] : null; };
 const sbPush = (code, data) => sbRpc("kolekta_push", { p_code: code, p_data: data });
-const sbAdminCreate = async (secret, name, atasanCode, petugasCode) => {
-  const body = { p_admin: secret, p_name: name };
-  if (atasanCode && atasanCode.trim()) body.p_atasan_code = atasanCode.trim();
-  if (petugasCode && petugasCode.trim()) body.p_petugas_code = petugasCode.trim();
-  const a = await sbRpc("kolekta_admin_create_tenant", body);
-  return a && a[0] ? a[0] : null;
-};
 const sbAdminList = async (secret) => (await sbRpc("kolekta_admin_list_tenants", { p_admin: secret })) || [];
 const sbAdminDelete = (secret, tenantId) => sbRpc("kolekta_admin_delete_tenant", { p_admin: secret, p_tenant_id: tenantId });
+const sbAdminCreateFull = async (secret, name, members) => {
+  const a = await sbRpc("kolekta_admin_create_full", { p_admin: secret, p_name: name, p_members: members });
+  return a && a[0] ? a[0] : null;
+};
+const sbAdminListMembers = async (secret, tenantId) => (await sbRpc("kolekta_admin_list_members", { p_admin: secret, p_tenant_id: tenantId })) || [];
+const sbMembersForCode = async (code) => { try { return (await sbRpc("kolekta_members_for_code", { p_code: code })) || []; } catch { return []; } };
 
 function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; } }
 function saveAuth(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch {} }
@@ -1232,6 +1251,18 @@ export default function KolektaApp() {
       if (!next) next = emptyData();
       if (!Array.isArray(next.worklog)) next.worklog = [];
       next.settings = { ...defaultSettings(), ...next.settings, peran: auth.role };
+      // Identitas dari kode login per-anggota: kunci petugas ke namanya sendiri.
+      if (auth.role === "petugas" && auth.memberName) next.settings.petugasAktif = auth.memberName;
+      // Lengkapi daftar petugas dari roster anggota institusi (kode per-petugas).
+      try {
+        const members = await sbMembersForCode(auth.code);
+        const petugasNames = members.filter((m) => m.role === "petugas").map((m) => m.member_name);
+        if (petugasNames.length) {
+          const merged = [...(next.settings.petugas || [])];
+          petugasNames.forEach((nm) => { if (nm && !merged.includes(nm)) merged.push(nm); });
+          next.settings.petugas = merged;
+        }
+      } catch {}
       if (!alive) return;
       setData(next);
       loadedRef.current = true;
@@ -1252,7 +1283,7 @@ export default function KolektaApp() {
   const doLogin = async (code) => {
     const info = await sbLogin(code);
     if (!info) throw new Error("Kode tidak dikenal");
-    const session = { code, tenantId: info.tenant_id, name: info.name, role: info.role };
+    const session = { code, tenantId: info.tenant_id, name: info.name, role: info.role, memberName: info.member_name || "" };
     saveAuth(session);
     setAuth(session);
     return session;
@@ -2031,6 +2062,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {tab === "set" && (
           <Settingstab data={data} setData={setData} flash={flash} copy={copy}
             role={auth.role} tenantName={auth.name} onLogout={doLogout}
+            lockedPetugas={auth.role === "petugas" ? (auth.memberName || "") : ""}
             onBackup={() => exportJSON(data)} onRestore={() => jsonRef.current?.click()}
             onReset={() => { setData(sampleData()); flash("Data direset ke contoh"); }}
             onClear={() => { setData({ settings: data.settings, invoices: [] }); flash("Semua tagihan dihapus"); }} />
@@ -2281,13 +2313,13 @@ function WorklogDetail({ entry, canDelete, onDelete }) {
         ) : (
           <div className="grid grid-cols-3 gap-2">
             {bukti.map((b, idx) => (
-              <a key={idx} href={b.data} target="_blank" rel="noreferrer" download={b.name || `bukti-${idx + 1}`}
-                className="flex flex-col items-center gap-1 rounded-lg p-2 text-center" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+              <button key={idx} type="button" onClick={() => openBukti(b)} title={`Buka ${b.name || "bukti"}`}
+                className="kpress flex flex-col items-center gap-1 rounded-lg p-2 text-center" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                 {b.type === "image"
                   ? <img src={b.data} alt={b.name} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
                   : <span className="flex h-20 w-full items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={28} style={{ color: T.red }} /></span>}
                 <span className="w-full truncate text-[10px] font-medium" style={{ color: T.sub }}>{b.name || (b.type === "image" ? "Gambar" : "PDF")}</span>
-              </a>
+              </button>
             ))}
           </div>
         )}
@@ -3893,7 +3925,7 @@ function RiwayatDetail({ inv, s, flash, copy, onClose, onOpen }) {
   );
 }
 
-function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, onRestore, role, tenantName, onLogout }) {
+function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, onRestore, role, tenantName, onLogout, lockedPetugas = "" }) {
   const s = data.settings;
   const isAtasan = role === "atasan";
   const upd = (k, v) => setData((d) => ({ ...d, settings: { ...d.settings, [k]: v } }));
@@ -3986,7 +4018,16 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
         ) : (
           <p className="mb-3 text-[11px]" style={{ color: T.sub }}>Anda masuk sebagai <b style={{ color: T.brand2 }}>Petugas</b>. Pilih nama Anda di bawah; hanya tagihan yang ditugaskan ke Anda yang tampil.</p>
         )}
-        {s.peran === "petugas" && (
+        {s.peran === "petugas" && lockedPetugas && (
+          <div className="mb-3"><Field label="Saya petugas">
+            <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ ...inputSt }}>
+              <Lock size={13} style={{ color: T.sub }} />
+              <span className="font-semibold" style={{ color: T.ink }}>{lockedPetugas}</span>
+            </div>
+          </Field>
+          <p className="mt-1 text-[11px]" style={{ color: T.sub }}>Identitas terkunci sesuai kode login Anda. Hanya tagihan & laporan milik <b>{lockedPetugas}</b> yang tampil.</p></div>
+        )}
+        {s.peran === "petugas" && !lockedPetugas && (
           <div className="mb-3"><Field label="Saya petugas">
             <select className={inputCls} style={inputSt} value={s.petugasAktif} onChange={(e) => upd("petugasAktif", e.target.value)}>
               <option value="">— pilih nama —</option>
@@ -4122,30 +4163,37 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-/* ---------- Panel admin: kelola institusi & kode (butuh rahasia admin) ---------- */
+/* ---------- Panel admin: kelola institusi & kode per-anggota (butuh rahasia admin) ---------- */
 function AdminPanel({ th, onBack }) {
   const [secret, setSecret] = useState("");
   const [authed, setAuthed] = useState(false);
   const [name, setName] = useState("");
-  const [custom, setCustom] = useState(false);
-  const [cAtasan, setCAtasan] = useState("");
-  const [cPetugas, setCPetugas] = useState("");
+  const [members, setMembers] = useState([{ role: "atasan", name: "" }, { role: "petugas", name: "" }]);
   const [rows, setRows] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const [delId, setDelId] = useState("");   // tenant yang sedang dikonfirmasi hapus
-  const [delCode, setDelCode] = useState(""); // input kode konfirmasi (harus 12345)
+  const [delId, setDelId] = useState("");
+  const [delCode, setDelCode] = useState("");
+  const [openId, setOpenId] = useState("");          // institusi yang kodenya sedang dibuka
+  const [memCache, setMemCache] = useState({});       // tenant_id -> daftar anggota+kode
+  const [loadingMem, setLoadingMem] = useState("");
 
   const DELETE_CODE = "12345";
 
   const errText = (m) => {
     if (/code_taken/.test(m)) return "Kode sudah dipakai institusi lain.";
-    if (/both_codes_required/.test(m)) return "Isi kode atasan dan petugas.";
-    if (/codes_must_differ/.test(m)) return "Kode atasan dan petugas harus berbeda.";
+    if (/name_required/.test(m)) return "Isi nama institusi.";
+    if (/members_required/.test(m)) return "Tambahkan minimal satu anggota dengan nama.";
     if (/invalid_admin/.test(m)) return "Rahasia / kode admin salah.";
     if (/tenant_required/.test(m)) return "Institusi tidak ditemukan.";
     return "Gagal: " + m;
   };
+
+  const addMember = (role) => setMembers((a) => [...a, { role, name: "" }]);
+  const updMember = (idx, patch) => setMembers((a) => a.map((m, n) => (n === idx ? { ...m, ...patch } : m)));
+  const delMember = (idx) => setMembers((a) => a.filter((_, n) => n !== idx));
+
+  const copyCode = async (c) => { try { await navigator.clipboard.writeText(c); setMsg("Kode disalin ✓"); } catch { setMsg("Tak bisa menyalin di sini"); } };
 
   const askDelete = (id) => { setDelId(id); setDelCode(""); setMsg(""); };
   const cancelDelete = () => { setDelId(""); setDelCode(""); };
@@ -4168,17 +4216,46 @@ function AdminPanel({ th, onBack }) {
     catch (e) { setMsg(errText(e.message)); }
     setBusy(false);
   };
+
+  const loadMembers = async (t) => {
+    setLoadingMem(t.tenant_id);
+    try {
+      let list = await sbAdminListMembers(secret, t.tenant_id);
+      // Institusi lama (sebelum kode per-anggota): tampilkan kode lama dari tenant.
+      if ((!list || list.length === 0)) {
+        list = [];
+        if (t.atasan_code) list.push({ role: "atasan", member_name: "Atasan", code: t.atasan_code });
+        if (t.petugas_code) list.push({ role: "petugas", member_name: "Petugas", code: t.petugas_code });
+      }
+      setMemCache((c) => ({ ...c, [t.tenant_id]: list }));
+    } catch (e) { setMsg(errText(e.message)); }
+    setLoadingMem("");
+  };
+  const toggleOpen = (t) => {
+    if (openId === t.tenant_id) { setOpenId(""); return; }
+    setOpenId(t.tenant_id);
+    if (!memCache[t.tenant_id]) loadMembers(t);
+  };
+
   const create = async () => {
     if (!name.trim()) return setMsg("Isi nama institusi.");
-    if (custom && (!cAtasan.trim() || !cPetugas.trim())) return setMsg("Isi kode atasan dan petugas.");
+    const clean = members.map((m) => ({ role: m.role, name: m.name.trim() })).filter((m) => m.name);
+    if (clean.length === 0) return setMsg("Tambahkan minimal satu anggota dengan nama.");
     setBusy(true); setMsg("");
     try {
-      await sbAdminCreate(secret, name.trim(), custom ? cAtasan : "", custom ? cPetugas : "");
-      setName(""); setCAtasan(""); setCPetugas("");
-      setRows(await sbAdminList(secret)); setMsg("Institusi dibuat ✓");
+      const res = await sbAdminCreateFull(secret, name.trim(), clean);
+      setName(""); setMembers([{ role: "atasan", name: "" }, { role: "petugas", name: "" }]);
+      setRows(await sbAdminList(secret));
+      if (res?.tenant_id) {
+        setMemCache((c) => ({ ...c, [res.tenant_id]: (res.members || []).map((m) => ({ role: m.role, member_name: m.name, code: m.code })) }));
+        setOpenId(res.tenant_id);
+      }
+      setMsg(`Institusi dibuat — ${clean.length} kode dibuat ✓`);
     } catch (e) { setMsg(errText(e.message)); }
     setBusy(false);
   };
+
+  const roleColor = (r) => (r === "atasan" ? th.brand : th.brand2);
 
   return (
     <div className="rounded-2xl p-5 shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
@@ -4199,62 +4276,99 @@ function AdminPanel({ th, onBack }) {
         </>
       ) : (
         <>
+          {/* Form buat institusi + daftar anggota */}
           <div className="mb-3 rounded-lg p-2.5" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
-            <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !custom && create()} placeholder="Nama institusi baru"
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama institusi / PT baru"
               className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink }} />
-            <label className="mt-2 flex cursor-pointer items-center gap-2 text-[12px]" style={{ color: th.sub }}>
-              <input type="checkbox" checked={custom} onChange={(e) => setCustom(e.target.checked)} />
-              Tentukan kode sendiri (kosongkan = digenerate otomatis)
-            </label>
-            {custom && (
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <input value={cAtasan} onChange={(e) => setCAtasan(e.target.value)} placeholder="Kode atasan"
-                  className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
-                <input value={cPetugas} onChange={(e) => setCPetugas(e.target.value)} placeholder="Kode petugas (bawahan)"
-                  className="min-w-0 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
-              </div>
-            )}
+            <p className="mb-1.5 mt-2.5 text-[11px] font-semibold" style={{ color: th.sub }}>Anggota (tiap orang dapat kode login sendiri)</p>
+            <div className="space-y-1.5">
+              {members.map((m, idx) => (
+                <div key={idx} className="flex items-center gap-1.5">
+                  <select value={m.role} onChange={(e) => updMember(idx, { role: e.target.value })}
+                    className="shrink-0 rounded-lg px-2 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: roleColor(m.role), fontWeight: 600 }}>
+                    <option value="atasan">Atasan</option>
+                    <option value="petugas">Petugas</option>
+                  </select>
+                  <input value={m.name} onChange={(e) => updMember(idx, { name: e.target.value })} placeholder="Nama"
+                    className="min-w-0 flex-1 rounded-lg px-2.5 py-2 text-xs outline-none" style={{ background: th.surface, border: `1px solid ${th.line}`, color: th.ink }} />
+                  <button onClick={() => delMember(idx)} title="Hapus baris" className="shrink-0 rounded-md p-1.5" style={{ color: th.sub, border: `1px solid ${th.line}`, background: th.surface }}>
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button onClick={() => addMember("petugas")} className="rounded-lg py-1.5 text-[11px] font-semibold" style={{ background: th.surface, color: th.brand2, border: `1px solid ${th.line}` }}>+ Petugas</button>
+              <button onClick={() => addMember("atasan")} className="rounded-lg py-1.5 text-[11px] font-semibold" style={{ background: th.surface, color: th.brand, border: `1px solid ${th.line}` }}>+ Atasan</button>
+            </div>
             <button disabled={busy} onClick={create} className="mt-2 w-full rounded-lg py-2 text-xs font-semibold text-white" style={{ background: th.brand, opacity: busy ? 0.6 : 1 }}>
-              {busy ? "Menyimpan…" : "+ Buat institusi"}
+              {busy ? "Menyimpan…" : "+ Buat institusi & kode"}
             </button>
           </div>
+
+          {/* Daftar institusi — klik untuk lihat semua kode */}
           <div className="space-y-2">
             {rows.length === 0 && <p className="text-xs" style={{ color: th.sub }}>Belum ada institusi.</p>}
-            {rows.map((t) => (
-              <div key={t.tenant_id} className="rounded-lg p-2.5" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
-                <div className="mb-1 flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold" style={{ color: th.ink }}>{t.name}</p>
-                  {delId !== t.tenant_id && (
-                    <button onClick={() => askDelete(t.tenant_id)} title="Hapus institusi"
-                      className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}`, background: th.surface }}>
-                      <Trash2 size={13} />
+            {rows.map((t) => {
+              const isOpen = openId === t.tenant_id;
+              const mem = memCache[t.tenant_id];
+              return (
+                <div key={t.tenant_id} className="rounded-lg" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
+                  <div className="flex items-center gap-2 p-2.5">
+                    <button onClick={() => toggleOpen(t)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <ChevronDown size={15} style={{ color: th.sub, transform: isOpen ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                      <span className="truncate text-sm font-semibold" style={{ color: th.ink }}>{t.name}</span>
                     </button>
+                    {delId !== t.tenant_id && (
+                      <button onClick={() => askDelete(t.tenant_id)} title="Hapus institusi"
+                        className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}`, background: th.surface }}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+
+                  {isOpen && (
+                    <div className="border-t px-2.5 pb-2.5 pt-2" style={{ borderColor: th.line }}>
+                      {loadingMem === t.tenant_id && !mem ? (
+                        <p className="text-[11px]" style={{ color: th.sub }}>Memuat kode…</p>
+                      ) : !mem || mem.length === 0 ? (
+                        <p className="text-[11px]" style={{ color: th.sub }}>Belum ada anggota / kode.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {mem.map((m, idx) => (
+                            <div key={idx} className="flex items-center gap-2 rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+                              <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: roleColor(m.role) + "1A", color: roleColor(m.role) }}>{m.role === "atasan" ? "Atasan" : "Petugas"}</span>
+                              <span className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: th.ink }}>{m.member_name}</span>
+                              <span className="shrink-0 text-[12px] font-bold" style={{ color: roleColor(m.role), fontFamily: MONO }}>{m.code}</span>
+                              <button onClick={() => copyCode(m.code)} title="Salin kode" className="shrink-0 rounded-md p-1" style={{ color: th.sub }}><Copy size={13} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {delId === t.tenant_id && (
+                    <div className="mx-2.5 mb-2.5 rounded-lg p-2.5" style={{ background: th.surface, border: `1px solid ${th.red}` }}>
+                      <p className="mb-2 text-[12px]" style={{ color: th.red }}>
+                        Hapus <b>{t.name}</b> permanen beserta seluruh datanya? Ketik kode <b style={{ fontFamily: MONO }}>12345</b> untuk konfirmasi.
+                      </p>
+                      <input value={delCode} onChange={(e) => setDelCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmDelete(t)}
+                        inputMode="numeric" placeholder="Kode hapus" autoFocus
+                        className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <button disabled={busy} onClick={cancelDelete}
+                          className="rounded-lg py-2 text-xs font-semibold" style={{ background: th.bg, color: th.ink, border: `1px solid ${th.line}` }}>Batal</button>
+                        <button disabled={busy || delCode.trim() !== DELETE_CODE} onClick={() => confirmDelete(t)}
+                          className="rounded-lg py-2 text-xs font-semibold text-white" style={{ background: th.red, opacity: busy || delCode.trim() !== DELETE_CODE ? 0.5 : 1 }}>
+                          {busy ? "Menghapus…" : "Hapus permanen"}
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px]" style={{ fontFamily: MONO }}>
-                  <div><span style={{ color: th.sub }}>Atasan</span><br /><span style={{ color: th.brand, fontWeight: 600 }}>{t.atasan_code}</span></div>
-                  <div><span style={{ color: th.sub }}>Petugas</span><br /><span style={{ color: th.brand2, fontWeight: 600 }}>{t.petugas_code}</span></div>
-                </div>
-                {delId === t.tenant_id && (
-                  <div className="mt-2 rounded-lg p-2.5" style={{ background: th.surface, border: `1px solid ${th.red}` }}>
-                    <p className="mb-2 text-[12px]" style={{ color: th.red }}>
-                      Hapus <b>{t.name}</b> permanen beserta seluruh datanya? Ketik kode <b style={{ fontFamily: MONO }}>12345</b> untuk konfirmasi.
-                    </p>
-                    <input value={delCode} onChange={(e) => setDelCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmDelete(t)}
-                      inputMode="numeric" placeholder="Kode hapus" autoFocus
-                      className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <button disabled={busy} onClick={cancelDelete}
-                        className="rounded-lg py-2 text-xs font-semibold" style={{ background: th.bg, color: th.ink, border: `1px solid ${th.line}` }}>Batal</button>
-                      <button disabled={busy || delCode.trim() !== DELETE_CODE} onClick={() => confirmDelete(t)}
-                        className="rounded-lg py-2 text-xs font-semibold text-white" style={{ background: th.red, opacity: busy || delCode.trim() !== DELETE_CODE ? 0.5 : 1 }}>
-                        {busy ? "Menghapus…" : "Hapus permanen"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
