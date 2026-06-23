@@ -1696,7 +1696,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
             <button onClick={openLapor}
-              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ background: T.brand2 + "14", color: T.brand2, border: `1px solid ${T.brand2}33` }}>
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ color: T.brand2 }}>
               <ClipboardList size={18} /><span>Lapor</span>
             </button>
             <button onClick={openRiwayatKerja}
@@ -2193,7 +2193,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 );
               })}
               <button onClick={() => { openLapor(); setDrawer(false); }}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ background: T.brand2 + "14", color: T.brand2, border: `1px solid ${T.brand2}33` }}>
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ color: T.brand2 }}>
                 <ClipboardList size={18} /><span>Lapor</span>
               </button>
               <button onClick={() => { openRiwayatKerja(); setDrawer(false); }}
@@ -2242,7 +2242,9 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
   const [sel, setSel] = useState(null);
   const [formInv, setFormInv] = useState(null);
   const [pickQ, setPickQ] = useState("");
-  const [day, setDay] = useState(today0().toISOString().slice(0, 10));
+  const todayISO = today0().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(todayISO);
+  const [to, setTo] = useState(todayISO);
   const [who, setWho] = useState("all"); // atasan: "all" | nama petugas
   const isPetugas = role === "petugas";
   const pickList = useMemo(() => {
@@ -2250,19 +2252,22 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
     return invoices.filter((x) => !q || (x.customer || "").toLowerCase().includes(q) || (x.noInvoice || "").toLowerCase().includes(q));
   }, [invoices, pickQ]);
 
-  const shiftDay = (n) => { const d = new Date(day + "T00:00:00"); d.setDate(d.getDate() + n); setDay(d.toISOString().slice(0, 10)); };
-  const dayEntries = useMemo(
+  const lo = from <= to ? from : to;
+  const hi = from <= to ? to : from;
+  const setRange = (f, t) => { setFrom(f); setTo(t); };
+  const shiftRange = (n) => { const d = new Date(); d.setDate(d.getDate() - n + 1); setRange(d.toISOString().slice(0, 10), todayISO); };
+  const rangeEntries = useMemo(
     () => entries
-      .filter((e) => e.ts === day && (isPetugas || who === "all" || e.petugas === who))
+      .filter((e) => e.ts >= lo && e.ts <= hi && (isPetugas || who === "all" || e.petugas === who))
       .sort((a, b) => new Date(b.waktu || 0) - new Date(a.waktu || 0)),
-    [entries, day, who, isPetugas]
+    [entries, lo, hi, who, isPetugas]
   );
   const grouped = useMemo(() => {
     const m = new Map();
-    dayEntries.forEach((e) => { const k = e.petugas || "Tanpa nama"; if (!m.has(k)) m.set(k, []); m.get(k).push(e); });
+    rangeEntries.forEach((e) => { const k = e.petugas || "Tanpa nama"; if (!m.has(k)) m.set(k, []); m.get(k).push(e); });
     return [...m.entries()];
-  }, [dayEntries]);
-  const isToday = day === today0().toISOString().slice(0, 10);
+  }, [rangeEntries]);
+  const isToday = lo === todayISO && hi === todayISO;
 
   const openDetail = (e) => { setSel(e); setView("detail"); };
   const chooseInv = (inv) => { setFormInv(inv); setView("form"); };
@@ -2327,7 +2332,7 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
               <LaporForm invoice={formInv} s={s} petugas={petugasAktif}
                 flash={flash} copy={copy} patch={patch} audit={audit} onSaveWorklog={onAdd}
                 onCancel={() => { setFormInv(null); setView("pick"); }}
-                onDone={() => { setDay(today0().toISOString().slice(0, 10)); setFormInv(null); setView("list"); }} />
+                onDone={() => { setRange(todayISO, todayISO); setFormInv(null); setView("list"); }} />
             </div>
           )}
 
@@ -2338,19 +2343,21 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
 
           {view === "list" && (
             <>
-              {/* Navigasi hari */}
-              <div className="mb-4 flex items-center gap-2 rounded-xl p-1.5" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-                <button onClick={() => shiftDay(-1)} aria-label="Hari sebelumnya" className="kpress rounded-lg p-1.5" style={{ color: T.sub }}><ChevronLeft size={18} /></button>
-                <div className="flex flex-1 items-center justify-center gap-2">
-                  <CalendarDays size={14} style={{ color: T.brand2 }} />
-                  <span className="text-sm font-semibold" style={{ color: T.ink }}>{isToday ? "Hari ini" : fmtTgl(day)}</span>
+              {/* Rentang tanggal */}
+              <div className="mb-4 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <div className="flex items-center gap-2">
+                  <CalendarDays size={15} className="shrink-0" style={{ color: T.brand2 }} />
+                  <input type="date" value={from} max={todayISO} onChange={(e) => e.target.value && setFrom(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink, colorScheme: "light" }} />
+                  <span className="shrink-0 text-[11px] font-semibold" style={{ color: T.sub }}>s/d</span>
+                  <input type="date" value={to} max={todayISO} onChange={(e) => e.target.value && setTo(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink, colorScheme: "light" }} />
                 </div>
-                <label className="kpress relative cursor-pointer rounded-lg px-2 py-1 text-[11px] font-semibold" style={{ color: T.brand2 }}>
-                  Pilih
-                  <input type="date" value={day} max={today0().toISOString().slice(0, 10)} onChange={(e) => e.target.value && setDay(e.target.value)}
-                    className="absolute inset-0 cursor-pointer opacity-0" style={{ colorScheme: "light" }} />
-                </label>
-                <button onClick={() => shiftDay(1)} disabled={isToday} aria-label="Hari berikutnya" className="kpress rounded-lg p-1.5" style={{ color: isToday ? T.line : T.sub }}><ChevronRight size={18} /></button>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {[["Hari ini", 1], ["7 hari", 7], ["30 hari", 30]].map(([lbl, n]) => (
+                    <button key={lbl} onClick={() => shiftRange(n)} className="kpress rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>{lbl}</button>
+                  ))}
+                </div>
               </div>
 
               {/* Filter per petugas (atasan) */}
@@ -2366,15 +2373,15 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
                 </div>
               )}
 
-              {dayEntries.length === 0 ? (
+              {rangeEntries.length === 0 ? (
                 <div className="rounded-xl p-8 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
                   <History size={28} className="mx-auto mb-2" style={{ color: T.line }} />
-                  <p className="text-sm font-medium" style={{ color: T.sub }}>Belum ada laporan pekerjaan untuk hari ini.</p>
+                  <p className="text-sm font-medium" style={{ color: T.sub }}>{isToday ? "Belum ada laporan pekerjaan untuk hari ini." : "Tidak ada laporan pada rentang tanggal ini."}</p>
                   {isPetugas && <p className="mt-1 text-xs" style={{ color: T.sub }}>Tekan <b>Lapor</b> untuk mencatat apa yang sudah Anda lakukan.</p>}
                 </div>
               ) : isPetugas ? (
                 <div className="space-y-2">
-                  {dayEntries.map((e) => <WorklogRow key={e.id} entry={e} onClick={() => openDetail(e)} />)}
+                  {rangeEntries.map((e) => <WorklogRow key={e.id} entry={e} onClick={() => openDetail(e)} />)}
                 </div>
               ) : (
                 <div className="space-y-5">
@@ -2442,6 +2449,13 @@ function WorklogDetail({ entry, canDelete, onDelete }) {
         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Yang sudah dilakukan</p>
         <p className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: T.ink }}>{entry.deskripsi}</p>
       </div>
+
+      {entry.tindakLanjut && (
+        <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Tindak lanjut berikutnya</p>
+          <p className="inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: T.brand2 }}><CalendarClock size={15} /> {fmtTgl(entry.tindakLanjut)}</p>
+        </div>
+      )}
 
       <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Bukti ({bukti.length})</p>
@@ -2572,7 +2586,7 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
       aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: foto || null, lok: lok || null }, ...(x.aktivitas || [])],
     }));
     const buktiAll = [...(foto ? [{ name: "Foto lapangan", type: "image", data: foto }] : []), ...bukti];
-    onSaveWorklog({ petugas: petugas || "", invoiceId: i.id, customer: i.customer || "", noInvoice: i.noInvoice || "", deskripsi: catatan.trim(), hasil, bukti: buktiAll });
+    onSaveWorklog({ petugas: petugas || "", invoiceId: i.id, customer: i.customer || "", noInvoice: i.noInvoice || "", deskripsi: catatan.trim(), hasil, tindakLanjut: tindakLanjut || "", bukti: buktiAll });
     flash("Laporan tersimpan");
     onDone();
   };
@@ -4881,17 +4895,21 @@ function AdminPanel({ th, onBack }) {
                                   <button onClick={() => setMEdit("")} className="shrink-0 rounded-lg px-2.5 text-[11px] font-semibold" style={{ background: th.bg, color: th.sub, border: `1px solid ${th.line}` }}>Batal</button>
                                 </div>
                               ) : (
-                                <div className="flex items-center gap-2 rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
-                                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: roleColor(m.role) + "1A", color: roleColor(m.role) }}>{m.role === "atasan" ? "Atasan" : "Petugas"}</span>
-                                  <span className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: th.ink }}>{m.member_name}</span>
-                                  <span className="shrink-0 text-[12px] font-bold" style={{ color: roleColor(m.role), fontFamily: MONO }}>{m.code}</span>
-                                  <button onClick={() => copyCode(m.code)} title="Salin kode" className="shrink-0 rounded-md p-1" style={{ color: th.sub }}><Copy size={13} /></button>
-                                  {m.member_id && !m.legacy && (
-                                    <>
-                                      <button onClick={() => startRenameMember(m)} title="Ubah nama" className="shrink-0 rounded-md p-1" style={{ color: th.brand2 }}><Pencil size={13} /></button>
-                                      <button onClick={() => { setMDel(m.member_id); setMDelCode(""); setMsg(""); }} title="Hapus anggota" className="shrink-0 rounded-md p-1" style={{ color: th.red }}><Trash2 size={13} /></button>
-                                    </>
-                                  )}
+                                <div className="rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+                                  <div className="flex items-center gap-2">
+                                    <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: roleColor(m.role) + "1A", color: roleColor(m.role) }}>{m.role === "atasan" ? "Atasan" : "Petugas"}</span>
+                                    <span className="min-w-0 flex-1 text-xs font-semibold" style={{ color: th.ink }}>{m.member_name}</span>
+                                  </div>
+                                  <div className="mt-1.5 flex items-center gap-2">
+                                    <span className="text-[12px] font-bold" style={{ color: roleColor(m.role), fontFamily: MONO }}>{m.code}</span>
+                                    <button onClick={() => copyCode(m.code)} title="Salin kode" className="shrink-0 rounded-md p-1" style={{ color: th.sub }}><Copy size={13} /></button>
+                                    {m.member_id && !m.legacy && (
+                                      <div className="ml-auto flex items-center gap-1">
+                                        <button onClick={() => startRenameMember(m)} title="Ubah nama" className="shrink-0 rounded-md p-1" style={{ color: th.brand2 }}><Pencil size={13} /></button>
+                                        <button onClick={() => { setMDel(m.member_id); setMDelCode(""); setMsg(""); }} title="Hapus anggota" className="shrink-0 rounded-md p-1" style={{ color: th.red }}><Trash2 size={13} /></button>
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                               {mDel && m.member_id === mDel && (
