@@ -1576,7 +1576,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
           </div>
 
           {/* Komposer */}
-          <div className="px-3 py-2.5" style={{ background: T.surface, borderTop: `1px solid ${T.line}` }}>
+          <div className="px-3 pt-2.5" style={{ background: T.surface, borderTop: `1px solid ${T.line}`, paddingBottom: "calc(0.625rem + env(safe-area-inset-bottom))" }}>
             <div className="relative mx-auto max-w-2xl">
               {mention && mentionList.length > 0 && (
                 <div className="mention-pop absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl shadow-lg" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
