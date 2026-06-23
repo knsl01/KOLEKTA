@@ -83,7 +83,8 @@ const rp = (n) =>
 const rpc = (v) => {
   let n = Math.round(v || 0); const neg = n < 0 ? "-" : ""; n = Math.abs(n);
   const f = (x, d) => x.toFixed(d).replace(/\.0$/, "").replace(".", ",");
-  if (n >= 1e9) return `${neg}Rp${f(n / 1e9, 1)} M`;
+  if (n >= 1e12) return `${neg}Rp${f(n / 1e12, n < 1e13 ? 1 : 0)} T`;
+  if (n >= 1e9) return `${neg}Rp${f(n / 1e9, n < 1e10 ? 1 : 0)} M`;
   if (n >= 1e6) return `${neg}Rp${f(n / 1e6, n < 1e7 ? 1 : 0)} jt`;
   if (n >= 1e3) return `${neg}Rp${Math.round(n / 1e3)} rb`;
   return `${neg}Rp${n}`;
