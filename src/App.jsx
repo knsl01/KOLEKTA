@@ -5,7 +5,7 @@ import {
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
-  Moon, Sun, ChevronLeft, ChevronRight, Paperclip,
+  Moon, Sun, ChevronLeft, ChevronRight, Paperclip, ArrowRight,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -1118,6 +1118,46 @@ const sbAdminAddMember = async (secret, tenantId, role, name) => { const a = awa
 const sbAdminStorage = async (secret) => { const a = await sbRpc("kolekta_admin_storage", { p_admin: secret }); return a && a[0] ? a[0] : null; };
 const fmtBytes = (n) => { n = Number(n) || 0; if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB"; if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB"; if (n >= 1024) return (n / 1024).toFixed(0) + " KB"; return n + " B"; };
 
+/* ---------- Audit Log (append-only, immutable di server) ----------
+   Penulisan log HANYA lewat RPC kolekta_audit_write (security-definer):
+   tenant_id & role diturunkan dari kode di server, jadi antar-PT terpisah
+   dan tak bisa dipalsukan. Tabel diblokir UPDATE/DELETE (lihat migrasi). */
+const sbAuditWrite = (code, actor, action, entity, before, after, meta) =>
+  sbRpc("kolekta_audit_write", {
+    p_code: code, p_actor: actor || "", p_action: action,
+    p_entity: entity || "", p_before: before ?? null, p_after: after ?? null, p_meta: meta ?? null,
+  });
+const sbAuditList = async (code, f = {}) =>
+  (await sbRpc("kolekta_audit_list", {
+    p_code: code, p_from: f.from || null, p_to: f.to || null,
+    p_user: f.user || null, p_action: f.action || null, p_limit: f.limit || 500,
+  })) || [];
+const sbAdminAuditList = async (secret, f = {}) =>
+  (await sbRpc("kolekta_admin_audit_list", {
+    p_admin: secret, p_tenant_id: f.tenant || null, p_from: f.from || null, p_to: f.to || null,
+    p_user: f.user || null, p_action: f.action || null, p_limit: f.limit || 1000,
+  })) || [];
+
+/* Jenis aktivitas yang dicatat (untuk filter & label tampilan). */
+const AUDIT_ACTIONS = {
+  login: "Login", tambah: "Tambah data", edit: "Edit data", hapus: "Hapus data",
+  status: "Ubah status", bayar: "Pembayaran", janji: "Janji bayar",
+  eskalasi: "Eskalasi / surat", dokumen: "Dokumen", profil: "Ubah profil",
+  export: "Export data", import: "Import data", backup: "Backup",
+  pulihkan: "Pulihkan backup", reset: "Reset data", kosongkan: "Kosongkan data",
+};
+const auditLabel = (a) => AUDIT_ACTIONS[a] || a;
+const auditTone = (a) =>
+  a === "hapus" || a === "kosongkan" || a === "reset" ? "red"
+  : a === "bayar" || a === "status" ? "green"
+  : a === "login" ? "slate"
+  : a === "export" || a === "backup" ? "brass" : "brand2";
+const fmtAuditTime = (iso) => {
+  if (!iso) return "";
+  try { return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); }
+  catch { return iso; }
+};
+
 function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; } }
 function saveAuth(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch {} }
 function clearAuth() { try { localStorage.removeItem(AUTH_KEY); } catch {} }
@@ -1292,11 +1332,21 @@ export default function KolektaApp() {
     const session = { code, tenantId: info.tenant_id, name: info.name, role: info.role, memberName: info.member_name || "" };
     saveAuth(session);
     setAuth(session);
+    const actor = session.memberName || (session.role === "atasan" ? "Atasan" : "Petugas");
+    sbAuditWrite(code, actor, "login", session.name, null, null, { role: session.role }).catch(() => {});
     return session;
   };
   const doLogout = () => { if (pushTimer.current) clearTimeout(pushTimer.current); clearAuth(); setAuth(null); setData(null); setTab("hari"); };
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
+
+  /* Catat aktivitas ke audit log server (append-only). Fire-and-forget. */
+  const audit = (action, entity, before, after, meta) => {
+    if (!auth) return;
+    const actor = auth.memberName || (auth.role === "atasan" ? "Atasan" : (data?.settings?.petugasAktif || "Petugas"));
+    sbAuditWrite(auth.code, actor, action, entity, before, after, meta).catch(() => {});
+  };
+
   const s = data?.settings;
 
   const allEnriched = useMemo(() => (data ? data.invoices.map((i) => enrich(i, s)) : []), [data, s]);
@@ -1473,8 +1523,14 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   const patch = (id, fn) =>
     setData((d) => ({ ...d, invoices: d.invoices.map((i) => (i.id === id ? fn(i) : i)) }));
   const remove = (id) => setData((d) => ({ ...d, invoices: d.invoices.filter((i) => i.id !== id) }));
-  const addInvoice = (inv) => setData((d) => ({ ...d, invoices: [{ ...inv, id: uid(), aktivitas: [], lastFollowUp: null, janjiBayar: null, pembayaran: [], eskalasi: [], dibuat: today0().toISOString().slice(0, 10) }, ...d.invoices] }));
-  const addMany = (arr) => setData((d) => ({ ...d, invoices: [...arr, ...d.invoices] }));
+  const addInvoice = (inv) => {
+    audit("tambah", `${inv.noInvoice} · ${inv.customer}`, null, { customer: inv.customer, noInvoice: inv.noInvoice, nominal: inv.nominal, status: inv.status });
+    setData((d) => ({ ...d, invoices: [{ ...inv, id: uid(), aktivitas: [], lastFollowUp: null, janjiBayar: null, pembayaran: [], eskalasi: [], dibuat: today0().toISOString().slice(0, 10) }, ...d.invoices] }));
+  };
+  const addMany = (arr) => {
+    audit("import", `${arr.length} tagihan`, null, { count: arr.length });
+    setData((d) => ({ ...d, invoices: [...arr, ...d.invoices] }));
+  };
   const addWorklog = (entry) => setData((d) => ({ ...d, worklog: [{ ...entry, id: uid(), ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString() }, ...(d.worklog || [])] }));
   const removeWorklog = (id) => setData((d) => ({ ...d, worklog: (d.worklog || []).filter((w) => w.id !== id) }));
 
@@ -1510,6 +1566,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       const obj = JSON.parse(await file.text());
       if (!obj || !Array.isArray(obj.invoices)) throw new Error();
       obj.settings = { ...data.settings, ...(obj.settings || {}) };
+      audit("pulihkan", "Backup JSON", null, { invoices: obj.invoices.length });
       setData(obj); flash("Backup dipulihkan");
     } catch { flash("File backup tidak valid"); }
   };
@@ -1525,6 +1582,11 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     return <div className="flex h-screen items-center justify-center" style={{ background: T.bg, color: T.sub, fontFamily: SANS }}>Memuat Kolekta…</div>;
 
   T = themePalette(data.settings.tema, data.settings.gelap);
+
+  /* Audit Log hanya untuk Atasan PT (petugas tak punya akses penuh). */
+  const navItems = auth.role === "atasan"
+    ? [...NAV.slice(0, 5), { id: "audit", icon: ClipboardList, label: "Audit Log" }, NAV[5]]
+    : NAV;
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => {
     const active = tab === id;
@@ -1625,7 +1687,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             </div>
           </div>
           <nav className="flex flex-col gap-1 px-3">
-            {NAV.map((n) => (
+            {navItems.map((n) => (
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
             <button onClick={() => setShowWorklog(true)}
@@ -1675,14 +1737,14 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {/* Nav (HP) */}
         <nav className="sticky top-2 z-20 mt-4 flex gap-1 rounded-xl p-1 shadow-sm lg:hidden"
           style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-          {NAV.filter((n) => n.id !== "set" && n.id !== "riwayat").map((n) => (
+          {navItems.filter((n) => n.id !== "set" && n.id !== "riwayat" && n.id !== "audit").map((n) => (
             <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
           ))}
         </nav>
 
         {/* Judul (PC) */}
         <div className="hidden pb-1 pt-7 lg:block">
-          <h2 className="text-xl font-bold tracking-tight" style={{ color: T.ink }}>{NAV.find((n) => n.id === tab)?.label}</h2>
+          <h2 className="text-xl font-bold tracking-tight" style={{ color: T.ink }}>{navItems.find((n) => n.id === tab)?.label}</h2>
         </div>
 
         {/* Konten beranimasi */}
@@ -1849,7 +1911,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <button onClick={() => fileRef.current?.click()}
                 className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><Upload size={16} /><span className="hidden sm:inline">Impor</span></button>
-              <button onClick={() => { try { exportExcel(enriched, s); flash("Excel diunduh"); } catch { flash("Export gagal di lingkungan ini"); } }}
+              <button onClick={() => { try { exportExcel(enriched, s); audit("export", "Excel daftar tagihan", null, { count: enriched.length }); flash("Excel diunduh"); } catch { flash("Export gagal di lingkungan ini"); } }}
                 className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><FileSpreadsheet size={16} /><span className="hidden sm:inline">Excel</span></button>
               <button onClick={() => setShowAdd((v) => !v)}
@@ -1918,8 +1980,8 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               {filtered.map((i) => (
                 <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
                   onToggle={() => setOpenId(openId === i.id ? null : i.id)}
-                  onStatement={(name) => { const t = statementText(name, enriched, s); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
-                  patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} />
+                  onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
+                  patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
               ))}
               {filtered.length === 0 && (
                 <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
@@ -2064,14 +2126,25 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             onOpen={(id) => { setTab("tagihan"); setOpenId(id); }} />
         )}
 
+        {/* ---------- AUDIT LOG (khusus Atasan PT) ---------- */}
+        {tab === "audit" && (
+          auth.role === "atasan"
+            ? <AuditView code={auth.code} tenantName={auth.name} />
+            : <div className="mt-4 rounded-xl p-6 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+                <Lock size={20} className="mx-auto mb-2" style={{ color: T.sub }} />
+                <p className="text-sm font-medium">Akses ditolak</p>
+                <p className="mt-1 text-xs" style={{ color: T.sub }}>Audit log penuh hanya untuk Atasan PT.</p>
+              </div>
+        )}
+
         {/* ---------- PENGATURAN ---------- */}
         {tab === "set" && (
           <Settingstab data={data} setData={setData} flash={flash} copy={copy}
             role={auth.role} tenantName={auth.name} onLogout={doLogout}
             lockedPetugas={auth.role === "petugas" ? (auth.memberName || "") : ""}
-            onBackup={() => exportJSON(data)} onRestore={() => jsonRef.current?.click()}
-            onReset={() => { setData(sampleData()); flash("Data direset ke contoh"); }}
-            onClear={() => { setData({ settings: data.settings, invoices: [] }); flash("Semua tagihan dihapus"); }} />
+            onBackup={() => { exportJSON(data); audit("backup", "Backup JSON", null, { invoices: data.invoices.length }); }} onRestore={() => jsonRef.current?.click()}
+            onReset={() => { audit("reset", "Muat data contoh", { invoices: data.invoices.length }, null); setData(sampleData()); flash("Data direset ke contoh"); }}
+            onClear={() => { audit("kosongkan", "Kosongkan semua tagihan", { invoices: data.invoices.length }, null); setData({ settings: data.settings, invoices: [] }); flash("Semua tagihan dihapus"); }} />
         )}
         </div>{/* /konten */}
           </div>
@@ -2094,7 +2167,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <button onClick={() => setDrawer(false)}><X size={18} style={{ color: T.sub }} /></button>
             </div>
             <nav className="flex flex-col gap-1 px-3">
-              {NAV.map((n) => {
+              {navItems.map((n) => {
                 const active = tab === n.id;
                 const badge = n.id === "hari" ? panels.belum.length + panels.perlu.length : 0;
                 return (
@@ -2703,7 +2776,9 @@ function SignaturePad({ onChange }) {
   );
 }
 
-function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onStatement }) {
+function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onStatement, audit }) {
+  const ent = `${i.noInvoice} · ${i.customer}`;
+  const logAudit = audit || (() => {});
   const [note, setNote] = useState("");
   const [janji, setJanji] = useState(i.janjiBayar || "");
   const [contact, setContact] = useState({ tipe: i.tipe || "perusahaan", pic: i.pic || "", telp: i.telp || "", alamat: i.alamat || "", jaminanTipe: i.jaminanTipe || "none", jaminan: i.jaminan || "", assignedTo: i.assignedTo || "" });
@@ -2744,10 +2819,16 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
       const tb = pem.reduce((a, p) => a + p.jumlah, 0);
       return { ...x, pembayaran: pem, status: tb >= x.nominal ? "lunas" : x.status, lastFollowUp: today0().toISOString().slice(0, 10) };
     });
+    logAudit("bayar", ent, { sisaPokok: i.sisaPokok }, { jumlah: j, lunas: i.terbayar + j >= i.nominal });
     setBayar(""); flash("Pembayaran dicatat");
   };
 
-  const setStatus = (st) => { if (st === "lunas") { setLunasCode(""); setLunasAsk(true); return; } patch(i.id, (x) => ({ ...x, status: st })); };
+  const setStatus = (st) => {
+    if (st === "lunas") { setLunasCode(""); setLunasAsk(true); return; }
+    if (st === i.status) return;
+    patch(i.id, (x) => ({ ...x, status: st }));
+    logAudit("status", ent, { status: i.status }, { status: st });
+  };
   const confirmLunas = () => {
     if (lunasCode.trim().toLowerCase() !== "lunas") { flash('Ketik "lunas" untuk konfirmasi'); return; }
     setLunasAsk(false); setLunasCode(""); markLunas();
@@ -2759,9 +2840,10 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
       const pem = sisa > 0 ? [{ ts: today0().toISOString().slice(0, 10), jumlah: sisa, note: "pelunasan" }, ...(x.pembayaran || [])] : (x.pembayaran || []);
       return { ...x, pembayaran: pem, status: "lunas" };
     });
+    logAudit("status", ent, { status: i.status }, { status: "lunas" });
     flash("Ditandai lunas");
   };
-  const logEskalasi = (level) => { patch(i.id, (x) => ({ ...x, eskalasi: [{ ts: today0().toISOString().slice(0, 10), level }, ...(x.eskalasi || [])] })); };
+  const logEskalasi = (level) => { patch(i.id, (x) => ({ ...x, eskalasi: [{ ts: today0().toISOString().slice(0, 10), level }, ...(x.eskalasi || [])] })); logAudit("eskalasi", ent, null, { level }); };
   const logFollowup = () => {
     const h = HASIL[hasil];
     const body = `[${h.label}]${note.trim() ? " " + note.trim() : ""}`;
@@ -2815,6 +2897,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     const sigArg = sigMapFor(docType, dsig, dsig2);
     const ok = printDoc(label, text, sigArg);
     patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, sig2: dsig2 || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi, pembahasan: f.pembahasan, kesepakatan: f.kesepakatan }, ...(x.dokumen || [])] }));
+    logAudit("dokumen", ent, null, { jenis: label, jumlah: f.jumlah });
     if (!ok) { copy(stripSign(text)); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
     setShowDoc(false); setDsig(null); setDsig2(null); setDForm({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   };
@@ -2933,7 +3016,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                   <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Tanggal janji bayar</p>
                   <div className="flex gap-2">
                     <input type="date" className={inputCls} style={inputSt} value={janji} onChange={(e) => setJanji(e.target.value)} />
-                    <button onClick={() => { patch(i.id, (x) => ({ ...x, janjiBayar: janji })); flash("Janji bayar disimpan"); }}
+                    <button onClick={() => { patch(i.id, (x) => ({ ...x, janjiBayar: janji })); logAudit("janji", ent, { janjiBayar: i.janjiBayar || null }, { janjiBayar: janji }); flash("Janji bayar disimpan"); }}
                       className="kpress shrink-0 rounded-lg px-4 text-xs font-semibold text-white" style={{ background: T.brand2 }}>Simpan</button>
                   </div>
                 </div>
@@ -3170,7 +3253,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                   {s.petugas.map((nm) => <option key={nm} value={nm}>Petugas: {nm}</option>)}
                 </select>
               )}
-              <button onClick={() => { patch(i.id, (x) => ({ ...x, tipe: contact.tipe, pic: contact.pic, telp: contact.telp, alamat: contact.alamat, jaminanTipe: contact.jaminanTipe, jaminan: contact.jaminan, assignedTo: contact.assignedTo })); flash("Profil disimpan"); }}
+              <button onClick={() => { patch(i.id, (x) => ({ ...x, tipe: contact.tipe, pic: contact.pic, telp: contact.telp, alamat: contact.alamat, jaminanTipe: contact.jaminanTipe, jaminan: contact.jaminan, assignedTo: contact.assignedTo })); logAudit("profil", ent, { pic: i.pic || "", telp: i.telp || "", alamat: i.alamat || "", assignedTo: i.assignedTo || "" }, { pic: contact.pic, telp: contact.telp, alamat: contact.alamat, assignedTo: contact.assignedTo }); flash("Profil disimpan"); }}
                 className="mt-2 w-full rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>Simpan profil</button>
             </div>
           )}
@@ -3185,7 +3268,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                 <input type="text" inputMode="numeric" value={grpID(ed.nominal)} onChange={(e) => setEd({ ...ed, nominal: onlyDigits(e.target.value) })} placeholder="Nominal pokok" className={inputCls} style={inputSt} />
                 <input type="date" value={ed.tglJatuhTempo} onChange={(e) => setEd({ ...ed, tglJatuhTempo: e.target.value })} className={inputCls} style={inputSt} />
               </div>
-              <button onClick={() => { patch(i.id, (x) => ({ ...x, customer: ed.customer.trim() || x.customer, noInvoice: ed.noInvoice.trim() || x.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : x.nominal, tglJatuhTempo: ed.tglJatuhTempo || x.tglJatuhTempo })); setEditing(false); flash("Data tagihan diperbarui"); }}
+              <button onClick={() => { patch(i.id, (x) => ({ ...x, customer: ed.customer.trim() || x.customer, noInvoice: ed.noInvoice.trim() || x.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : x.nominal, tglJatuhTempo: ed.tglJatuhTempo || x.tglJatuhTempo })); logAudit("edit", ent, { customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo }, { customer: ed.customer.trim() || i.customer, noInvoice: ed.noInvoice.trim() || i.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : i.nominal, tglJatuhTempo: ed.tglJatuhTempo || i.tglJatuhTempo }); setEditing(false); flash("Data tagihan diperbarui"); }}
                 className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: T.brand }}>Simpan perubahan</button>
             </div>
           )}
@@ -3201,7 +3284,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               className="flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>
               <Pencil size={15} />
             </button>
-            <button onClick={() => remove(i.id)}
+            <button onClick={() => { logAudit("hapus", ent, { customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, status: i.status }, null); remove(i.id); }}
               className="flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.red + "14", color: T.red }}>
               <Trash2 size={15} />
             </button>
@@ -3218,6 +3301,173 @@ function Mini({ label, value, accent }) {
     <div className="rounded-lg p-2" style={{ background: T.bg }}>
       <p className="text-[11px]" style={{ color: T.sub }}>{label}</p>
       <p className="whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO, color: accent || T.ink }}>{value}</p>
+    </div>
+  );
+}
+
+/* ================= AUDIT LOG (tampilan) ================= */
+const auditErrText = (m = "") =>
+  /forbidden/.test(m) ? "Akses ditolak — audit log penuh hanya untuk Atasan PT."
+  : /invalid_admin/.test(m) ? "Rahasia / kode admin salah."
+  : /invalid_code/.test(m) ? "Sesi tidak dikenal, silakan masuk ulang."
+  : "Gagal memuat audit log: " + m;
+
+const auditValFmt = (v) =>
+  v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v);
+
+/* Tampilkan perubahan sebelum -> sesudah secara ringkas per field. */
+function AuditDiff({ before, after, meta }) {
+  const keys = Array.from(new Set([
+    ...(before && typeof before === "object" ? Object.keys(before) : []),
+    ...(after && typeof after === "object" ? Object.keys(after) : []),
+  ]));
+  const hasDiff = keys.length > 0;
+  const showMeta = meta && typeof meta === "object" && Object.keys(meta).length > 0;
+  if (!hasDiff && !showMeta) return null;
+  return (
+    <div className="mt-1.5 space-y-0.5">
+      {keys.map((k) => {
+        const b = before ? before[k] : undefined;
+        const a = after ? after[k] : undefined;
+        const changed = JSON.stringify(b) !== JSON.stringify(a);
+        return (
+          <div key={k} className="flex flex-wrap items-center gap-1 text-[11px]" style={{ fontFamily: MONO }}>
+            <span style={{ color: T.sub }}>{k}:</span>
+            {before != null && <span style={{ color: after != null && changed ? T.red : T.ink, textDecoration: after != null && changed ? "line-through" : "none" }}>{auditValFmt(b)}</span>}
+            {before != null && after != null && changed && <ArrowRight size={10} style={{ color: T.sub }} />}
+            {after != null && (!before || changed) && <span style={{ color: T.green }}>{auditValFmt(a)}</span>}
+          </div>
+        );
+      })}
+      {showMeta && !hasDiff && (
+        <div className="text-[11px]" style={{ color: T.sub, fontFamily: MONO }}>
+          {Object.entries(meta).map(([k, v]) => `${k}: ${auditValFmt(v)}`).join(" · ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AuditRow({ r, showTenant }) {
+  const tone = T[auditTone(r.action)] || T.brand2;
+  return (
+    <div className="rounded-lg p-2.5" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: tone + "1A", color: tone }}>{auditLabel(r.action)}</span>
+        {showTenant && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: T.brand2 + "14", color: T.brand2 }}>{r.tenant_name || r.tenant_id}</span>}
+        <span className="ml-auto whitespace-nowrap text-[11px]" style={{ color: T.sub, fontFamily: MONO }}>{fmtAuditTime(r.ts)}</span>
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+        <User size={12} style={{ color: T.sub }} />
+        <span className="font-semibold" style={{ color: T.ink }}>{r.actor || "—"}</span>
+        <span className="rounded px-1 py-0.5 text-[9px] font-bold" style={{ background: (r.role === "atasan" ? T.brass : T.slate) + "1A", color: r.role === "atasan" ? T.brass : T.slate }}>{r.role || "—"}</span>
+        {r.entity && <span className="min-w-0 truncate" style={{ color: T.sub }}>· {r.entity}</span>}
+      </div>
+      <AuditDiff before={r.before} after={r.after} meta={r.meta} />
+    </div>
+  );
+}
+
+/* Panel audit log dengan filter tanggal / user / aktivitas.
+   kind="tenant" (Atasan PT) atau kind="admin" (Admin Kolekta, lintas PT). */
+function AuditPanel({ kind, fetcher, tenants = [] }) {
+  const [f, setF] = useState({ from: "", to: "", user: "", action: "all", tenant: "" });
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const isAdmin = kind === "admin";
+
+  const load = async (override) => {
+    const cur = override || f;
+    setBusy(true); setErr("");
+    try {
+      const data = await fetcher({
+        from: cur.from || null, to: cur.to || null,
+        user: cur.user.trim() || null,
+        action: cur.action === "all" ? null : cur.action,
+        tenant: cur.tenant || null,
+      });
+      setRows(Array.isArray(data) ? data : []); setLoaded(true);
+    } catch (e) { setErr(auditErrText(e.message)); setRows([]); }
+    setBusy(false);
+  };
+  useEffect(() => { load(); /* muat awal */ }, []); // eslint-disable-line
+
+  const reset = () => { const nf = { from: "", to: "", user: "", action: "all", tenant: "" }; setF(nf); load(nf); };
+
+  return (
+    <div className="mt-4 space-y-3">
+      <section className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="mb-2 flex items-center gap-2">
+          <History size={15} style={{ color: T.brand2 }} />
+          <h2 className="text-sm font-semibold">Filter</h2>
+          <span className="ml-auto text-[11px]" style={{ color: T.sub }}>{loaded ? `${rows.length} aktivitas` : ""}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <Field label="Dari tanggal"><input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} className={inputCls} style={inputSt} /></Field>
+          <Field label="Sampai tanggal"><input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} className={inputCls} style={inputSt} /></Field>
+          <Field label="User / petugas"><input value={f.user} onChange={(e) => setF({ ...f, user: e.target.value })} placeholder="nama…" className={inputCls} style={inputSt} /></Field>
+          <Field label="Aktivitas">
+            <select value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })} className={inputCls} style={inputSt}>
+              <option value="all">Semua aktivitas</option>
+              {Object.entries(AUDIT_ACTIONS).map(([k, lbl]) => <option key={k} value={k}>{lbl}</option>)}
+            </select>
+          </Field>
+          {isAdmin && (
+            <Field label="PT / Tenant">
+              <select value={f.tenant} onChange={(e) => setF({ ...f, tenant: e.target.value })} className={inputCls} style={inputSt}>
+                <option value="">Semua PT</option>
+                {tenants.map((t) => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+              </select>
+            </Field>
+          )}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <button onClick={() => load()} disabled={busy} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white" style={{ background: T.brand, opacity: busy ? 0.6 : 1 }}>
+            <Search size={13} /> {busy ? "Memuat…" : "Terapkan filter"}
+          </button>
+          <button onClick={reset} disabled={busy} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>
+            <RotateCcw size={13} /> Reset
+          </button>
+        </div>
+      </section>
+
+      <div className="rounded-xl p-2 text-center text-[11px]" style={{ background: T.brand2 + "0F", color: T.brand2 }}>
+        🔒 Audit log bersifat permanen & tak dapat diubah/dihapus (append-only). Koreksi dilakukan dengan mencatat aktivitas baru.
+      </div>
+
+      {err && <div className="rounded-xl p-3 text-sm" style={{ background: T.red + "12", color: T.red, border: `1px solid ${T.red}33` }}>{err}</div>}
+
+      {!err && (
+        <div className="space-y-2">
+          {rows.map((r) => <AuditRow key={(r.tenant_id || "") + "-" + r.id} r={r} showTenant={isAdmin && !f.tenant} />)}
+          {loaded && rows.length === 0 && (
+            <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+              <p className="text-sm font-medium">Belum ada aktivitas</p>
+              <p className="mt-1 text-xs" style={{ color: T.sub }}>Tidak ada catatan untuk filter ini.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Audit log untuk Atasan PT — hanya PT miliknya (dipaksa di server). */
+function AuditView({ code, tenantName }) {
+  return (
+    <div>
+      <div className="mt-4 rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="flex items-center gap-2">
+          <ClipboardList size={16} style={{ color: T.brand2 }} />
+          <div>
+            <h2 className="text-sm font-semibold">Audit Log — {tenantName}</h2>
+            <p className="text-[11px]" style={{ color: T.sub }}>Catatan aktivitas seluruh pengguna di PT ini.</p>
+          </div>
+        </div>
+      </div>
+      <AuditPanel kind="tenant" fetcher={(o) => sbAuditList(code, o)} />
     </div>
   );
 }
@@ -4194,6 +4444,7 @@ function AdminPanel({ th, onBack }) {
   const [addFor, setAddFor] = useState("");            // tenant_id form tambah anggota
   const [addRole, setAddRole] = useState("petugas");
   const [addName, setAddName] = useState("");
+  const [panel, setPanel] = useState("tenants");       // tenants | audit
 
   const DELETE_CODE = "12345";
   const STORAGE_CAP = 500 * 1048576; // ~500 MB (kuota database Supabase free)
@@ -4336,6 +4587,17 @@ function AdminPanel({ th, onBack }) {
         </>
       ) : (
         <>
+          <div className="mb-3 flex gap-1 rounded-xl p-1" style={{ background: th.bg }}>
+            {[["tenants", "Institusi & kode"], ["audit", "Audit Log"]].map(([v, lbl]) => (
+              <button key={v} onClick={() => setPanel(v)} className="flex-1 rounded-lg py-1.5 text-xs font-semibold"
+                style={panel === v ? { background: th.brand, color: "#fff" } : { color: th.sub }}>{lbl}</button>
+            ))}
+          </div>
+
+          {panel === "audit" ? (
+            <AuditPanel kind="admin" tenants={rows} fetcher={(o) => sbAdminAuditList(secret, o)} />
+          ) : (
+          <>
           {/* Info penyimpanan dokumen */}
           {storage && (() => {
             const ratio = STORAGE_CAP ? storage.db_bytes / STORAGE_CAP : 0;
@@ -4514,6 +4776,8 @@ function AdminPanel({ th, onBack }) {
               );
             })}
           </div>
+          </>
+          )}
         </>
       )}
       {msg && <p className="mt-2 text-[12px]" style={{ color: /✓/.test(msg) ? th.green : th.red }}>{msg}</p>}
