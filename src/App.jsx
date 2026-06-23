@@ -3315,35 +3315,68 @@ const auditErrText = (m = "") =>
 const auditValFmt = (v) =>
   v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v);
 
-/* Tampilkan perubahan sebelum -> sesudah secara ringkas per field. */
-function AuditDiff({ before, after, meta }) {
-  const keys = Array.from(new Set([
-    ...(before && typeof before === "object" ? Object.keys(before) : []),
-    ...(after && typeof after === "object" ? Object.keys(after) : []),
-  ]));
-  const hasDiff = keys.length > 0;
-  const showMeta = meta && typeof meta === "object" && Object.keys(meta).length > 0;
-  if (!hasDiff && !showMeta) return null;
+/* Label status yang aman (kalau key tak dikenal, tampilkan apa adanya). */
+const auditStLabel = (k) => (k && STATUS_META[k] ? STATUS_META[k].label : (k || "—"));
+
+/* Kalimat ringkas, bahasa manusia: apa yang dilakukan + hasilnya. */
+function auditNarrative(r) {
+  const b = r.before || {}, a = r.after || {}, m = r.meta || {};
+  switch (r.action) {
+    case "login": return `Masuk ke sistem sebagai ${m.role || r.role || "pengguna"}.`;
+    case "tambah": return `Menambah tagihan baru senilai ${rp(a.nominal)}.`;
+    case "import": return `Mengimpor ${m.count ?? "?"} tagihan sekaligus.`;
+    case "hapus": return `Menghapus tagihan (pokok ${rp(b.nominal)}, status ${auditStLabel(b.status)}).`;
+    case "status": return `Mengubah status dari "${auditStLabel(b.status)}" menjadi "${auditStLabel(a.status)}".`;
+    case "bayar": {
+      const lunas = a.lunas ? " Tagihan menjadi LUNAS." : "";
+      const sisa = b.sisaPokok != null ? ` Sisa pokok sebelum bayar ${rp(b.sisaPokok)}.` : "";
+      return `Mencatat pembayaran masuk ${rp(a.jumlah)}.${lunas}${sisa}`;
+    }
+    case "janji": return `Menetapkan janji bayar pada ${a.janjiBayar ? fmtTgl(a.janjiBayar) : "—"}.`;
+    case "eskalasi": return `Menandai surat/eskalasi "${a.level || "—"}" terkirim.`;
+    case "dokumen": return `Membuat dokumen ${a.jenis || "—"}${a.jumlah ? ` senilai ${rp(a.jumlah)}` : ""}.`;
+    case "profil": return `Memperbarui profil / kontak debitur.`;
+    case "edit": return `Mengubah data tagihan.`;
+    case "export": return `Mengekspor data: ${r.entity || "—"}.`;
+    case "backup": return `Membuat backup data (${m.invoices ?? "?"} tagihan).`;
+    case "pulihkan": return `Memulihkan data dari backup (${m.invoices ?? "?"} tagihan).`;
+    case "reset": return `Mereset data ke contoh.`;
+    case "kosongkan": return `Mengosongkan semua tagihan (${b.invoices ?? "?"} tagihan dihapus).`;
+    default: return auditLabel(r.action) + (r.entity ? ` — ${r.entity}` : "");
+  }
+}
+
+/* Nilai per-field diformat enak dibaca (rupiah utk field nominal). */
+const auditFieldVal = (k, v) =>
+  v == null || v === "" ? "—"
+  : k === "nominal" ? rp(v)
+  : k === "tglJatuhTempo" || k === "janjiBayar" ? fmtTgl(v)
+  : k === "status" ? auditStLabel(v)
+  : typeof v === "object" ? JSON.stringify(v) : String(v);
+
+const AUDIT_FIELD_LABEL = {
+  customer: "Customer", noInvoice: "No. invoice", nominal: "Nominal", tglJatuhTempo: "Jatuh tempo",
+  pic: "PIC / kontak", telp: "No. WA", alamat: "Alamat", assignedTo: "Petugas",
+};
+
+/* Rincian perubahan sebelum -> sesudah, HANYA untuk field yang benar-benar
+   berubah dan punya pasangan before & after (mis. edit data / profil). */
+function AuditChanges({ before, after }) {
+  if (!before || !after) return null;
+  const keys = Object.keys(after).filter(
+    (k) => k in before && JSON.stringify(before[k]) !== JSON.stringify(after[k])
+  );
+  if (!keys.length) return null;
   return (
-    <div className="mt-1.5 space-y-0.5">
-      {keys.map((k) => {
-        const b = before ? before[k] : undefined;
-        const a = after ? after[k] : undefined;
-        const changed = JSON.stringify(b) !== JSON.stringify(a);
-        return (
-          <div key={k} className="flex flex-wrap items-center gap-1 text-[11px]" style={{ fontFamily: MONO }}>
-            <span style={{ color: T.sub }}>{k}:</span>
-            {before != null && <span style={{ color: after != null && changed ? T.red : T.ink, textDecoration: after != null && changed ? "line-through" : "none" }}>{auditValFmt(b)}</span>}
-            {before != null && after != null && changed && <ArrowRight size={10} style={{ color: T.sub }} />}
-            {after != null && (!before || changed) && <span style={{ color: T.green }}>{auditValFmt(a)}</span>}
-          </div>
-        );
-      })}
-      {showMeta && !hasDiff && (
-        <div className="text-[11px]" style={{ color: T.sub, fontFamily: MONO }}>
-          {Object.entries(meta).map(([k, v]) => `${k}: ${auditValFmt(v)}`).join(" · ")}
+    <div className="mt-1.5 space-y-0.5 rounded-lg p-1.5" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      {keys.map((k) => (
+        <div key={k} className="flex flex-wrap items-center gap-1 text-[11px]">
+          <span style={{ color: T.sub }}>{AUDIT_FIELD_LABEL[k] || k}:</span>
+          <span style={{ color: T.red, textDecoration: "line-through", fontFamily: MONO }}>{auditFieldVal(k, before[k])}</span>
+          <ArrowRight size={10} style={{ color: T.sub }} />
+          <span style={{ color: T.green, fontFamily: MONO }}>{auditFieldVal(k, after[k])}</span>
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -3363,7 +3396,8 @@ function AuditRow({ r, showTenant }) {
         <span className="rounded px-1 py-0.5 text-[9px] font-bold" style={{ background: (r.role === "atasan" ? T.brass : T.slate) + "1A", color: r.role === "atasan" ? T.brass : T.slate }}>{r.role || "—"}</span>
         {r.entity && <span className="min-w-0 truncate" style={{ color: T.sub }}>· {r.entity}</span>}
       </div>
-      <AuditDiff before={r.before} after={r.after} meta={r.meta} />
+      <p className="mt-1 text-xs" style={{ color: T.ink }}>{auditNarrative(r)}</p>
+      {(r.action === "edit" || r.action === "profil") && <AuditChanges before={r.before} after={r.after} />}
     </div>
   );
 }
