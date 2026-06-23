@@ -6,6 +6,7 @@ import {
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
   Moon, Sun, ChevronLeft, ChevronRight, Paperclip, ArrowRight,
+  CheckCheck, Users, ArrowLeft, Image as ImageIcon,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -1119,6 +1120,21 @@ const sbAdminAddMember = async (secret, tenantId, role, name) => { const a = awa
 const sbAdminStorage = async (secret) => { const a = await sbRpc("kolekta_admin_storage", { p_admin: secret }); return a && a[0] ? a[0] : null; };
 const fmtBytes = (n) => { n = Number(n) || 0; if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB"; if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB"; if (n >= 1024) return (n / 1024).toFixed(0) + " KB"; return n + " B"; };
 
+/* ---------- Chat (Realtime via polling, isolasi per-PT di server) ---------- */
+const sbChatSend = async (code, sender, role, conv, body, attachments) => {
+  const a = await sbRpc("kolekta_chat_send", { p_code: code, p_sender: sender, p_role: role, p_conv: conv, p_body: body || "", p_attachments: attachments || [] });
+  return a && a[0] ? a[0] : null;
+};
+const sbChatFetch = async (code, role, me, conv, after, limit) =>
+  (await sbRpc("kolekta_chat_fetch", { p_code: code, p_role: role, p_me: me, p_conv: conv, p_after: after || 0, p_limit: limit || 300 })) || [];
+const sbChatReads = async (code, role, me, conv) =>
+  (await sbRpc("kolekta_chat_reads", { p_code: code, p_role: role, p_me: me, p_conv: conv })) || [];
+const sbChatMarkRead = (code, me, role, conv, last) =>
+  sbRpc("kolekta_chat_mark_read", { p_code: code, p_me: me, p_role: role, p_conv: conv, p_last: last || 0 });
+const sbChatConvos = async (code, role, me) =>
+  (await sbRpc("kolekta_chat_convos", { p_code: code, p_role: role, p_me: me })) || [];
+const CHAT_ATT_MAX = 5 * 1024 * 1024; // 5 MB / file
+
 /* ---------- Audit Log (append-only, immutable di server) ----------
    Penulisan log HANYA lewat RPC kolekta_audit_write (security-definer):
    tenant_id & role diturunkan dari kode di server, jadi antar-PT terpisah
@@ -1264,6 +1280,252 @@ function Pill({ status }) {
   );
 }
 
+/* ---------- Panel Chat (grup PT + japri atasan↔petugas) ---------- */
+function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread }) {
+  const [openConv, setOpenConv] = useState(null);
+  const [convos, setConvos] = useState([]);
+  const [msgs, setMsgs] = useState([]);
+  const [reads, setReads] = useState([]);
+  const [text, setText] = useState("");
+  const [atts, setAtts] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [busyAtt, setBusyAtt] = useState(false);
+  const [err, setErr] = useState("");
+  const lastIdRef = useRef(0);
+  const pollRef = useRef(null);
+  const bottomRef = useRef(null);
+  const imgInputRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const convList = useMemo(() => {
+    const list = [{ conv: "group", title: ptName ? `Tim ${ptName}` : "Tim", kind: "group" }];
+    if (meRole === "atasan") {
+      (petugasNames || []).filter(Boolean).forEach((nm) => list.push({ conv: "dm:" + nm, title: nm, kind: "dm" }));
+    } else {
+      list.push({ conv: "dm:" + meName, title: "Atasan", kind: "dm" });
+    }
+    return list;
+  }, [petugasNames, meRole, meName, ptName]);
+
+  const sumOf = (k) => convos.find((c) => c.conv === k);
+  const totalUnread = useMemo(() => convos.reduce((a, c) => a + (c.unread || 0), 0), [convos]);
+  useEffect(() => { onUnread && onUnread(totalUnread); }, [totalUnread, onUnread]);
+
+  /* Daftar percakapan (saat di list) */
+  useEffect(() => {
+    if (openConv) return;
+    let alive = true, timer;
+    const tick = async () => {
+      try { const c = await sbChatConvos(auth.code, meRole, meName); if (alive) setConvos(c); } catch {}
+      if (alive) timer = setTimeout(tick, 6000);
+    };
+    tick();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [openConv, auth.code, meRole, meName]);
+
+  /* Pesan dalam satu percakapan (polling ~3s) */
+  useEffect(() => {
+    if (!openConv) return;
+    let alive = true;
+    lastIdRef.current = 0; setMsgs([]); setReads([]);
+    const mergeIn = (incoming) => setMsgs((p) => {
+      const m = new Map(p.map((x) => [x.id, x]));
+      incoming.forEach((x) => m.set(x.id, x));
+      return [...m.values()].sort((a, b) => a.id - b.id);
+    });
+    const tick = async () => {
+      if (!alive) return;
+      try {
+        const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
+        if (alive && incoming.length) {
+          lastIdRef.current = incoming[incoming.length - 1].id;
+          mergeIn(incoming);
+          sbChatMarkRead(auth.code, meName, meRole, openConv, lastIdRef.current).catch(() => {});
+        }
+        const rd = await sbChatReads(auth.code, meRole, meName, openConv);
+        if (alive) setReads(rd);
+      } catch {}
+      if (alive) pollRef.current = setTimeout(tick, 3000);
+    };
+    tick();
+    return () => { alive = false; clearTimeout(pollRef.current); };
+  }, [openConv, auth.code, meRole, meName]);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ block: "end" }); }, [msgs]);
+
+  const addImages = async (files) => {
+    setBusyAtt(true);
+    try {
+      const out = [];
+      for (const f of files) {
+        try { const data = await resizeImage(f, 1280, 0.62); out.push({ name: f.name || "foto.jpg", type: "image", size: Math.round((data.length * 3) / 4), data }); } catch {}
+      }
+      if (out.length) setAtts((p) => [...p, ...out]);
+    } finally { setBusyAtt(false); }
+  };
+  const addFiles = async (files) => {
+    setBusyAtt(true);
+    try {
+      const out = [];
+      for (const f of files) {
+        if (f.size > CHAT_ATT_MAX) { setErr(`${f.name}: file > 5 MB`); setTimeout(() => setErr(""), 2800); continue; }
+        try { const data = await readFileData(f); out.push({ name: f.name || "file", type: f.type && f.type.startsWith("image/") ? "image" : "file", size: f.size, data }); } catch {}
+      }
+      if (out.length) setAtts((p) => [...p, ...out]);
+    } finally { setBusyAtt(false); }
+  };
+
+  const sendMsg = async () => {
+    const body = text.trim();
+    if ((!body && atts.length === 0) || sending) return;
+    setSending(true);
+    try {
+      await sbChatSend(auth.code, meName, meRole, openConv, body, atts);
+      setText(""); setAtts([]);
+      const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
+      if (incoming.length) {
+        lastIdRef.current = incoming[incoming.length - 1].id;
+        setMsgs((p) => { const m = new Map(p.map((x) => [x.id, x])); incoming.forEach((x) => m.set(x.id, x)); return [...m.values()].sort((a, b) => a.id - b.id); });
+        sbChatMarkRead(auth.code, meName, meRole, openConv, lastIdRef.current).catch(() => {});
+      }
+    } catch (e) { setErr("Gagal mengirim pesan"); setTimeout(() => setErr(""), 2800); }
+    finally { setSending(false); }
+  };
+
+  const readByOthers = (id) => reads.filter((r) => r.member !== meName && r.last_read_id >= id).length;
+  const openAtt = (att) => {
+    try { const b = dataUrlToBlob(att.data); const u = URL.createObjectURL(b); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60000); }
+    catch { const a = document.createElement("a"); a.href = att.data; a.download = att.name || "file"; a.click(); }
+  };
+
+  const activeTitle = openConv ? (convList.find((c) => c.conv === openConv)?.title || "Chat") : null;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: T.surface, borderBottom: `1px solid ${T.line}` }}>
+        {openConv ? (
+          <button onClick={() => setOpenConv(null)} className="kpress shrink-0 rounded-lg p-1.5" style={{ color: T.ink }} aria-label="Kembali"><ArrowLeft size={20} /></button>
+        ) : (
+          <button onClick={onClose} className="kpress shrink-0 rounded-lg p-1.5" style={{ color: T.ink }} aria-label="Tutup"><X size={20} /></button>
+        )}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {openConv && (openConv === "group"
+            ? <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ background: T.brand2 + "1A", color: T.brand2 }}><Users size={18} /></span>
+            : <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{(activeTitle || "?").slice(0, 1).toUpperCase()}</span>)}
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-bold" style={{ color: T.ink }}>{openConv ? activeTitle : "Chat"}</h2>
+            <p className="truncate text-[11px]" style={{ color: T.sub }}>{openConv ? (openConv === "group" ? "Grup tim · semua anggota PT" : "Japri") : (ptName || "")}</p>
+          </div>
+        </div>
+      </div>
+
+      {err && <div className="px-4 py-2 text-center text-xs font-semibold" style={{ background: T.red + "1A", color: T.red }}>{err}</div>}
+
+      {!openConv ? (
+        /* ---- Daftar percakapan ---- */
+        <div className="flex-1 overflow-y-auto p-3">
+          <div className="mx-auto max-w-2xl space-y-2">
+            {convList.map((c) => {
+              const sm = sumOf(c.conv);
+              return (
+                <button key={c.conv} onClick={() => setOpenConv(c.conv)}
+                  className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                  {c.kind === "group"
+                    ? <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full" style={{ background: T.brand2 + "1A", color: T.brand2 }}><Users size={20} /></span>
+                    : <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-base font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{c.title.slice(0, 1).toUpperCase()}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-semibold" style={{ color: T.ink }}>{c.title}</span>
+                      {sm?.last_at && <span className="ml-auto shrink-0 text-[10px]" style={{ color: T.sub }}>{fmtWaktu(sm.last_at)}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-xs" style={{ color: T.sub }}>
+                        {sm ? `${sm.last_sender === meName ? "Anda: " : ""}${sm.last_body || (sm.last_has_att ? "📎 Lampiran" : "")}` : "Belum ada pesan"}
+                      </span>
+                      {sm?.unread > 0 && <span className="shrink-0 rounded-full px-1.5 text-center text-[11px] font-bold leading-5 text-white" style={{ background: T.brand2, minWidth: 20 }}>{sm.unread}</span>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+            <p className="px-1 pt-2 text-center text-[11px]" style={{ color: T.sub }}>Pesan terisolasi per-PT. Petugas hanya bisa chat grup tim & japri ke atasan.</p>
+          </div>
+        </div>
+      ) : (
+        /* ---- Ruang percakapan ---- */
+        <>
+          <div className="flex-1 overflow-y-auto px-3 py-4" style={{ background: T.bg }}>
+            <div className="mx-auto flex max-w-2xl flex-col gap-2">
+              {msgs.length === 0 && <p className="py-10 text-center text-xs" style={{ color: T.sub }}>Belum ada pesan. Mulai percakapan.</p>}
+              {msgs.map((m) => {
+                const mine = m.sender === meName;
+                const rc = mine ? readByOthers(m.id) : 0;
+                return (
+                  <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                    <div className="max-w-[82%] rounded-2xl px-3 py-2 shadow-sm" style={{ background: mine ? T.brand2 : T.surface, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderBottomRightRadius: mine ? 4 : 16, borderBottomLeftRadius: mine ? 16 : 4 }}>
+                      {!mine && openConv === "group" && <p className="mb-0.5 text-[11px] font-bold" style={{ color: T.brand2 }}>{m.sender}{m.sender_role === "atasan" ? " · Atasan" : ""}</p>}
+                      {(m.attachments || []).length > 0 && (
+                        <div className="mb-1 flex flex-col gap-1.5">
+                          {m.attachments.map((att, idx) => att.type === "image" ? (
+                            <img key={idx} src={att.data} alt={att.name} onClick={() => openAtt(att)} className="max-h-52 w-auto cursor-pointer rounded-lg object-cover" style={{ maxWidth: 240 }} />
+                          ) : (
+                            <button key={idx} onClick={() => openAtt(att)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left" style={{ background: mine ? "rgba(255,255,255,.18)" : T.bg, border: `1px solid ${mine ? "rgba(255,255,255,.25)" : T.line}` }}>
+                              <FileText size={16} style={{ color: mine ? "#fff" : T.brand2 }} />
+                              <span className="min-w-0 flex-1 truncate text-xs font-medium">{att.name}</span>
+                              <span className="shrink-0 text-[10px] opacity-80">{humanSize(att.size || 0)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {m.body && <p className="whitespace-pre-wrap break-words text-sm leading-snug">{m.body}</p>}
+                      <div className="mt-0.5 flex items-center justify-end gap-1">
+                        <span className="text-[10px]" style={{ color: mine ? "rgba(255,255,255,.75)" : T.sub }}>{fmtWaktu(m.created_at)}</span>
+                        {mine && (rc > 0
+                          ? <span className="inline-flex items-center gap-0.5 text-[10px]" style={{ color: "#bfe3ff" }}><CheckCheck size={13} />{openConv === "group" && rc > 1 ? rc : ""}</span>
+                          : <Check size={13} style={{ color: "rgba(255,255,255,.7)" }} />)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={bottomRef} />
+            </div>
+          </div>
+
+          {/* Komposer */}
+          <div className="px-3 py-2.5" style={{ background: T.surface, borderTop: `1px solid ${T.line}` }}>
+            <div className="mx-auto max-w-2xl">
+              {atts.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {atts.map((a, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }}>
+                      {a.type === "image" ? <ImageIcon size={13} style={{ color: T.brand2 }} /> : <FileText size={13} style={{ color: T.brand2 }} />}
+                      <span className="max-w-[120px] truncate">{a.name}</span>
+                      <button onClick={() => setAtts((p) => p.filter((_, i) => i !== idx))} style={{ color: T.red }}><X size={13} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-end gap-2">
+                <input ref={imgInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { addImages([...e.target.files]); e.target.value = ""; }} />
+                <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { addFiles([...e.target.files]); e.target.value = ""; }} />
+                <button onClick={() => imgInputRef.current?.click()} disabled={busyAtt} className="kpress shrink-0 rounded-full p-2" style={{ color: T.brand2 }} aria-label="Kirim foto"><Camera size={20} /></button>
+                <button onClick={() => fileInputRef.current?.click()} disabled={busyAtt} className="kpress shrink-0 rounded-full p-2" style={{ color: T.brand2 }} aria-label="Lampirkan file"><Paperclip size={20} /></button>
+                <textarea value={text} onChange={(e) => setText(e.target.value)} rows={1} placeholder="Tulis pesan…"
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
+                  className="max-h-28 min-h-[40px] min-w-0 flex-1 resize-none rounded-2xl px-3 py-2 text-sm outline-none" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }} />
+                <button onClick={sendMsg} disabled={sending || busyAtt || (!text.trim() && atts.length === 0)} className="kpress grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: T.brand2, color: "#fff", opacity: sending || (!text.trim() && atts.length === 0) ? 0.5 : 1 }} aria-label="Kirim"><Send size={18} /></button>
+              </div>
+              {busyAtt && <p className="mt-1 text-[11px]" style={{ color: T.sub }}>Memproses lampiran…</p>}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function KolektaApp() {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("hari");
@@ -1283,6 +1545,8 @@ export default function KolektaApp() {
   const [sortBy, setSortBy] = useState("overdue");
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
+  const [showChat, setShowChat] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
   const loadedRef = useRef(false);
   const pushTimer = useRef(null);
 
@@ -1350,6 +1614,23 @@ export default function KolektaApp() {
   };
 
   const s = data?.settings;
+
+  /* Identitas untuk chat */
+  const meRole = auth?.role || "petugas";
+  const meName = auth ? (auth.memberName || (meRole === "atasan" ? "Atasan" : (s?.petugasAktif || "Petugas"))) : "";
+  const chatPetugas = useMemo(() => [...(s?.petugas || [])].filter(Boolean), [s]);
+
+  /* Polling lencana belum-dibaca chat (saat panel tertutup) */
+  useEffect(() => {
+    if (!auth || !meName || showChat) return;
+    let alive = true, timer;
+    const tick = async () => {
+      try { const c = await sbChatConvos(auth.code, meRole, meName); if (alive) setChatUnread(c.reduce((a, x) => a + (x.unread || 0), 0)); } catch {}
+      if (alive) timer = setTimeout(tick, 12000);
+    };
+    tick();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [auth, meName, meRole, showChat]);
 
   const allEnriched = useMemo(() => (data ? data.invoices.map((i) => enrich(i, s)) : []), [data, s]);
   const enriched = useMemo(
@@ -1700,6 +1981,11 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ color: T.brand2 }}>
               <ClipboardList size={18} /><span>Lapor</span>
             </button>
+            <button onClick={() => setShowChat(true)}
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
+              <MessageCircle size={18} /><span>Chat</span>
+              {chatUnread > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>}
+            </button>
             <button onClick={openRiwayatKerja}
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
               <History size={18} /><span>Riwayat kerja</span>
@@ -1733,6 +2019,14 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               </div>
               <p className="truncate text-xs" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
             </div>
+          </button>
+          <button onClick={() => setShowChat(true)} aria-label="Chat"
+            className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
+            <MessageCircle size={20} />
+            {chatUnread > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[11px] font-bold leading-[18px]"
+                style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>
+            )}
           </button>
           <button onClick={openRiwayatKerja} aria-label="Riwayat kerja"
             className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
@@ -2197,6 +2491,11 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ color: T.brand2 }}>
                 <ClipboardList size={18} /><span>Lapor</span>
               </button>
+              <button onClick={() => { setShowChat(true); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <MessageCircle size={18} /><span>Chat</span>
+                {chatUnread > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>}
+              </button>
               <button onClick={() => { openRiwayatKerja(); setDrawer(false); }}
                 className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
                 <History size={18} /><span>Riwayat kerja</span>
@@ -2221,6 +2520,12 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       {toast && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-white shadow-lg"
           style={{ background: T.toast }}>{toast}</div>
+      )}
+
+      {showChat && auth && (
+        <ChatPanel T={T} auth={auth} meName={meName} meRole={meRole}
+          ptName={auth.name || s?.perusahaan || ""} petugasNames={chatPetugas}
+          onClose={() => setShowChat(false)} onUnread={setChatUnread} />
       )}
 
       <Kalkulator open={showCalc} onClose={() => setShowCalc(false)} />
