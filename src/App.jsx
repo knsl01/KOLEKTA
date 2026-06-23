@@ -1733,12 +1733,15 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
   const [view, setView] = useState("list"); // list | add | detail
   const [sel, setSel] = useState(null);
   const [day, setDay] = useState(today0().toISOString().slice(0, 10));
+  const [who, setWho] = useState("all"); // atasan: "all" | nama petugas
   const isPetugas = role === "petugas";
 
   const shiftDay = (n) => { const d = new Date(day + "T00:00:00"); d.setDate(d.getDate() + n); setDay(d.toISOString().slice(0, 10)); };
   const dayEntries = useMemo(
-    () => entries.filter((e) => e.ts === day).sort((a, b) => new Date(b.waktu || 0) - new Date(a.waktu || 0)),
-    [entries, day]
+    () => entries
+      .filter((e) => e.ts === day && (isPetugas || who === "all" || e.petugas === who))
+      .sort((a, b) => new Date(b.waktu || 0) - new Date(a.waktu || 0)),
+    [entries, day, who, isPetugas]
   );
   const grouped = useMemo(() => {
     const m = new Map();
@@ -1801,6 +1804,19 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
                 </label>
                 <button onClick={() => shiftDay(1)} disabled={isToday} aria-label="Hari berikutnya" className="kpress rounded-lg p-1.5" style={{ color: isToday ? T.line : T.sub }}><ChevronRight size={18} /></button>
               </div>
+
+              {/* Filter per petugas (atasan) */}
+              {!isPetugas && petugasList.length > 0 && (
+                <div className="mb-4 flex flex-wrap gap-1.5">
+                  {[["all", "Semua petugas"], ...petugasList.map((nm) => [nm, nm])].map(([v, lbl]) => (
+                    <button key={v} onClick={() => setWho(v)}
+                      className="kpress rounded-full px-3 py-1.5 text-xs font-semibold transition-colors"
+                      style={who === v ? { background: T.brand, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {dayEntries.length === 0 ? (
                 <div className="rounded-xl p-8 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
