@@ -6,7 +6,7 @@ import {
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
   Moon, Sun, ChevronLeft, ChevronRight, Paperclip, ArrowRight,
-  CheckCheck, Users, ArrowLeft, Image as ImageIcon,
+  CheckCheck, Users, ArrowLeft, Image as ImageIcon, Phone, Video,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -1314,6 +1314,10 @@ const renderChatBody = (body, names, mine, T) => {
   if (last < body.length) out.push(body.slice(last));
   return out;
 };
+/* Undangan panggilan (Jitsi) disisipkan sebagai pesan teks ber-marker */
+const CALL_RE = /^\[call:(audio|video)\]\s+(https?:\/\/\S+)/;
+const parseCall = (body) => { const m = CALL_RE.exec(body || ""); return m ? { kind: m[1], url: m[2] } : null; };
+const chatPreview = (body, hasAtt) => { const c = parseCall(body); if (c) return c.kind === "video" ? "📹 Panggilan video" : "📞 Panggilan suara"; return body || (hasAtt ? "📎 Lampiran" : ""); };
 
 /* ---------- Panel Chat (grup PT + japri atasan↔petugas) ---------- */
 function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread }) {
@@ -1459,6 +1463,25 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
     finally { setSending(false); }
   };
 
+  const startCall = async (kind) => {
+    if (!openConv || sending) return;
+    const slug = (auth.tenantId || "x") + "-" + openConv + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const room = "Kolekta-" + slug.replace(/[^a-zA-Z0-9-]/g, "");
+    const url = "https://meet.jit.si/" + room + "#config.prejoinPageEnabled=false" + (kind === "audio" ? "&config.startWithVideoMuted=true" : "");
+    window.open(url, "_blank", "noopener");
+    setSending(true);
+    try {
+      await sbChatSend(auth.code, meName, meRole, openConv, `[call:${kind}] ${url}`, []);
+      const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
+      if (incoming.length) {
+        lastIdRef.current = incoming[incoming.length - 1].id;
+        setMsgs((p) => { const m = new Map(p.map((x) => [x.id, x])); incoming.forEach((x) => m.set(x.id, x)); return [...m.values()].sort((a, b) => a.id - b.id); });
+        sbChatMarkRead(auth.code, meName, meRole, openConv, lastIdRef.current).catch(() => {});
+      }
+    } catch { setErr("Gagal memulai panggilan"); setTimeout(() => setErr(""), 2800); }
+    finally { setSending(false); }
+  };
+
   const readByOthers = (id) => reads.filter((r) => r.member !== meName && r.last_read_id >= id).length;
   const openAtt = (att) => {
     try { const b = dataUrlToBlob(att.data); const u = URL.createObjectURL(b); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60000); }
@@ -1485,6 +1508,12 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
             <p className="truncate text-[11px]" style={{ color: T.sub }}>{openConv ? (openConv === "group" ? "Grup tim · semua anggota PT" : "Japri") : (ptName || "")}</p>
           </div>
         </div>
+        {openConv && (
+          <div className="flex shrink-0 items-center gap-1">
+            <button onClick={() => startCall("audio")} disabled={sending} className="kpress rounded-full p-2" style={{ color: T.brand2 }} aria-label="Panggilan suara"><Phone size={20} /></button>
+            <button onClick={() => startCall("video")} disabled={sending} className="kpress rounded-full p-2" style={{ color: T.brand2 }} aria-label="Panggilan video"><Video size={20} /></button>
+          </div>
+        )}
       </div>
 
       {err && <div className="px-4 py-2 text-center text-xs font-semibold" style={{ background: T.red + "1A", color: T.red }}>{err}</div>}
@@ -1508,7 +1537,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-xs" style={{ color: T.sub }}>
-                        {sm ? `${sm.last_sender === meName ? "Anda: " : ""}${sm.last_body || (sm.last_has_att ? "📎 Lampiran" : "")}` : "Belum ada pesan"}
+                        {sm ? `${sm.last_sender === meName ? "Anda: " : ""}${chatPreview(sm.last_body, sm.last_has_att)}` : "Belum ada pesan"}
                       </span>
                       {sm?.unread > 0 && <span className="shrink-0 rounded-full px-1.5 text-center text-[11px] font-bold leading-5 text-white" style={{ background: T.brand2, minWidth: 20 }}>{sm.unread}</span>}
                     </div>
@@ -1534,6 +1563,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
                 const rc = mine ? readByOthers(m.id) : 0;
                 const grp = openConv === "group";
                 const sc = chatColor(m.sender);
+                const call = parseCall(m.body);
                 return (
                   <div key={m.id}>
                     {newDay && (
@@ -1560,7 +1590,15 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
                             ))}
                           </div>
                         )}
-                        {m.body && <p className="whitespace-pre-wrap break-words text-sm leading-snug">{renderChatBody(m.body, allNames, mine, T)}</p>}
+                        {call ? (
+                          <button onClick={() => window.open(call.url, "_blank", "noopener")} className="kpress flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left" style={{ background: mine ? "rgba(255,255,255,.18)" : T.bg, border: `1px solid ${mine ? "rgba(255,255,255,.25)" : T.line}` }}>
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ background: mine ? "rgba(255,255,255,.22)" : T.brand2 + "1A", color: mine ? "#fff" : T.brand2 }}>{call.kind === "video" ? <Video size={18} /> : <Phone size={18} />}</span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold">{call.kind === "video" ? "Panggilan video" : "Panggilan suara"}</span>
+                              <span className="block text-[11px]" style={{ color: mine ? "rgba(255,255,255,.8)" : T.sub }}>Ketuk untuk gabung</span>
+                            </span>
+                          </button>
+                        ) : (m.body && <p className="whitespace-pre-wrap break-words text-sm leading-snug">{renderChatBody(m.body, allNames, mine, T)}</p>)}
                         <div className="mt-0.5 flex items-center justify-end gap-1">
                           <span className="text-[10px]" style={{ color: mine ? "rgba(255,255,255,.75)" : T.sub }}>{fmtWaktu(m.created_at)}</span>
                           {mine && (rc > 0
