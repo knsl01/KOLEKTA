@@ -2009,13 +2009,13 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         <div className="min-w-0 flex-1">
           <div className="mx-auto max-w-3xl px-3 pb-24 sm:px-5">
             {/* Header (HP) */}
-            <header className="flex items-center gap-3 pt-5 lg:hidden">
-          <button onClick={() => setDrawer(true)} className="flex flex-1 items-center gap-3 text-left">
-            <Logo size={40} />
+            <header className="flex items-center gap-2 pt-5 lg:hidden">
+          <button onClick={() => setDrawer(true)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+            <span className="shrink-0"><Logo size={40} /></span>
             <div className="min-w-0">
-              <div className="flex items-baseline gap-2">
-                <h1 className="text-xl font-bold tracking-tight" style={{ color: T.brand }}>Kolekta</h1>
-                <span className="text-xs" style={{ color: T.brass }}>collection control</span>
+              <div className="flex min-w-0 items-baseline gap-2">
+                <h1 className="shrink-0 text-xl font-bold tracking-tight" style={{ color: T.brand }}>Kolekta</h1>
+                <span className="truncate text-xs" style={{ color: T.brass }}>collection control</span>
               </div>
               <p className="truncate text-xs" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
             </div>
