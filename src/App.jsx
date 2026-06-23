@@ -5,6 +5,7 @@ import {
   FileSpreadsheet, Printer, Building2, User, Upload, Download, Cloud, RefreshCw, Pencil,
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete,
+  History, ChevronLeft, ChevronRight, Paperclip,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -94,6 +95,16 @@ function resizeImage(file, max = 640, q = 0.55) {
     img.src = url;
   });
 }
+/* Baca file (PDF / lainnya) jadi dataURL untuk disimpan sebagai bukti. */
+function readFileData(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error("read"));
+    r.readAsDataURL(file);
+  });
+}
+const humanSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
 function getLoc() {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error("no geo"));
@@ -827,6 +838,7 @@ export default function KolektaApp() {
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
+  const [showWorklog, setShowWorklog] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [fStatus, setFStatus] = useState("all");
   const [fTipe, setFTipe] = useState("all");
@@ -849,6 +861,7 @@ export default function KolektaApp() {
       try { const row = await sbPull(auth.code); if (row && row.data) next = row.data; } catch {}
       if (!next) { try { const r = await window.storage.get(KEY + ":" + auth.tenantId); if (r && r.value) next = JSON.parse(r.value); } catch {} }
       if (!next) next = emptyData();
+      if (!Array.isArray(next.worklog)) next.worklog = [];
       next.settings = { ...defaultSettings(), ...next.settings, peran: auth.role };
       if (!alive) return;
       setData(next);
@@ -1056,6 +1069,18 @@ AKTIVITAS HARI INI
   const remove = (id) => setData((d) => ({ ...d, invoices: d.invoices.filter((i) => i.id !== id) }));
   const addInvoice = (inv) => setData((d) => ({ ...d, invoices: [{ ...inv, id: uid(), aktivitas: [], lastFollowUp: null, janjiBayar: null, pembayaran: [], eskalasi: [], dibuat: today0().toISOString().slice(0, 10) }, ...d.invoices] }));
   const addMany = (arr) => setData((d) => ({ ...d, invoices: [...arr, ...d.invoices] }));
+  const addWorklog = (entry) => setData((d) => ({ ...d, worklog: [{ ...entry, id: uid(), ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString() }, ...(d.worklog || [])] }));
+  const removeWorklog = (id) => setData((d) => ({ ...d, worklog: (d.worklog || []).filter((w) => w.id !== id) }));
+
+  /* Riwayat kerja: petugas hanya melihat miliknya sendiri (tidak bisa lihat hasil petugas lain). */
+  const worklogScoped = useMemo(() => {
+    const all = data?.worklog || [];
+    return s?.peran === "petugas" ? all.filter((w) => w.petugas === s.petugasAktif) : all;
+  }, [data, s]);
+  const worklogTodayN = useMemo(() => {
+    const t = today0().toISOString().slice(0, 10);
+    return worklogScoped.filter((w) => w.ts === t).length;
+  }, [worklogScoped]);
 
   const fileRef = useRef(null);
   const jsonRef = useRef(null);
@@ -1193,6 +1218,11 @@ AKTIVITAS HARI INI
             {NAV.map((n) => (
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
+            <button onClick={() => setShowWorklog(true)}
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
+              <History size={18} /><span>Riwayat kerja</span>
+              {worklogTodayN > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>}
+            </button>
             <button onClick={() => setShowCalc(true)}
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
               <CalcIcon size={18} /><span>Kalkulator</span>
@@ -1221,6 +1251,14 @@ AKTIVITAS HARI INI
               </div>
               <p className="truncate text-xs" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
             </div>
+          </button>
+          <button onClick={() => setShowWorklog(true)} aria-label="Riwayat kerja"
+            className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
+            <History size={20} />
+            {worklogTodayN > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[11px] font-bold leading-[18px]"
+                style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>
+            )}
           </button>
         </header>
 
@@ -1651,6 +1689,11 @@ AKTIVITAS HARI INI
                   </button>
                 );
               })}
+              <button onClick={() => { setShowWorklog(true); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <History size={18} /><span>Riwayat kerja</span>
+                {worklogTodayN > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>}
+              </button>
               <button onClick={() => { setShowCalc(true); setDrawer(false); }}
                 className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
                 <CalcIcon size={18} /><span>Kalkulator</span>
@@ -1673,6 +1716,294 @@ AKTIVITAS HARI INI
       )}
 
       <Kalkulator open={showCalc} onClose={() => setShowCalc(false)} />
+      {showWorklog && (
+        <WorklogModal onClose={() => setShowWorklog(false)}
+          role={s.peran} petugasAktif={s.petugasAktif} petugasList={s.petugas || []}
+          entries={worklogScoped} invoices={enriched}
+          onAdd={addWorklog} onRemove={removeWorklog} flash={flash} />
+      )}
+    </div>
+  );
+}
+
+/* ---------- Riwayat Kerja Petugas (modal) ----------
+   - Petugas: lapor pekerjaan harian → pilih PT, ketik yang sudah dilakukan, lampirkan bukti (PDF MOM / screenshot).
+   - Atasan: lihat hasil kerja tiap petugas per hari. Petugas tidak bisa melihat hasil petugas lain. */
+function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoices, onAdd, onRemove, flash }) {
+  const [view, setView] = useState("list"); // list | add | detail
+  const [sel, setSel] = useState(null);
+  const [day, setDay] = useState(today0().toISOString().slice(0, 10));
+  const isPetugas = role === "petugas";
+
+  const shiftDay = (n) => { const d = new Date(day + "T00:00:00"); d.setDate(d.getDate() + n); setDay(d.toISOString().slice(0, 10)); };
+  const dayEntries = useMemo(
+    () => entries.filter((e) => e.ts === day).sort((a, b) => new Date(b.waktu || 0) - new Date(a.waktu || 0)),
+    [entries, day]
+  );
+  const grouped = useMemo(() => {
+    const m = new Map();
+    dayEntries.forEach((e) => { const k = e.petugas || "Tanpa nama"; if (!m.has(k)) m.set(k, []); m.get(k).push(e); });
+    return [...m.entries()];
+  }, [dayEntries]);
+  const isToday = day === today0().toISOString().slice(0, 10);
+
+  const openDetail = (e) => { setSel(e); setView("detail"); };
+  const back = () => { setSel(null); setView("list"); };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: T.surface, borderBottom: `1px solid ${T.line}` }}>
+        {view === "list"
+          ? <button onClick={onClose} aria-label="Tutup" className="kpress shrink-0 rounded-lg p-1.5" style={{ color: T.sub }}><X size={20} /></button>
+          : <button onClick={back} aria-label="Kembali" className="kpress shrink-0 rounded-lg p-1.5" style={{ color: T.sub }}><ChevronLeft size={20} /></button>}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <History size={18} style={{ color: T.brand2 }} />
+            <h2 className="truncate text-base font-bold" style={{ color: T.ink }}>
+              {view === "add" ? "Lapor pekerjaan" : view === "detail" ? "Detail pekerjaan" : isPetugas ? "Riwayat kerja saya" : "Riwayat kerja petugas"}
+            </h2>
+          </div>
+          {view === "list" && <p className="text-[11px]" style={{ color: T.sub }}>{isPetugas ? "Hanya pekerjaan Anda yang tampil." : "Hasil kerja seluruh petugas."}</p>}
+        </div>
+        {view === "list" && isPetugas && (
+          <button onClick={() => setView("add")} className="kpress flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>
+            <Plus size={16} /> Lapor
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-2xl px-4 py-4">
+          {view === "add" && (
+            <WorklogForm invoices={invoices} petugas={petugasAktif}
+              onCancel={back} flash={flash}
+              onSave={(entry) => { onAdd(entry); setDay(today0().toISOString().slice(0, 10)); back(); flash("Pekerjaan dilaporkan"); }} />
+          )}
+
+          {view === "detail" && sel && (
+            <WorklogDetail entry={sel} canDelete={isPetugas && sel.petugas === petugasAktif}
+              onDelete={() => { onRemove(sel.id); back(); flash("Laporan dihapus"); }} />
+          )}
+
+          {view === "list" && (
+            <>
+              {/* Navigasi hari */}
+              <div className="mb-4 flex items-center gap-2 rounded-xl p-1.5" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <button onClick={() => shiftDay(-1)} aria-label="Hari sebelumnya" className="kpress rounded-lg p-1.5" style={{ color: T.sub }}><ChevronLeft size={18} /></button>
+                <div className="flex flex-1 items-center justify-center gap-2">
+                  <CalendarDays size={14} style={{ color: T.brand2 }} />
+                  <span className="text-sm font-semibold" style={{ color: T.ink }}>{isToday ? "Hari ini" : fmtTgl(day)}</span>
+                </div>
+                <label className="kpress cursor-pointer rounded-lg px-2 py-1 text-[11px] font-semibold" style={{ color: T.brand2 }}>
+                  Pilih
+                  <input type="date" value={day} max={today0().toISOString().slice(0, 10)} onChange={(e) => e.target.value && setDay(e.target.value)} className="hidden" />
+                </label>
+                <button onClick={() => shiftDay(1)} disabled={isToday} aria-label="Hari berikutnya" className="kpress rounded-lg p-1.5" style={{ color: isToday ? T.line : T.sub }}><ChevronRight size={18} /></button>
+              </div>
+
+              {dayEntries.length === 0 ? (
+                <div className="rounded-xl p-8 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+                  <History size={28} className="mx-auto mb-2" style={{ color: T.line }} />
+                  <p className="text-sm font-medium" style={{ color: T.sub }}>Belum ada laporan pekerjaan untuk hari ini.</p>
+                  {isPetugas && <p className="mt-1 text-xs" style={{ color: T.sub }}>Tekan <b>Lapor</b> untuk mencatat apa yang sudah Anda lakukan.</p>}
+                </div>
+              ) : isPetugas ? (
+                <div className="space-y-2">
+                  {dayEntries.map((e) => <WorklogRow key={e.id} entry={e} onClick={() => openDetail(e)} />)}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {grouped.map(([nama, list]) => (
+                    <div key={nama}>
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: T.brand2 }}>{nama.slice(0, 1).toUpperCase()}</span>
+                        <h3 className="text-sm font-bold" style={{ color: T.ink }}>{nama}</h3>
+                        <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>{list.length} laporan</span>
+                      </div>
+                      <div className="space-y-2">
+                        {list.map((e) => <WorklogRow key={e.id} entry={e} onClick={() => openDetail(e)} />)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorklogRow({ entry, onClick }) {
+  const n = (entry.bukti || []).length;
+  return (
+    <button onClick={onClick} className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <Building2 size={13} className="shrink-0" style={{ color: T.brand2 }} />
+          <p className="truncate text-sm font-semibold" style={{ color: T.ink }}>{entry.customer || "—"}</p>
+        </div>
+        <p className="mt-0.5 line-clamp-2 text-xs" style={{ color: T.sub }}>{entry.deskripsi}</p>
+        <div className="mt-1 flex items-center gap-2 text-[11px]" style={{ color: T.sub }}>
+          <Clock size={11} /> <span style={{ fontFamily: MONO }}>{entry.waktu ? fmtWaktu(entry.waktu) : fmtTgl(entry.ts)}</span>
+          {n > 0 && <span className="inline-flex items-center gap-0.5" style={{ color: T.brass }}><Paperclip size={11} /> {n}</span>}
+        </div>
+      </div>
+      <ChevronRight size={16} className="shrink-0" style={{ color: T.sub }} />
+    </button>
+  );
+}
+
+function WorklogDetail({ entry, canDelete, onDelete }) {
+  const [ask, setAsk] = useState(false);
+  const bukti = entry.bukti || [];
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>PT / Debitur</p>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          <Building2 size={15} style={{ color: T.brand2 }} />
+          <p className="text-base font-bold" style={{ color: T.ink }}>{entry.customer || "—"}</p>
+        </div>
+        {entry.noInvoice && <p className="mt-0.5 text-xs" style={{ color: T.sub }}>{entry.noInvoice}</p>}
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-1" style={{ background: T.bg, color: T.sub }}><User size={11} /> {entry.petugas || "—"}</span>
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-1" style={{ background: T.bg, color: T.sub, fontFamily: MONO }}><Clock size={11} /> {entry.waktu ? fmtWaktu(entry.waktu) : fmtTgl(entry.ts)}</span>
+        </div>
+      </div>
+
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Yang sudah dilakukan</p>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: T.ink }}>{entry.deskripsi}</p>
+      </div>
+
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Bukti ({bukti.length})</p>
+        {bukti.length === 0 ? (
+          <p className="text-xs" style={{ color: T.sub }}>Tidak ada bukti dilampirkan.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {bukti.map((b, idx) => (
+              <a key={idx} href={b.data} target="_blank" rel="noreferrer" download={b.name || `bukti-${idx + 1}`}
+                className="flex flex-col items-center gap-1 rounded-lg p-2 text-center" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                {b.type === "image"
+                  ? <img src={b.data} alt={b.name} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                  : <span className="flex h-20 w-full items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={28} style={{ color: T.red }} /></span>}
+                <span className="w-full truncate text-[10px] font-medium" style={{ color: T.sub }}>{b.name || (b.type === "image" ? "Gambar" : "PDF")}</span>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {canDelete && (
+        ask ? (
+          <div className="flex items-center gap-2 rounded-xl p-3" style={{ background: T.red + "10", border: `1px solid ${T.red}40` }}>
+            <span className="flex-1 text-xs" style={{ color: T.ink }}>Hapus laporan ini?</span>
+            <button onClick={() => setAsk(false)} className="rounded-lg px-3 py-1.5 text-xs font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
+            <button onClick={onDelete} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: T.red }}>Hapus</button>
+          </div>
+        ) : (
+          <button onClick={() => setAsk(true)} className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.red + "12", color: T.red }}>
+            <Trash2 size={15} /> Hapus laporan
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
+function WorklogForm({ invoices, petugas, onSave, onCancel, flash }) {
+  const [invId, setInvId] = useState("");
+  const [deskripsi, setDeskripsi] = useState("");
+  const [bukti, setBukti] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  const onPick = async (e) => {
+    const files = [...(e.target.files || [])]; e.target.value = "";
+    if (!files.length) return;
+    setBusy(true);
+    const out = [];
+    for (const f of files) {
+      if (f.size > 8 * 1048576) { flash(`${f.name} terlalu besar (maks 8 MB)`); continue; }
+      try {
+        if (f.type.startsWith("image/")) {
+          const data = await resizeImage(f, 1280, 0.7);
+          out.push({ name: f.name, type: "image", data });
+        } else {
+          const data = await readFileData(f);
+          out.push({ name: f.name, type: f.type === "application/pdf" ? "pdf" : "file", data, size: f.size });
+        }
+      } catch { flash(`Gagal membaca ${f.name}`); }
+    }
+    setBukti((prev) => [...prev, ...out]);
+    setBusy(false);
+  };
+
+  const save = () => {
+    if (!invId) { flash("Pilih PT / debitur dulu"); return; }
+    if (!deskripsi.trim()) { flash("Tulis dulu apa yang sudah dilakukan"); return; }
+    const inv = invoices.find((x) => x.id === invId);
+    onSave({
+      petugas: petugas || "",
+      invoiceId: invId,
+      customer: inv?.customer || "",
+      noInvoice: inv?.noInvoice || "",
+      deskripsi: deskripsi.trim(),
+      bukti,
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Untuk PT / debitur</p>
+        <select value={invId} onChange={(e) => setInvId(e.target.value)} className={inputCls} style={inputSt}>
+          <option value="">— pilih PT / debitur —</option>
+          {invoices.map((i) => <option key={i.id} value={i.id}>{i.customer}{i.noInvoice ? ` · ${i.noInvoice}` : ""}</option>)}
+        </select>
+        {invoices.length === 0 && <p className="mt-1 text-[11px]" style={{ color: T.red }}>Belum ada tagihan yang ditugaskan ke Anda.</p>}
+      </div>
+
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Apa yang sudah Anda lakukan? <span style={{ color: T.red }}>*</span></p>
+        <textarea value={deskripsi} onChange={(e) => setDeskripsi(e.target.value)} rows={4}
+          placeholder="Contoh: Kunjungan ke kantor PT, bertemu bagian keuangan. Hasil MOM: janji bayar 50% minggu depan, sisanya akhir bulan."
+          className={inputCls} style={{ ...inputSt, resize: "vertical" }} />
+      </div>
+
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Bukti (PDF hasil MOM, screenshot, dll.)</p>
+        <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple onChange={onPick} className="hidden" />
+        <button onClick={() => fileRef.current?.click()} disabled={busy}
+          className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px dashed ${T.line}` }}>
+          <Upload size={16} /> {busy ? "Memproses…" : "Lampirkan file"}
+        </button>
+        {bukti.length > 0 && (
+          <div className="mt-2 space-y-1.5">
+            {bukti.map((b, idx) => (
+              <div key={idx} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                {b.type === "image"
+                  ? <img src={b.data} alt={b.name} className="h-9 w-9 shrink-0 rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                  : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={16} style={{ color: T.red }} /></span>}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium" style={{ color: T.ink }}>{b.name}</p>
+                  <p className="text-[10px]" style={{ color: T.sub }}>{b.type === "image" ? "Gambar" : b.type === "pdf" ? "PDF" : "File"}{b.size ? ` · ${humanSize(b.size)}` : ""}</p>
+                </div>
+                <button onClick={() => setBukti((prev) => prev.filter((_, n) => n !== idx))} aria-label="Hapus"><X size={15} style={{ color: T.sub }} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 pb-2">
+        <button onClick={onCancel} className="flex-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
+        <button onClick={save} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand }}>Simpan laporan</button>
+      </div>
     </div>
   );
 }
