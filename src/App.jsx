@@ -1696,7 +1696,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
             <button onClick={openLapor}
-              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors" style={{ background: T.brand, color: "#fff" }}>
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ background: T.brand2 + "14", color: T.brand2, border: `1px solid ${T.brand2}33` }}>
               <ClipboardList size={18} /><span>Lapor</span>
             </button>
             <button onClick={openRiwayatKerja}
@@ -2193,7 +2193,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 );
               })}
               <button onClick={() => { openLapor(); setDrawer(false); }}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ background: T.brand, color: "#fff" }}>
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ background: T.brand2 + "14", color: T.brand2, border: `1px solid ${T.brand2}33` }}>
                 <ClipboardList size={18} /><span>Lapor</span>
               </button>
               <button onClick={() => { openRiwayatKerja(); setDrawer(false); }}
@@ -2562,7 +2562,8 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
   const save = () => {
     if (!catatan.trim()) { flash("Tulis dulu apa yang sudah dilakukan / hasilnya"); return; }
     const h = HASIL[hasil];
-    const body = `[${h.label}]${catatan.trim() ? " " + catatan.trim() : ""}`;
+    const tl = tindakLanjut ? `\n\u2192 Tindak lanjut berikutnya: ${fmtTgl(tindakLanjut)}` : "";
+    const body = `[${h.label}]${catatan.trim() ? " " + catatan.trim() : ""}${tl}`;
     patch(i.id, (x) => ({
       ...x,
       status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
@@ -3156,8 +3157,8 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
       {open && (
         <div className="border-t px-3 pb-3 pt-3" style={{ borderColor: T.line }}>
           {/* Sub-tab nav */}
-          <div className="mb-3 grid grid-cols-4 gap-1 rounded-xl p-1" style={{ background: T.bg }}>
-            {[["tagih", "Tagih", Wallet], ["lapangan", "Lapangan", Camera], ["eskalasi", "Eskalasi", Send], ["profil", "Profil", User]].map(([k, lbl, Ic]) => (
+          <div className="mb-3 grid grid-cols-3 gap-1 rounded-xl p-1" style={{ background: T.bg }}>
+            {[["tagih", "Tagih", Wallet], ["eskalasi", "Eskalasi", Send], ["profil", "Profil", User]].map(([k, lbl, Ic]) => (
               <button key={k} onClick={() => setSub(k)}
                 className="kpress flex flex-col items-center justify-center gap-0.5 rounded-lg py-1.5 text-[11px] font-semibold transition-colors"
                 style={sub === k ? { background: T.surface, color: T.brand2, boxShadow: "0 1px 2px rgba(0,0,0,.08)" } : { color: T.sub }}>
@@ -3229,33 +3230,9 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
             </div>
           )}
 
-          {/* ===== LAPANGAN ===== */}
-          {sub === "lapangan" && (
-            <div className="sub-fade">
-              <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Catat hasil kontak / kunjungan</p>
-              <select value={hasil} onChange={(e) => setHasil(e.target.value)} className={`${inputCls} mb-2`} style={inputSt}>
-                {HASIL_ORDER.map((k) => <option key={k} value={k}>{HASIL[k].label}</option>)}
-              </select>
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Deskripsi / catatan…" className={inputCls} style={inputSt} />
-              <div className="mt-2 flex items-center gap-2">
-                <span className="shrink-0 text-[11px] font-medium" style={{ color: T.sub }}>Tindak lanjut berikutnya</span>
-                <input type="date" value={tindakLanjut} onChange={(e) => setTindakLanjut(e.target.value)} className={inputCls} style={inputSt} />
-                {tindakLanjut && <button onClick={() => setTindakLanjut("")}><X size={14} style={{ color: T.sub }} /></button>}
-              </div>
-              <input ref={fotoRef} type="file" accept="image/*" capture="environment" onChange={onPickFoto} className="hidden" />
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button onClick={() => fotoRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: foto ? T.green + "1A" : T.bg, color: foto ? T.green : T.brand2, border: `1px solid ${T.line}` }}><Camera size={14} /> {foto ? "Foto ✓" : "Foto + lokasi"}</button>
-                <button onClick={grabLoc} disabled={busyLoc} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: lok ? T.green + "1A" : T.bg, color: lok ? T.green : T.brand2, border: `1px solid ${T.line}` }}><MapPin size={14} /> {busyLoc ? "Mengambil…" : lok ? "Lokasi ✓" : "Ambil lokasi"}</button>
-              </div>
-              {(foto || lok) && (
-                <div className="mt-2 flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                  {foto && <img src={foto} alt="bukti" className="h-10 w-10 rounded object-cover" style={{ border: `1px solid ${T.line}` }} />}
-                  {lok && <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: T.sub }}>{lok.lat}, {lok.lng} (±{lok.acc}m)</span>}
-                  <button onClick={() => { setFoto(null); setLok(null); }} className="ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" style={{ color: T.red }}>Hapus lampiran</button>
-                </div>
-              )}
-              <button onClick={logFollowup} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Catat hasil kontak</button>
-
+          {/* ===== Riwayat kunjungan & arsip dokumen (read-only) — pindah ke tab Profil ===== */}
+          {sub === "profil" && (i.aktivitas?.length > 0 || i.dokumen?.length > 0) && (
+            <div className="sub-fade mt-3 border-t pt-3" style={{ borderColor: T.line }}>
               {i.aktivitas?.length > 0 && (
                 <div className="mt-3">
                   <button onClick={() => setOpenRiwayat((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
@@ -3282,46 +3259,6 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                 </div>
               )}
 
-              <button onClick={() => setShowDoc((v) => !v)}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold"
-                style={{ background: T.brass + "1A", color: T.brass }}>
-                <FileSignature size={15} /> {showDoc ? "Tutup dokumen lapangan" : "Buat dokumen + tanda tangan"}
-              </button>
-              {showDoc && (
-                <div className="mt-2 rounded-lg p-2.5" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    <button onClick={() => setDocType("pernyataan")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
-                    <button onClick={() => setDocType("mom")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "mom" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>MOM / Visit Report</button>
-                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
-                  </div>
-                  {docType === "pernyataan" ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <input value={grpID(dForm.jumlah)} onChange={(e) => setDForm({ ...dForm, jumlah: onlyDigits(e.target.value) })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
-                      <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
-                    </div>
-                  ) : docType === "mom" ? (
-                    <div className="space-y-2 sub-fade">
-                      <textarea value={dForm.pembahasan} onChange={(e) => setDForm({ ...dForm, pembahasan: e.target.value })} rows={2} placeholder="Hasil pembahasan / poin pertemuan…" className={inputCls} style={inputSt} />
-                      <textarea value={dForm.kesepakatan} onChange={(e) => setDForm({ ...dForm, kesepakatan: e.target.value })} rows={2} placeholder="Kesepakatan / tindak lanjut…" className={inputCls} style={inputSt} />
-                      <div>
-                        <p className="mb-1 text-[11px] font-medium" style={{ color: T.sub }}>Target penyelesaian (opsional)</p>
-                        <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
-                      </div>
-                    </div>
-                  ) : (
-                    <input value={dForm.kondisi} onChange={(e) => setDForm({ ...dForm, kondisi: e.target.value })} placeholder="Kondisi / kelengkapan unit" className={inputCls} style={inputSt} />
-                  )}
-                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan {docType === "mom" ? "debitur / customer" : "debitur"}</p>
-                  <SignaturePad onChange={setDsig} />
-                  {docType === "mom" && (
-                    <>
-                      <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan petugas / atasan</p>
-                      <SignaturePad onChange={setDsig2} />
-                    </>
-                  )}
-                  <button onClick={createDoc} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Buat &amp; cetak (PDF)</button>
-                </div>
-              )}
               {i.dokumen?.length > 0 && (
                 <div className="mt-3">
                   <button onClick={() => setOpenArsip((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
