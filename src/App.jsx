@@ -1207,7 +1207,7 @@ function parseImportRows(rows) {
       telp: String(pickv(row, ["no. wa", "no wa", "wa", "telp", "telepon", "hp"])).trim(),
       assignedTo: String(pickv(row, ["petugas", "kolektor", "collector"])).trim(),
       jaminanTipe, jaminan,
-      status, lastFollowUp: null, janjiBayar: null, pembayaran: [], eskalasi: [], aktivitas: [], dibuat: today0().toISOString().slice(0, 10),
+      status, lastFollowUp: null, janjiBayar: null, janjiNominal: null, pembayaran: [], eskalasi: [], aktivitas: [], dibuat: today0().toISOString().slice(0, 10),
     });
   }
   return out;
@@ -1525,7 +1525,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   const remove = (id) => setData((d) => ({ ...d, invoices: d.invoices.filter((i) => i.id !== id) }));
   const addInvoice = (inv) => {
     audit("tambah", `${inv.noInvoice} · ${inv.customer}`, null, { customer: inv.customer, noInvoice: inv.noInvoice, nominal: inv.nominal, status: inv.status });
-    setData((d) => ({ ...d, invoices: [{ ...inv, id: uid(), aktivitas: [], lastFollowUp: null, janjiBayar: null, pembayaran: [], eskalasi: [], dibuat: today0().toISOString().slice(0, 10) }, ...d.invoices] }));
+    setData((d) => ({ ...d, invoices: [{ ...inv, id: uid(), aktivitas: [], lastFollowUp: null, janjiBayar: null, janjiNominal: null, pembayaran: [], eskalasi: [], dibuat: today0().toISOString().slice(0, 10) }, ...d.invoices] }));
   };
   const addMany = (arr) => {
     audit("import", `${arr.length} tagihan`, null, { count: arr.length });
@@ -1841,7 +1841,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                       <button key={i.id} onClick={() => { setTab("tagihan"); setOpenId(i.id); }} className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-black/5">
                         <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={lewat ? { background: T.red + "1A", color: T.red } : { background: T.green + "1A", color: T.green }}>{lewat ? "lewat" : "akan datang"}</span>
                         <span className="min-w-0 flex-1 truncate text-sm">{i.customer}</span>
-                        <span className="shrink-0 whitespace-nowrap text-xs" style={{ color: T.sub }}>{fmtTgl(i.janjiBayar).split(" ").slice(0, 2).join(" ")}</span>
+                        <span className="shrink-0 whitespace-nowrap text-xs" style={{ color: T.sub }}>{fmtTgl(i.janjiBayar).split(" ").slice(0, 2).join(" ")}{i.janjiNominal ? ` \u00B7 ${rp(i.janjiNominal)}` : ""}</span>
                       </button>
                     );
                   })}
@@ -2781,6 +2781,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const logAudit = audit || (() => {});
   const [note, setNote] = useState("");
   const [janji, setJanji] = useState(i.janjiBayar || "");
+  const [janjiNom, setJanjiNom] = useState(i.janjiNominal || "");
   const [contact, setContact] = useState({ tipe: i.tipe || "perusahaan", pic: i.pic || "", telp: i.telp || "", alamat: i.alamat || "", jaminanTipe: i.jaminanTipe || "none", jaminan: i.jaminan || "", assignedTo: i.assignedTo || "" });
   const [lvl, setLvl] = useState(null);
   const [bayar, setBayar] = useState("");
@@ -3038,12 +3039,23 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
 
               {i.status === "janji_bayar" && (
                 <div className="mt-3">
-                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Tanggal janji bayar</p>
+                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Janji bayar (tanggal &amp; nominal)</p>
                   <div className="flex gap-2">
                     <input type="date" className={inputCls} style={inputSt} value={janji} onChange={(e) => setJanji(e.target.value)} />
-                    <button onClick={() => { patch(i.id, (x) => ({ ...x, janjiBayar: janji })); logAudit("janji", ent, { janjiBayar: i.janjiBayar || null }, { janjiBayar: janji }); flash("Janji bayar disimpan"); }}
+                    <input value={grpID(janjiNom)} onChange={(e) => setJanjiNom(onlyDigits(e.target.value))} inputMode="numeric" placeholder={`Nominal (${rp(i.total)})`} className={inputCls} style={inputSt} />
+                    <button onClick={() => { patch(i.id, (x) => ({ ...x, janjiBayar: janji, janjiNominal: janjiNom ? Number(janjiNom) : null })); logAudit("janji", ent, { janjiBayar: i.janjiBayar || null }, { janjiBayar: janji }); flash("Janji bayar disimpan"); }}
                       className="kpress shrink-0 rounded-lg px-4 text-xs font-semibold text-white" style={{ background: T.brand2 }}>Simpan</button>
                   </div>
+                  {janji && (() => {
+                    const txt = `Selamat ${greeting()}, ${sapaanWA(i)} \uD83D\uDE4F\n\nIzin mengingatkan janji pembayaran untuk tagihan *${i.noInvoice}*.\nTanggal janji bayar: *${fmtTgl(janji)}*${janjiNom ? `\nNominal dijanjikan: *${rp(Number(janjiNom))}*` : ""}\n\nTotal tagihan saat ini: *${rp(i.total)}*\n\nMohon dapat ditepati sesuai janji ya, Pak/Bu. Terima kasih \uD83D\uDE4F\n\u2014 ${s.perusahaan?.trim() || "Kolekta"}`;
+                    const link = waLink(i.telp, txt);
+                    return (
+                      <button onClick={() => { if (link) window.open(link, "_blank"); else copy(txt); }}
+                        className="kpress mt-2 flex w-full items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.green }}>
+                        <MessageCircle size={14} /> {link ? "Ingatkan janji bayar via WA" : "Salin pengingat (no. WA kosong)"}
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
             </div>
