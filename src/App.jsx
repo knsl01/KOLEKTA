@@ -2799,6 +2799,8 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [tindakLanjut, setTindakLanjut] = useState(i.tindakLanjut || "");
   const [lunasAsk, setLunasAsk] = useState(false);
   const [lunasCode, setLunasCode] = useState("");
+  const [delAsk, setDelAsk] = useState(false);
+  const [delCode, setDelCode] = useState("");
   const [openRiwayat, setOpenRiwayat] = useState(false);
   const [openEsk, setOpenEsk] = useState(false);
   const [openArsip, setOpenArsip] = useState(false);
@@ -2832,6 +2834,12 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const confirmLunas = () => {
     if (lunasCode.trim().toLowerCase() !== "lunas") { flash('Ketik "lunas" untuk konfirmasi'); return; }
     setLunasAsk(false); setLunasCode(""); markLunas();
+  };
+  const confirmHapus = () => {
+    if (delCode.trim().toLowerCase() !== "hapus tagihan") { flash('Ketik "hapus tagihan" untuk konfirmasi'); return; }
+    setDelAsk(false); setDelCode("");
+    logAudit("hapus", ent, { customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, status: i.status }, null);
+    remove(i.id);
   };
   const markLunas = () => {
     patch(i.id, (x) => {
@@ -2932,6 +2940,23 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
           <div className="mt-3 flex gap-2">
             <button onClick={() => setLunasAsk(false)} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
             <button onClick={confirmLunas} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.green }}>Tandai Lunas</button>
+          </div>
+        </div>
+      </div>
+    )}
+    {delAsk && (
+      <div onClick={() => setDelAsk(false)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <div className="mb-1 flex items-center gap-2">
+            <AlertTriangle size={18} style={{ color: T.red }} />
+            <h3 className="text-sm font-semibold">Hapus tagihan</h3>
+          </div>
+          <p className="mb-3 text-xs" style={{ color: T.sub }}>Menghapus <b>{i.customer}</b> ({i.noInvoice}) bersifat permanen dan tidak bisa dibatalkan. Ketik <b style={{ color: T.red }}>hapus tagihan</b> untuk melanjutkan.</p>
+          <input autoFocus value={delCode} onChange={(e) => setDelCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmHapus()}
+            placeholder='ketik "hapus tagihan"' className={inputCls} style={{ ...inputSt, textAlign: "center" }} />
+          <div className="mt-3 flex gap-2">
+            <button onClick={() => { setDelAsk(false); setDelCode(""); }} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
+            <button onClick={confirmHapus} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.red }}>Hapus</button>
           </div>
         </div>
       </div>
@@ -3284,7 +3309,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
               className="flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>
               <Pencil size={15} />
             </button>
-            <button onClick={() => { logAudit("hapus", ent, { customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, status: i.status }, null); remove(i.id); }}
+            <button onClick={() => { setDelCode(""); setDelAsk(true); }}
               className="flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.red + "14", color: T.red }}>
               <Trash2 size={15} />
             </button>
