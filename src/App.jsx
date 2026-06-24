@@ -2284,7 +2284,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
   /* Audit Log hanya untuk Atasan PT (petugas tak punya akses penuh). */
   const navItems = auth.role === "atasan"
-    ? [...NAV.slice(0, 6), { id: "audit", icon: ClipboardList, label: "Audit Log" }, NAV[6]]
+    ? [...NAV.slice(0, NAV.length - 1), { id: "audit", icon: ClipboardList, label: "Audit Log" }, NAV[NAV.length - 1]]
     : NAV;
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => {
