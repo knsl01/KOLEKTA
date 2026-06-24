@@ -71,6 +71,7 @@ const stLabel = (st) => STATUS_META[st].label;
 const NAV = [
   { id: "hari", icon: Bell, label: "Hari Ini" },
   { id: "tagihan", icon: Wallet, label: "Tagihan" },
+  { id: "pelanggan", icon: Users, label: "Pelanggan" },
   { id: "analitik", icon: BarChart3, label: "Analitik" },
   { id: "heatmap", icon: Flame, label: "Heat Map" },
   { id: "riwayat", icon: History, label: "Riwayat" },
@@ -1034,8 +1035,17 @@ function printEskalasiRekap(list, s) {
   return printViaIframe("Rekap Riwayat Eskalasi", html);
 }
 
-/* ---------- Statement of Account per debitur ---------- */
-function statementText(name, list, s) {
+/* Rentang nomor invoice ("INV-001 s/d INV-010") untuk ringkasan saat invoice banyak. */
+function invoiceRange(rows) {
+  const nos = rows.map((i) => i.noInvoice).filter(Boolean);
+  if (nos.length === 0) return "-";
+  if (nos.length === 1) return nos[0];
+  const sorted = [...nos].sort();
+  return `${sorted[0]} s/d ${sorted[sorted.length - 1]} (${nos.length} invoice)`;
+}
+/* ---------- Statement of Account per debitur ----------
+   mode daftar invoice: "full" (rinci semua) | "range" (rentang awal–akhir) | "ringkas" (tanpa daftar). */
+function statementText(name, list, s, mode = "full") {
   const { p, jabatan, ttdKota } = fieldBase(s);
   const now = new Date();
   const tgl = fmtTgl(now.toISOString().slice(0, 10));
@@ -1044,9 +1054,13 @@ function statementText(name, list, s) {
   const totOut = rows.filter((i) => i.status !== "lunas").reduce((a, i) => a + i.total, 0);
   const totBayar = rows.reduce((a, i) => a + (i.terbayar || 0), 0);
   const totTagih = rows.reduce((a, i) => a + i.total, 0);
-  const lines = rows.map((i) =>
-    `- ${i.noInvoice} | JT ${fmtTgl(i.tglJatuhTempo)} | Pokok ${rp(i.nominal)} | Dibayar ${rp(i.terbayar || 0)} | Sisa+Denda ${rp(i.total)} | ${stLabel(i.status)}`
-  ).join("\n");
+  const lines = mode === "ringkas"
+    ? "(rincian per invoice tidak dilampirkan)"
+    : mode === "range"
+      ? `- ${invoiceRange(rows)} | Total Sisa+Denda ${rp(totOut)}`
+      : rows.map((i) =>
+          `- ${i.noInvoice} | JT ${fmtTgl(i.tglJatuhTempo)} | Pokok ${rp(i.nominal)} | Dibayar ${rp(i.terbayar || 0)} | Sisa+Denda ${rp(i.total)} | ${stLabel(i.status)}`
+        ).join("\n");
   return `${kopLine(s)}
 STATEMENT OF ACCOUNT
 
@@ -1084,6 +1098,21 @@ ${p}
 
 (__________________________)
 ${jabatan}`;
+}
+
+/* Pesan WA tagih gabungan untuk seluruh tagihan 1 customer.
+   mode: "full" (rinci) | "range" (rentang invoice) | "ringkas" (hanya total). */
+function tagihWaText(name, rows, s, mode = "range") {
+  const aktif = rows.filter((i) => i.status !== "lunas");
+  const totOut = aktif.reduce((a, i) => a + i.total, 0);
+  const pt = s.perusahaan?.trim() || "kami";
+  let rincian = "";
+  if (mode === "full") {
+    rincian = "\n\n" + aktif.map((i) => `• ${i.noInvoice} — JT ${fmtTgl(i.tglJatuhTempo)} — ${rp(i.total)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hr)` : ""}`).join("\n");
+  } else if (mode === "range") {
+    rincian = `\n\nTagihan: ${invoiceRange(aktif)}`;
+  }
+  return `Yth. ${name},\n\nIzin mengingatkan, saat ini terdapat *${aktif.length}* tagihan yang masih perlu diselesaikan kepada ${pt} dengan total *${rp(totOut)}*.${rincian}\n\nMohon konfirmasi rencana pembayarannya. Terima kasih.`;
 }
 
 /* ---------- Backup JSON ---------- */
@@ -1206,6 +1235,8 @@ async function sbSignUrls(code, paths) {
   }
   const out = {}; for (const p of (paths || [])) if (_signCache.has(p)) out[p] = _signCache.get(p); return out;
 }
+/* Hapus file milik tenant sendiri (broker memvalidasi prefix per-tenant). */
+const sbDelete = (code, paths) => sbFn("del", { code, paths: paths || [] });
 /* Admin (lintas-PT): kelola file Storage per PT lewat broker (pakai rahasia admin). */
 const sbAdminFiles = async (secret, tenantId) => ((await sbFn("admin-list", { admin: secret, tenant: tenantId })) || {}).files || [];
 const sbAdminFileUrls = async (secret, paths) => ((await sbFn("admin-url", { admin: secret, paths })) || {}).urls || {};
@@ -1844,6 +1875,8 @@ export default function KolektaApp() {
   const [tab, setTab] = useState("hari");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState(null);
+  const [custSel, setCustSel] = useState(null);   // custKey customer yang sedang dibuka
+  const [showBulkAdd, setShowBulkAdd] = useState(null); // {customer} | true untuk input invoice massal
   const [showAdd, setShowAdd] = useState(false);
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
@@ -1876,6 +1909,7 @@ export default function KolektaApp() {
       if (!next) { try { const r = await window.storage.get(KEY + ":" + auth.tenantId); if (r && r.value) next = JSON.parse(r.value); } catch {} }
       if (!next) next = emptyData();
       if (!Array.isArray(next.worklog)) next.worklog = [];
+      if (!next.customers || typeof next.customers !== "object") next.customers = {};
       next.settings = { ...defaultSettings(), ...next.settings, peran: auth.role };
       // Identitas dari kode login per-anggota: kunci petugas ke namanya sendiri.
       if (auth.role === "petugas" && auth.memberName) next.settings.petugasAktif = auth.memberName;
@@ -2184,6 +2218,16 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     audit("import", `${arr.length} tagihan`, null, { count: arr.length });
     setData((d) => ({ ...d, invoices: [...arr, ...d.invoices] }));
   };
+  // Simpan/ubah data tingkat-customer (profil default, file, catatan).
+  const patchCustomer = (key, fn) => setData((d) => {
+    const cur = (d.customers && d.customers[key]) || {};
+    return { ...d, customers: { ...(d.customers || {}), [key]: { ...cur, ...fn(cur), updatedAt: new Date().toISOString() } } };
+  });
+  // Terapkan perubahan profil ke SEMUA invoice milik 1 customer sekaligus.
+  const bulkPatchByCustomer = (custName, patchObj) => setData((d) => ({
+    ...d,
+    invoices: d.invoices.map((i) => (i.customer || "").trim().toLowerCase() === custName.trim().toLowerCase() ? { ...i, ...patchObj } : i),
+  }));
   const addWorklog = (entry) => setData((d) => ({ ...d, worklog: [{ ...entry, id: uid(), ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString() }, ...(d.worklog || [])] }));
   const removeWorklog = (id) => setData((d) => ({ ...d, worklog: (d.worklog || []).filter((w) => w.id !== id) }));
   const openLapor = () => { setWorklogView("pick"); setShowWorklog(true); };
@@ -2240,7 +2284,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
   /* Audit Log hanya untuk Atasan PT (petugas tak punya akses penuh). */
   const navItems = auth.role === "atasan"
-    ? [...NAV.slice(0, 5), { id: "audit", icon: ClipboardList, label: "Audit Log" }, NAV[5]]
+    ? [...NAV.slice(0, 6), { id: "audit", icon: ClipboardList, label: "Audit Log" }, NAV[6]]
     : NAV;
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => {
@@ -2691,6 +2735,18 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           </div>
         )}
 
+        {/* ---------- PELANGGAN ---------- */}
+        {tab === "pelanggan" && (
+          custSel
+            ? <CustomerDetail custKey={custSel} enriched={enriched} data={data} s={s} auth={auth}
+                flash={flash} copy={copy} audit={audit} patch={patch}
+                bulkPatchByCustomer={bulkPatchByCustomer} patchCustomer={patchCustomer}
+                renderCard={renderCard} onBack={() => setCustSel(null)}
+                onBulkAdd={(cust) => setShowBulkAdd({ customer: cust })} />
+            : <PelangganTab enriched={enriched} data={data}
+                onOpen={(k) => setCustSel(k)} onBulkAdd={() => setShowBulkAdd(true)} />
+        )}
+
         {/* ---------- ANALITIK ---------- */}
         {tab === "analitik" && (
           <div className="mt-4 space-y-4">
@@ -2905,6 +2961,20 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             </div>
           </aside>
         </div>
+      )}
+
+      {showBulkAdd && (
+        <BulkInvoiceForm
+          lockedCustomer={showBulkAdd && showBulkAdd.customer ? showBulkAdd.customer : ""}
+          petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""}
+          customers={data?.customers || {}} existing={allEnriched}
+          onSave={(rows, prof) => {
+            addMany(rows);
+            if (prof && prof.key) patchCustomer(prof.key, () => prof.data);
+            setShowBulkAdd(null);
+            flash(`${rows.length} invoice ditambahkan`);
+          }}
+          onCancel={() => setShowBulkAdd(null)} />
       )}
 
       {toast && (
@@ -3641,6 +3711,353 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "", projects 
       <button disabled={!valid} onClick={() => onAdd({ customer: f.customer.trim(), noInvoice: f.noInvoice.trim(), nominal: Number(f.nominal), tglJatuhTempo: f.tglJatuhTempo, pic: f.pic.trim(), telp: f.telp.trim(), tipe: f.tipe, proyek: f.proyek.trim(), alamat: f.alamat.trim(), jaminanTipe: f.jaminanTipe, jaminan: f.jaminan.trim(), assignedTo: f.assignedTo, status: "belum_dihubungi" })}
         className="mt-3 w-full rounded-lg py-2.5 text-sm font-semibold text-white transition-opacity"
         style={{ background: T.brand, opacity: valid ? 1 : 0.45 }}>Simpan tagihan</button>
+    </div>
+  );
+}
+
+/* ===================== MODUL PELANGGAN ===================== */
+const custKeyOf = (name) => (name || "").trim().toLowerCase();
+
+/* Daftar pelanggan: agregasi invoice per customer. */
+function PelangganTab({ enriched, data, onOpen, onBulkAdd }) {
+  const [q, setQ] = useState("");
+  const list = useMemo(() => {
+    const m = new Map();
+    for (const i of enriched) {
+      const k = custKeyOf(i.customer);
+      if (!m.has(k)) m.set(k, { key: k, nama: i.customer || "—", items: [] });
+      m.get(k).items.push(i);
+    }
+    const arr = [...m.values()].map((c) => {
+      const projects = new Set(c.items.map((i) => proyekLabel(i)));
+      return { ...c, roll: rollupProyek(c.items), nProyek: projects.size, files: ((data?.customers || {})[c.key]?.files || []).length };
+    });
+    const qq = q.trim().toLowerCase();
+    const filtered = qq ? arr.filter((c) => c.nama.toLowerCase().includes(qq)) : arr;
+    return filtered.sort((a, b) => b.roll.tertunggak - a.roll.tertunggak);
+  }, [enriched, data, q]);
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-2 rounded-lg px-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <Search size={16} style={{ color: T.sub }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari pelanggan / PT" className="w-full bg-transparent py-2.5 text-sm outline-none" />
+        </div>
+        <button onClick={onBulkAdd} className="flex items-center gap-1 rounded-lg px-3 py-2.5 text-sm font-semibold text-white shadow-sm" style={{ background: T.brand }}>
+          <Plus size={16} /><span className="hidden sm:inline">Pelanggan / invoice</span>
+        </button>
+      </div>
+
+      {list.length === 0 ? (
+        <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+          <Users size={22} className="mx-auto mb-2" style={{ color: T.sub }} />
+          <p className="text-sm font-medium">Belum ada pelanggan</p>
+          <p className="mt-1 text-xs" style={{ color: T.sub }}>Tekan tombol di atas untuk input banyak invoice sekaligus.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {list.map((c) => {
+            const r = c.roll;
+            const tone = r.allLunas ? T.green : r.worstOverdue > 60 ? T.red : r.worstOverdue > 0 ? T.amber : T.brand2;
+            return (
+              <button key={c.key} onClick={() => onOpen(c.key)} className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <div className="h-9 w-1 shrink-0 rounded-full" style={{ background: tone }} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <Building2 size={14} className="shrink-0" style={{ color: T.brand2 }} />
+                    <p className="truncate text-sm font-bold" style={{ color: T.ink }}>{c.nama}</p>
+                  </div>
+                  <p className="mt-0.5 text-[11px]" style={{ color: T.sub }}>{c.items.length} invoice · {c.nProyek} proyek{c.files ? ` · ${c.files} file` : ""}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+                    {r.allLunas
+                      ? <span className="rounded-full px-2 py-0.5" style={{ background: T.green + "1A", color: T.green }}>Lunas semua</span>
+                      : r.worstOverdue > 0
+                        ? <span className="rounded-full px-2 py-0.5" style={{ background: tone + "1A", color: tone }}>Telat terparah {r.worstOverdue} hr</span>
+                        : <span className="rounded-full px-2 py-0.5" style={{ background: T.brand2 + "1A", color: T.brand2 }}>Belum jatuh tempo</span>}
+                    {!r.allLunas && r.nextDue && <span className="rounded-full px-2 py-0.5" style={{ background: T.bg, color: T.sub }}>JT {fmtTgl(r.nextDue)}</span>}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO, color: r.allLunas ? T.green : T.ink }}>{rp(r.tertunggak)}</p>
+                  <p className="text-[10px]" style={{ color: T.sub }}>tertunggak</p>
+                </div>
+                <ChevronRight size={16} className="shrink-0" style={{ color: T.sub }} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Detail 1 pelanggan: profil + ringkasan + aksi massal + invoice per proyek + file. */
+function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, patch, bulkPatchByCustomer, patchCustomer, renderCard, onBack, onBulkAdd }) {
+  const rows = useMemo(() => enriched.filter((i) => custKeyOf(i.customer) === custKey), [enriched, custKey]);
+  const stored = (data?.customers || {})[custKey] || {};
+  const custName = rows[0]?.customer || stored.nama || "—";
+  const roll = useMemo(() => rollupProyek(rows), [rows]);
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const i of rows) {
+      const k = proyekLabel(i).toLowerCase();
+      if (!m.has(k)) m.set(k, { customer: custName, proyek: proyekLabel(i), items: [] });
+      m.get(k).items.push(i);
+    }
+    return [...m.values()].map((g) => ({ ...g, roll: rollupProyek(g.items) }));
+  }, [rows, custName]);
+
+  const [editP, setEditP] = useState(false);
+  const [prof, setProf] = useState({ pic: stored.pic ?? rows[0]?.pic ?? "", telp: stored.telp ?? rows[0]?.telp ?? "", alamat: stored.alamat ?? rows[0]?.alamat ?? "" });
+  const [docMode, setDocMode] = useState("range");
+  const [busyFile, setBusyFile] = useState(false);
+  const fileRef = useRef(null);
+  const files = stored.files || [];
+  const telp = prof.telp || rows[0]?.telp || "";
+
+  const saveProfil = () => {
+    bulkPatchByCustomer(custName, { pic: prof.pic.trim(), telp: prof.telp.trim(), alamat: prof.alamat.trim() });
+    patchCustomer(custKey, () => ({ nama: custName, pic: prof.pic.trim(), telp: prof.telp.trim(), alamat: prof.alamat.trim() }));
+    audit("profil", custName, null, { bulk: rows.length });
+    setEditP(false); flash("Profil diterapkan ke semua invoice");
+  };
+  const doStatement = () => {
+    const t = statementText(custName, enriched, s, docMode);
+    audit("export", "Statement " + custName);
+    if (printLetter("Statement " + custName, t)) flash("Statement dibuat");
+    else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); }
+  };
+  const doTagihWa = () => {
+    const text = tagihWaText(custName, rows, s, docMode);
+    const link = waLink(telp, text);
+    if (link) window.open(link, "_blank", "noopener");
+    else { copy(text); flash("No. WA kosong — pesan disalin"); }
+    audit("tagih", custName, null, { bulk: rows.filter((i) => i.status !== "lunas").length });
+  };
+  const bulkEskalasi = () => {
+    const aktif = rows.filter((i) => i.status !== "lunas");
+    if (!aktif.length) { flash("Tidak ada tagihan aktif"); return; }
+    const ts = today0().toISOString().slice(0, 10);
+    aktif.forEach((i) => patch(i.id, (x) => ({ ...x, eskalasi: [{ ts, level: recoLevel(i) }, ...(x.eskalasi || [])] })));
+    audit("eskalasi", custName, null, { bulk: aktif.length });
+    flash(`Eskalasi dicatat untuk ${aktif.length} invoice`);
+  };
+  const onPickFiles = async (e) => {
+    const list = [...(e.target.files || [])]; e.target.value = "";
+    if (!list.length) return;
+    setBusyFile(true);
+    for (const f of list) {
+      if (f.size > 10 * 1048576) { flash(`${f.name} terlalu besar (maks 10 MB)`); continue; }
+      try {
+        const isImg = f.type.startsWith("image/");
+        const dataUrl = isImg ? await resizeImage(f, 1600, 0.8) : await readFileData(f);
+        const up = await sbUpload(auth.code, "customer", f.name, dataUrl);
+        const ref = { name: f.name, type: isImg ? "image" : (f.type === "application/pdf" ? "pdf" : "file"), path: up.path, size: up.size || f.size, ts: new Date().toISOString(), by: auth.memberName || auth.role };
+        patchCustomer(custKey, (cur) => ({ files: [ref, ...(cur.files || [])] }));
+      } catch { flash(`Gagal unggah ${f.name}`); }
+    }
+    setBusyFile(false); flash("File tersimpan");
+  };
+  const delFile = async (ref) => {
+    try { if (ref.path) await sbDelete(auth.code, [ref.path]); } catch {}
+    patchCustomer(custKey, (cur) => ({ files: (cur.files || []).filter((x) => x.path !== ref.path) }));
+    flash("File dihapus");
+  };
+
+  const card = (label, value, tone) => (
+    <div className="rounded-xl p-3 text-center shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>{label}</p>
+      <p className="mt-0.5 text-sm font-bold" style={{ fontFamily: MONO, color: tone || T.ink }}>{value}</p>
+    </div>
+  );
+
+  return (
+    <div className="mt-4 space-y-3">
+      <button onClick={onBack} className="flex items-center gap-1 text-sm font-semibold" style={{ color: T.brand2 }}><ChevronLeft size={18} /> Daftar pelanggan</button>
+
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5"><Building2 size={16} style={{ color: T.brand2 }} /><h2 className="truncate text-base font-bold" style={{ color: T.ink }}>{custName}</h2></div>
+            <p className="mt-0.5 text-[11px]" style={{ color: T.sub }}>{rows.length} invoice · {groups.length} proyek</p>
+          </div>
+          <button onClick={() => setEditP((v) => !v)} className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Pencil size={13} /></button>
+        </div>
+        {editP ? (
+          <div className="mt-3 space-y-2">
+            <input value={prof.pic} onChange={(e) => setProf({ ...prof, pic: e.target.value })} placeholder="PIC" className={inputCls} style={inputSt} />
+            <input value={prof.telp} onChange={(e) => setProf({ ...prof, telp: e.target.value })} placeholder="No. WA" className={inputCls} style={inputSt} />
+            <input value={prof.alamat} onChange={(e) => setProf({ ...prof, alamat: e.target.value })} placeholder="Alamat" className={inputCls} style={inputSt} />
+            <p className="text-[11px]" style={{ color: T.sub }}>Disimpan & diterapkan ke seluruh {rows.length} invoice pelanggan ini.</p>
+            <button onClick={saveProfil} className="w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Simpan profil</button>
+          </div>
+        ) : (
+          (prof.pic || telp || prof.alamat) && (
+            <div className="mt-2 space-y-0.5 text-xs" style={{ color: T.sub }}>
+              {prof.pic && <p>PIC: <b style={{ color: T.ink }}>{prof.pic}</b></p>}
+              {telp && <p>WA: <b style={{ color: T.ink }}>{telp}</b></p>}
+              {prof.alamat && <p>Alamat: <b style={{ color: T.ink }}>{prof.alamat}</b></p>}
+            </div>
+          )
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {card("Nilai", rp(roll.nilai))}
+        {card("Terbayar", rp(roll.terbayar), T.green)}
+        {card("Tertunggak", rp(roll.tertunggak), roll.tertunggak > 0 ? T.red : T.ink)}
+      </div>
+
+      {/* Aksi massal */}
+      <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold" style={{ color: T.sub }}>Aksi untuk semua tagihan</p>
+          <select value={docMode} onChange={(e) => setDocMode(e.target.value)} className="rounded-lg px-2 py-1 text-[11px]" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }}>
+            <option value="full">Rinci per invoice</option>
+            <option value="range">Rentang (awal–akhir)</option>
+            <option value="ringkas">Ringkas (total saja)</option>
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <button onClick={doTagihWa} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.green }}><Send size={14} /> Tagih WA</button>
+          <button onClick={doStatement} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.brand }}><Printer size={14} /> Statement</button>
+          <button onClick={bulkEskalasi} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.brand2 }}><AlertTriangle size={14} /> Eskalasi</button>
+          <button onClick={() => onBulkAdd(custName)} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Plus size={14} /> Invoice</button>
+        </div>
+      </div>
+
+      {/* File pelanggan (AR & dokumen lain) */}
+      <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="flex items-center gap-1 text-xs font-semibold" style={{ color: T.sub }}><FolderOpen size={14} /> File pelanggan ({files.length})</p>
+          <button onClick={() => fileRef.current?.click()} disabled={busyFile} className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white" style={{ background: T.brand, opacity: busyFile ? 0.6 : 1 }}><Upload size={13} /> {busyFile ? "Mengunggah…" : "Upload"}</button>
+          <input ref={fileRef} type="file" multiple className="hidden" onChange={onPickFiles} />
+        </div>
+        {files.length === 0 ? (
+          <p className="text-[11px]" style={{ color: T.sub }}>Belum ada file. Upload AR, kontrak, atau dokumen lain di sini.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {files.map((b, idx) => (
+              <div key={idx} className="rounded-lg p-2 text-center" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                <button type="button" onClick={() => openBukti(b)} className="kpress block w-full" title={`Buka ${b.name}`}>
+                  {b.type === "image"
+                    ? <StoredImage code={auth.code} att={{ path: b.path, name: b.name }} className="h-16 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                    : <span className="flex h-16 w-full items-center justify-center rounded" style={{ background: T.brand2 + "12" }}><FileText size={24} style={{ color: T.brand2 }} /></span>}
+                  <span className="mt-1 block w-full truncate text-[10px] font-medium" style={{ color: T.sub }}>{b.name}</span>
+                </button>
+                <button onClick={() => delFile(b)} className="mt-1 text-[10px] font-semibold" style={{ color: T.red }}>Hapus</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Invoice per proyek */}
+      <p className="px-1 pt-1 text-xs font-semibold" style={{ color: T.sub }}>Invoice ({rows.length})</p>
+      <div className="space-y-4">
+        {groups.map((g) => <ProyekGroup key={`${g.customer}|||${g.proyek}`} g={g} renderCard={renderCard} />)}
+      </div>
+    </div>
+  );
+}
+
+/* Input banyak invoice sekaligus untuk 1 customer (profil diisi sekali, total berjalan). */
+function BulkInvoiceForm({ lockedCustomer, petugas = [], defaultPetugas = "", customers = {}, existing = [], onSave, onCancel }) {
+  const [cust, setCust] = useState(lockedCustomer || "");
+  const stored = customers[custKeyOf(cust)] || {};
+  const existingRows = useMemo(() => existing.filter((i) => custKeyOf(i.customer) === custKeyOf(cust)), [existing, cust]);
+  const existingTotal = existingRows.reduce((a, i) => a + (i.nominal || 0), 0);
+  const [prof, setProf] = useState({ pic: "", telp: "", alamat: "", tipe: "perusahaan", assignedTo: defaultPetugas });
+  const [rows, setRows] = useState([{ noInvoice: "", proyek: "", nominal: "", tglJatuhTempo: "" }]);
+  // Prefill profil dari data tersimpan / invoice pertama saat customer dikenal.
+  useEffect(() => {
+    const ex = existingRows[0];
+    if (stored.pic || stored.telp || stored.alamat || ex) {
+      setProf((p) => ({ ...p, pic: stored.pic ?? ex?.pic ?? p.pic, telp: stored.telp ?? ex?.telp ?? p.telp, alamat: stored.alamat ?? ex?.alamat ?? p.alamat, tipe: ex?.tipe || p.tipe }));
+    }
+  }, [custKeyOf(cust)]);
+
+  const custList = useMemo(() => [...new Set(existing.map((i) => i.customer).filter(Boolean))], [existing]);
+  const setRow = (idx, k, v) => setRows((rs) => rs.map((r, n) => (n === idx ? { ...r, [k]: v } : r)));
+  const addRow = () => setRows((rs) => [...rs, { noInvoice: "", proyek: "", nominal: "", tglJatuhTempo: "" }]);
+  const delRow = (idx) => setRows((rs) => rs.length > 1 ? rs.filter((_, n) => n !== idx) : rs);
+  const validRows = rows.filter((r) => r.noInvoice.trim() && Number(r.nominal) > 0 && r.tglJatuhTempo);
+  const sumBaru = validRows.reduce((a, r) => a + Number(r.nominal || 0), 0);
+  const canSave = cust.trim() && validRows.length > 0;
+
+  const save = () => {
+    if (!canSave) return;
+    const ts = today0().toISOString().slice(0, 10);
+    const out = validRows.map((r) => ({
+      id: uid(), customer: cust.trim(), noInvoice: r.noInvoice.trim(), nominal: Number(r.nominal),
+      tglJatuhTempo: r.tglJatuhTempo, proyek: r.proyek.trim(), tipe: prof.tipe,
+      pic: prof.pic.trim(), telp: prof.telp.trim(), alamat: prof.alamat.trim(), assignedTo: prof.assignedTo,
+      jaminanTipe: "none", jaminan: "", status: "belum_dihubungi",
+      lastFollowUp: null, janjiBayar: null, janjiNominal: null, pembayaran: [], eskalasi: [], aktivitas: [], dibuat: ts,
+    }));
+    const profData = { nama: cust.trim(), pic: prof.pic.trim(), telp: prof.telp.trim(), alamat: prof.alamat.trim() };
+    onSave(out, { key: custKeyOf(cust), data: profData });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
+      <div className="flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: T.surface, borderBottom: `1px solid ${T.line}` }}>
+        <button onClick={onCancel} className="kpress shrink-0 rounded-lg p-1.5" style={{ color: T.sub }}><X size={20} /></button>
+        <div className="min-w-0 flex-1"><h2 className="truncate text-base font-bold" style={{ color: T.ink }}>Input banyak invoice</h2></div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <Field label="Customer / PT">
+            <input list="bulk-cust" disabled={!!lockedCustomer} value={cust} onChange={(e) => setCust(e.target.value)} placeholder="PT / CV / nama debitur" className={inputCls} style={{ ...inputSt, opacity: lockedCustomer ? 0.7 : 1 }} />
+            <datalist id="bulk-cust">{custList.map((nm) => <option key={nm} value={nm} />)}</datalist>
+          </Field>
+          {existingRows.length > 0 && <p className="mt-1 text-[11px]" style={{ color: T.brand2 }}>Sudah ada {existingRows.length} invoice (total pokok {rp(existingTotal)}). Invoice baru akan ditambahkan.</p>}
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <input value={prof.pic} onChange={(e) => setProf({ ...prof, pic: e.target.value })} placeholder="PIC (opsional)" className={inputCls} style={inputSt} />
+            <input value={prof.telp} onChange={(e) => setProf({ ...prof, telp: e.target.value })} placeholder="No. WA (opsional)" className={inputCls} style={inputSt} />
+            <input value={prof.alamat} onChange={(e) => setProf({ ...prof, alamat: e.target.value })} placeholder="Alamat (opsional)" className={inputCls} style={inputSt} />
+          </div>
+          {petugas.length > 0 && (
+            <select value={prof.assignedTo} onChange={(e) => setProf({ ...prof, assignedTo: e.target.value })} className={`${inputCls} mt-2`} style={inputSt}>
+              <option value="">— petugas: belum ditugaskan —</option>
+              {petugas.map((nm) => <option key={nm} value={nm}>{nm}</option>)}
+            </select>
+          )}
+          <p className="mt-1 text-[11px]" style={{ color: T.sub }}>Profil di atas dipakai untuk semua baris invoice di bawah.</p>
+        </div>
+
+        <div className="space-y-2">
+          {rows.map((r, idx) => (
+            <div key={idx} className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[11px] font-semibold" style={{ color: T.sub }}>Invoice #{idx + 1}</span>
+                {rows.length > 1 && <button onClick={() => delRow(idx)} style={{ color: T.red }}><Trash2 size={14} /></button>}
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <input value={r.noInvoice} onChange={(e) => setRow(idx, "noInvoice", e.target.value)} placeholder="No. invoice" className={inputCls} style={inputSt} />
+                <input value={r.proyek} onChange={(e) => setRow(idx, "proyek", e.target.value)} placeholder="Proyek (opsional)" className={inputCls} style={inputSt} />
+                <input type="text" inputMode="numeric" value={grpID(r.nominal)} onChange={(e) => setRow(idx, "nominal", onlyDigits(e.target.value))} placeholder="Nominal pokok" className={inputCls} style={inputSt} />
+                <input type="date" value={r.tglJatuhTempo} onChange={(e) => setRow(idx, "tglJatuhTempo", e.target.value)} className={inputCls} style={inputSt} />
+              </div>
+            </div>
+          ))}
+          <button onClick={addRow} className="flex w-full items-center justify-center gap-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.surface, color: T.brand2, border: `1px dashed ${T.line}` }}><Plus size={16} /> Tambah baris invoice</button>
+        </div>
+      </div>
+
+      <div className="border-t p-3" style={{ background: T.surface, borderColor: T.line }}>
+        <div className="mb-2 flex items-center justify-between text-sm">
+          <span style={{ color: T.sub }}>{validRows.length} invoice baru</span>
+          <span className="font-bold" style={{ fontFamily: MONO, color: T.ink }}>Total baru: {rp(sumBaru)}</span>
+        </div>
+        {existingRows.length > 0 && <p className="mb-2 text-right text-[11px]" style={{ color: T.sub }}>Total pelanggan jadi {rp(existingTotal + sumBaru)}</p>}
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
+          <button onClick={save} disabled={!canSave} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand, opacity: canSave ? 1 : 0.45 }}>Simpan {validRows.length || ""} invoice</button>
+        </div>
+      </div>
     </div>
   );
 }
