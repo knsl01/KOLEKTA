@@ -145,21 +145,29 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([arr], { type: mime });
 }
 async function openBukti(b) {
+  // Buka tab SINKRON dalam gesture klik agar tak diblokir popup — resolusi
+  // signed URL (PDF/file tak punya thumbnail jadi belum ter-cache) & blob lokal
+  // terjadi SETELAH await; window.open di luar gesture akan diblokir browser.
+  const w = window.open("", "_blank");
   try {
+    let url = null, revoke = false;
     if (b?.path && !b?.data) {
-      try { const m = await sbSignUrls(_activeCode, [b.path]); const u = m[b.path]; if (u) window.open(u, "_blank", "noopener"); } catch {}
-      return;
+      const m = await sbSignUrls(_activeCode, [b.path]);
+      url = m[b.path] || null;
+    } else {
+      // Lampiran masih di antrian (belum terunggah): ambil blob lokal dari IndexedDB.
+      let data = b?.data;
+      if (!data && b?.localId) { try { data = await uploadQueue.getDataUrl(b.localId); } catch {} }
+      if (data) {
+        if (/^data:/.test(data)) { url = URL.createObjectURL(dataUrlToBlob(data)); revoke = true; }
+        else url = data;
+      }
     }
-    // Lampiran masih di antrian (belum terunggah): ambil blob lokal dari IndexedDB.
-    let data = b?.data;
-    if (!data && b?.localId) { try { data = await uploadQueue.getDataUrl(b.localId); } catch {} }
-    if (!data) return;
-    if (!/^data:/.test(data)) { window.open(data, "_blank", "noopener"); return; }
-    const url = URL.createObjectURL(dataUrlToBlob(data));
-    const w = window.open(url, "_blank", "noopener");
-    if (!w) { const a = document.createElement("a"); a.href = url; a.download = b.name || "bukti"; document.body.appendChild(a); a.click(); a.remove(); }
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (_) {}
+    if (!url) { if (w) w.close(); return; }
+    if (w) { w.location.href = url; }
+    else { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; a.download = b?.name || "bukti"; document.body.appendChild(a); a.click(); a.remove(); }
+    if (revoke) setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (_) { if (w) w.close(); }
 }
 function getLoc() {
   return new Promise((resolve, reject) => {
