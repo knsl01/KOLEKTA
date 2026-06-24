@@ -273,6 +273,25 @@ function ptpStat(list) {
   return { kept, broken: total - kept, total, rate: total ? Math.round((kept / total) * 100) : null };
 }
 
+/* Proyek = label pengikat di tiap invoice (1 proyek bisa banyak invoice/termin).
+   Pengelompokan pakai nama proyek yang dinormalkan; kosong -> "Tanpa proyek". */
+const PROYEK_NONE = "Tanpa proyek";
+const proyekKey = (i) => (i && i.proyek ? String(i.proyek).trim() : "");
+const proyekLabel = (i) => proyekKey(i) || PROYEK_NONE;
+/* Rangkuman tingkat proyek dari daftar invoice (overdue tetap per-invoice;
+   proyek hanya menonjolkan yang terparah + jatuh tempo terdekat). */
+function rollupProyek(list) {
+  const aktif = list.filter((i) => i.status !== "lunas");
+  const nilai = list.reduce((a, i) => a + (i.nominal || 0), 0);
+  const tertunggak = aktif.reduce((a, i) => a + (i.total || 0), 0);
+  const terbayar = list.reduce((a, i) => a + (i.terbayar || 0), 0);
+  const worstOverdue = aktif.reduce((a, i) => Math.max(a, i.daysOverdue || 0), 0);
+  const overdueCount = aktif.filter((i) => (i.daysOverdue || 0) > 0).length;
+  const nextDue = aktif.map((i) => i.tglJatuhTempo).filter(Boolean).sort()[0] || null;
+  const allLunas = list.length > 0 && aktif.length === 0;
+  return { count: list.length, aktifCount: aktif.length, nilai, tertunggak, terbayar, worstOverdue, overdueCount, nextDue, allLunas };
+}
+
 function enrich(inv, s) {
   const due = new Date(inv.tglJatuhTempo + "T00:00:00");
   const odRaw = dayDiff(today0(), due);
@@ -927,6 +946,7 @@ function exportExcel(rows, s) {
   const data = rows.map((i) => ({
     Customer: i.customer,
     Tipe: isPerorangan(i) ? "Perorangan" : "Perusahaan",
+    Proyek: i.proyek || "",
     "No. Invoice": i.noInvoice,
     "Jatuh Tempo": i.tglJatuhTempo,
     "Telat (hari)": i.daysOverdue,
@@ -1365,6 +1385,7 @@ function parseImportRows(rows) {
       id: uid(), customer,
       noInvoice: String(pickv(row, ["no. invoice", "no invoice", "invoice", "no"]) || "IMP-" + uid().slice(0, 4).toUpperCase()).trim(),
       nominal, tglJatuhTempo: tgl, tipe,
+      proyek: String(pickv(row, ["proyek", "project", "termin", "paket"])).trim(),
       alamat: String(pickv(row, ["alamat"])).trim(),
       pic: String(pickv(row, ["pic", "kontak"])).trim(),
       telp: String(pickv(row, ["no. wa", "no wa", "wa", "telp", "telepon", "hp"])).trim(),
@@ -1830,6 +1851,7 @@ export default function KolektaApp() {
   const [showWorklog, setShowWorklog] = useState(false);
   const [worklogView, setWorklogView] = useState("list");
   const [showFilter, setShowFilter] = useState(false);
+  const [groupView, setGroupView] = useState(false);
   const [fStatus, setFStatus] = useState("all");
   const [fTipe, setFTipe] = useState("all");
   const [fJaminan, setFJaminan] = useState("all");
@@ -1956,6 +1978,16 @@ export default function KolektaApp() {
     () => (s?.peran === "petugas" && s?.petugasAktif ? allEnriched.filter((i) => i.assignedTo === s.petugasAktif) : allEnriched),
     [allEnriched, s]
   );
+  // Daftar proyek yang sudah ada (untuk autocomplete AddForm), berikut customer-nya.
+  const allProjects = useMemo(() => {
+    const m = new Map();
+    for (const i of enriched) {
+      const nm = proyekKey(i); if (!nm) continue;
+      const k = nm.toLowerCase();
+      if (!m.has(k)) m.set(k, { nama: nm, cust: (i.customer || "").trim().toLowerCase() });
+    }
+    return [...m.values()];
+  }, [enriched]);
 
   const stats = useMemo(() => {
     const aktif = enriched.filter((i) => i.status !== "lunas");
@@ -2094,7 +2126,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let arr = enriched;
-    if (q) arr = arr.filter((i) => i.customer.toLowerCase().includes(q) || i.noInvoice.toLowerCase().includes(q));
+    if (q) arr = arr.filter((i) => i.customer.toLowerCase().includes(q) || i.noInvoice.toLowerCase().includes(q) || proyekKey(i).toLowerCase().includes(q));
     if (fStatus !== "all") arr = arr.filter((i) => i.status === fStatus);
     if (fTipe !== "all") arr = arr.filter((i) => (i.tipe || "perusahaan") === fTipe);
     if (fJaminan === "ada") arr = arr.filter((i) => i.jaminanTipe && i.jaminanTipe !== "none");
@@ -2114,12 +2146,31 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     });
   }, [enriched, query, fStatus, fTipe, fJaminan, fPetugas, sortBy]);
 
+  // Pengelompokan PT -> Proyek dari hasil filter (urutan mengikuti sort global:
+  // grup dengan invoice paling atas muncul lebih dulu).
+  const proyekGroups = useMemo(() => {
+    const m = new Map();
+    for (const i of filtered) {
+      const key = `${(i.customer || "").trim().toLowerCase()}|||${proyekLabel(i).toLowerCase()}`;
+      if (!m.has(key)) m.set(key, { customer: i.customer || "—", proyek: proyekLabel(i), items: [] });
+      m.get(key).items.push(i);
+    }
+    return [...m.values()].map((g) => ({ ...g, roll: rollupProyek(g.items) }));
+  }, [filtered]);
+
   const agenda = useMemo(() => {
     const aktif = enriched.filter((i) => i.status !== "lunas");
     const due7 = aktif.filter((i) => i.odRaw >= -7 && i.odRaw <= 0).sort((a, b) => new Date(a.tglJatuhTempo) - new Date(b.tglJatuhTempo));
     const janji = aktif.filter((i) => i.janjiBayar).sort((a, b) => new Date(a.janjiBayar) - new Date(b.janjiBayar));
     return { due7, janji };
   }, [enriched]);
+
+  const renderCard = (i) => (
+    <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
+      onToggle={() => setOpenId(openId === i.id ? null : i.id)}
+      onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
+      patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
+  );
 
   /* mutations */
   const patch = (id, fn) =>
@@ -2540,6 +2591,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari customer / no. invoice"
                   className="w-full bg-transparent py-2.5 text-sm outline-none" />
               </div>
+              <button onClick={() => setGroupView((v) => !v)} title={groupView ? "Tampilan daftar" : "Kelompokkan per proyek"}
+                className="chip flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
+                style={groupView ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><FolderOpen size={16} /></button>
               <button onClick={() => setShowFilter((v) => !v)}
                 className="chip flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} style={{ transition: "transform .2s ease", transform: showFilter ? "rotate(90deg)" : "none" }} /></button>
@@ -2609,22 +2663,31 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               </div>
             )}
 
-            {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} onAdd={(inv) => { addInvoice(inv); setShowAdd(false); flash("Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
+            {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} projects={allProjects} onAdd={(inv) => { addInvoice(inv); setShowAdd(false); flash("Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
 
-            <div className="space-y-2">
-              {filtered.map((i) => (
-                <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
-                  onToggle={() => setOpenId(openId === i.id ? null : i.id)}
-                  onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
-                  patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
-              ))}
-              {filtered.length === 0 && (
-                <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
-                  <p className="text-sm font-medium">Belum ada tagihan</p>
-                  <p className="mt-1 text-xs" style={{ color: T.sub }}>Tap “Tambah” untuk memasukkan invoice pertama.</p>
-                </div>
-              )}
-            </div>
+            {groupView ? (
+              <div className="space-y-4">
+                {proyekGroups.map((g) => (
+                  <ProyekGroup key={`${g.customer}|||${g.proyek}`} g={g} renderCard={renderCard} />
+                ))}
+                {proyekGroups.length === 0 && (
+                  <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+                    <p className="text-sm font-medium">Belum ada tagihan</p>
+                    <p className="mt-1 text-xs" style={{ color: T.sub }}>Tap “Tambah” untuk memasukkan invoice pertama.</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filtered.map(renderCard)}
+                {filtered.length === 0 && (
+                  <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+                    <p className="text-sm font-medium">Belum ada tagihan</p>
+                    <p className="mt-1 text-xs" style={{ color: T.sub }}>Tap “Tambah” untuk memasukkan invoice pertama.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -3517,8 +3580,18 @@ function Field({ label, children }) {
 const inputCls = "w-full rounded-lg px-3 py-2 text-sm outline-none";
 const inputSt = { background: T.bg, border: `1px solid ${T.line}`, color: T.ink };
 
-function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
-  const [f, setF] = useState({ customer: "", noInvoice: "", nominal: "", tglJatuhTempo: "", pic: "", telp: "", tipe: "perusahaan", alamat: "", jaminanTipe: "none", jaminan: "", assignedTo: defaultPetugas });
+function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "", projects = [] }) {
+  const [f, setF] = useState({ customer: "", noInvoice: "", nominal: "", tglJatuhTempo: "", pic: "", telp: "", tipe: "perusahaan", proyek: "", alamat: "", jaminanTipe: "none", jaminan: "", assignedTo: defaultPetugas });
+  // Saran proyek: utamakan proyek pada customer yang sama, lalu semua proyek lain.
+  const proyekSaran = useMemo(() => {
+    const cust = f.customer.trim().toLowerCase();
+    const mine = [], other = [];
+    for (const p of projects) {
+      if (!p || !p.nama) continue;
+      (cust && p.cust === cust ? mine : other).push(p.nama);
+    }
+    return [...new Set([...mine, ...other])];
+  }, [projects, f.customer]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const valid = f.customer.trim() && f.noInvoice.trim() && Number(f.nominal) > 0 && f.tglJatuhTempo;
   return (
@@ -3544,6 +3617,10 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
         <Field label={f.tipe === "perorangan" ? "Kontak (opsional)" : "Nama PIC (opsional)"}><input className={inputCls} style={inputSt} value={f.pic} onChange={set("pic")} placeholder={f.tipe === "perorangan" ? "mis. nomor rumah" : "mis. Bu Sari (Finance)"} /></Field>
         <Field label="No. WA (opsional)"><input className={inputCls} style={inputSt} value={f.telp} onChange={set("telp")} placeholder="08…" /></Field>
       </div>
+      <div className="mt-3"><Field label="Proyek / termin (opsional)">
+        <input list="proyek-saran" className={inputCls} style={inputSt} value={f.proyek} onChange={set("proyek")} placeholder="mis. Proyek Gedung A — pilih yg ada / ketik baru" />
+        <datalist id="proyek-saran">{proyekSaran.map((nm) => <option key={nm} value={nm} />)}</datalist>
+      </Field></div>
       <div className="mt-3"><Field label="Alamat (untuk surat, opsional)"><input className={inputCls} style={inputSt} value={f.alamat} onChange={set("alamat")} placeholder="Jl. … / Kota" /></Field></div>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Jenis jaminan"><select className={inputCls} style={inputSt} value={f.jaminanTipe} onChange={set("jaminanTipe")}>
@@ -3561,7 +3638,7 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
         </select></Field></div>
       )}
       {Number(f.nominal) > 0 && <p className="mt-2 text-xs" style={{ color: T.sub }}>Pokok: <b style={{ fontFamily: MONO, color: T.ink }}>{rp(Number(f.nominal))}</b></p>}
-      <button disabled={!valid} onClick={() => onAdd({ customer: f.customer.trim(), noInvoice: f.noInvoice.trim(), nominal: Number(f.nominal), tglJatuhTempo: f.tglJatuhTempo, pic: f.pic.trim(), telp: f.telp.trim(), tipe: f.tipe, alamat: f.alamat.trim(), jaminanTipe: f.jaminanTipe, jaminan: f.jaminan.trim(), assignedTo: f.assignedTo, status: "belum_dihubungi" })}
+      <button disabled={!valid} onClick={() => onAdd({ customer: f.customer.trim(), noInvoice: f.noInvoice.trim(), nominal: Number(f.nominal), tglJatuhTempo: f.tglJatuhTempo, pic: f.pic.trim(), telp: f.telp.trim(), tipe: f.tipe, proyek: f.proyek.trim(), alamat: f.alamat.trim(), jaminanTipe: f.jaminanTipe, jaminan: f.jaminan.trim(), assignedTo: f.assignedTo, status: "belum_dihubungi" })}
         className="mt-3 w-full rounded-lg py-2.5 text-sm font-semibold text-white transition-opacity"
         style={{ background: T.brand, opacity: valid ? 1 : 0.45 }}>Simpan tagihan</button>
     </div>
@@ -3615,6 +3692,54 @@ function SignaturePad({ onChange }) {
   );
 }
 
+/* Header grup proyek (PT · Proyek) + rangkuman; invoice/termin tampil di dalamnya.
+   Overdue tetap per-invoice; di sini hanya ditonjolkan yang terparah & JT terdekat. */
+function ProyekGroup({ g, renderCard }) {
+  const [open, setOpen] = useState(true);
+  const r = g.roll;
+  const pct = r.nilai > 0 ? Math.min(100, Math.round((r.terbayar / r.nilai) * 100)) : 0;
+  const tone = r.allLunas ? T.green : r.worstOverdue > 60 ? T.red : r.worstOverdue > 0 ? T.amber : T.brand2;
+  return (
+    <div className="overflow-hidden rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-3 p-3 text-left" style={{ background: tone + "0E" }}>
+        <div className="h-9 w-1 shrink-0 rounded-full" style={{ background: tone }} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <Building2 size={13} className="shrink-0" style={{ color: T.brand2 }} />
+            <p className="truncate text-sm font-bold" style={{ color: T.ink }}>{g.customer}</p>
+          </div>
+          <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-semibold" style={{ color: T.brand2 }}>
+            <FolderOpen size={11} className="shrink-0" /> <span className="truncate">{g.proyek}</span>
+            <span className="shrink-0 font-medium" style={{ color: T.sub }}>· {r.count} termin</span>
+          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+            {r.allLunas
+              ? <span className="rounded-full px-2 py-0.5" style={{ background: T.green + "1A", color: T.green }}>Lunas semua</span>
+              : r.worstOverdue > 0
+                ? <span className="rounded-full px-2 py-0.5" style={{ background: tone + "1A", color: tone }}>Telat terparah {r.worstOverdue} hr · {r.overdueCount} termin</span>
+                : <span className="rounded-full px-2 py-0.5" style={{ background: T.brand2 + "1A", color: T.brand2 }}>Belum jatuh tempo</span>}
+            {!r.allLunas && r.nextDue && <span className="rounded-full px-2 py-0.5" style={{ background: T.bg, color: T.sub }}>JT terdekat {fmtTgl(r.nextDue)}</span>}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO, color: r.allLunas ? T.green : T.ink }}>{rp(r.tertunggak)}</p>
+          <p className="text-[10px]" style={{ color: T.sub }}>tertunggak</p>
+        </div>
+        <ChevronDown size={16} style={{ color: T.sub, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+      </button>
+      {r.nilai > 0 && (
+        <div className="px-3 pb-1" style={{ background: tone + "0E" }}>
+          <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: T.line }}>
+            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tone }} />
+          </div>
+          <p className="mt-1 text-[10px]" style={{ color: T.sub }}>Terbayar {rp(r.terbayar)} dari {rp(r.nilai)} ({pct}%)</p>
+        </div>
+      )}
+      {open && <div className="space-y-2 p-2" style={{ background: T.bg }}>{g.items.map(renderCard)}</div>}
+    </div>
+  );
+}
+
 function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onStatement, audit }) {
   const ent = `${i.noInvoice} · ${i.customer}`;
   const logAudit = audit || (() => {});
@@ -3646,7 +3771,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [openEsk, setOpenEsk] = useState(false);
   const [openArsip, setOpenArsip] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [ed, setEd] = useState({ customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo });
+  const [ed, setEd] = useState({ customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo, proyek: i.proyek || "" });
   const docs = useMemo(() => escalationDocs(i, s), [i, s]);
   const reco = recoLevel(i);
   const activeLvl = lvl || reco;
@@ -3817,6 +3942,11 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
             {i.tlDue && !i.ptpLewat && <span className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold" style={{ background: T.amber + "1A", color: T.amber }}>TL</span>}
             {i.aktivitas?.some((a) => a.foto) && <Camera size={11} className="shrink-0" style={{ color: T.brand2 }} />}
           </div>
+          {proyekKey(i) && (
+            <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-medium" style={{ color: T.brand2 }}>
+              <FolderOpen size={11} className="shrink-0" /> <span className="truncate">{proyekKey(i)}</span>
+            </p>
+          )}
           <p className="truncate text-xs" style={{ color: T.sub }}>
             {i.noInvoice} · JT {fmtTgl(i.tglJatuhTempo)}{urgent ? ` · telat ${i.daysOverdue} hr` : i.status === "lunas" ? "" : " · belum jatuh tempo"}{i.assignedTo ? ` · ${i.assignedTo}` : ""}
           </p>
@@ -4088,8 +4218,9 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                 <input value={ed.noInvoice} onChange={(e) => setEd({ ...ed, noInvoice: e.target.value })} placeholder="No. invoice" className={inputCls} style={inputSt} />
                 <input type="text" inputMode="numeric" value={grpID(ed.nominal)} onChange={(e) => setEd({ ...ed, nominal: onlyDigits(e.target.value) })} placeholder="Nominal pokok" className={inputCls} style={inputSt} />
                 <input type="date" value={ed.tglJatuhTempo} onChange={(e) => setEd({ ...ed, tglJatuhTempo: e.target.value })} className={inputCls} style={inputSt} />
+                <input value={ed.proyek} onChange={(e) => setEd({ ...ed, proyek: e.target.value })} placeholder="Proyek / termin (opsional)" className={`${inputCls} sm:col-span-2`} style={inputSt} />
               </div>
-              <button onClick={() => { patch(i.id, (x) => ({ ...x, customer: ed.customer.trim() || x.customer, noInvoice: ed.noInvoice.trim() || x.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : x.nominal, tglJatuhTempo: ed.tglJatuhTempo || x.tglJatuhTempo })); logAudit("edit", ent, { customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo }, { customer: ed.customer.trim() || i.customer, noInvoice: ed.noInvoice.trim() || i.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : i.nominal, tglJatuhTempo: ed.tglJatuhTempo || i.tglJatuhTempo }); setEditing(false); flash("Data tagihan diperbarui"); }}
+              <button onClick={() => { patch(i.id, (x) => ({ ...x, customer: ed.customer.trim() || x.customer, noInvoice: ed.noInvoice.trim() || x.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : x.nominal, tglJatuhTempo: ed.tglJatuhTempo || x.tglJatuhTempo, proyek: ed.proyek.trim() })); logAudit("edit", ent, { customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo, proyek: i.proyek || "" }, { customer: ed.customer.trim() || i.customer, noInvoice: ed.noInvoice.trim() || i.noInvoice, nominal: Number(ed.nominal) > 0 ? Number(ed.nominal) : i.nominal, tglJatuhTempo: ed.tglJatuhTempo || i.tglJatuhTempo, proyek: ed.proyek.trim() }); setEditing(false); flash("Data tagihan diperbarui"); }}
                 className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: T.brand }}>Simpan perubahan</button>
             </div>
           )}
@@ -4101,7 +4232,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                 <Check size={15} /> Tandai lunas
               </button>
             )}
-            <button onClick={() => { setEd({ customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo }); setEditing((v) => !v); }}
+            <button onClick={() => { setEd({ customer: i.customer, noInvoice: i.noInvoice, nominal: i.nominal, tglJatuhTempo: i.tglJatuhTempo, proyek: i.proyek || "" }); setEditing((v) => !v); }}
               className="flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>
               <Pencil size={15} />
             </button>
