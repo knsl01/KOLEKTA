@@ -143,8 +143,12 @@ function dataUrlToBlob(dataUrl) {
   for (let n = 0; n < bin.length; n++) arr[n] = bin.charCodeAt(n);
   return new Blob([arr], { type: mime });
 }
-function openBukti(b) {
+async function openBukti(b) {
   try {
+    if (b?.path && !b?.data) {
+      try { const m = await sbSignUrls(_activeCode, [b.path]); const u = m[b.path]; if (u) window.open(u, "_blank", "noopener"); } catch {}
+      return;
+    }
     if (!b?.data) return;
     if (!/^data:/.test(b.data)) { window.open(b.data, "_blank", "noopener"); return; }
     const url = URL.createObjectURL(dataUrlToBlob(b.data));
@@ -1102,9 +1106,10 @@ async function sbRpc(fn, body) {
   }
   return txt ? JSON.parse(txt) : null;
 }
+let _activeCode = "";
 const sbLogin = async (code) => { const a = await sbRpc("kolekta_login", { p_code: code }); return a && a[0] ? a[0] : null; };
-const sbPull = async (code) => { const a = await sbRpc("kolekta_pull", { p_code: code }); return a && a[0] ? a[0] : null; };
-const sbPush = (code, data) => sbRpc("kolekta_push", { p_code: code, p_data: data });
+const sbPull = async (code) => { _activeCode = code || _activeCode; const a = await sbRpc("kolekta_pull", { p_code: code }); return a && a[0] ? a[0] : null; };
+const sbPush = (code, data) => { _activeCode = code || _activeCode; return sbRpc("kolekta_push", { p_code: code, p_data: data }); };
 const sbAdminList = async (secret) => (await sbRpc("kolekta_admin_list_tenants", { p_admin: secret })) || [];
 const sbAdminDelete = (secret, tenantId) => sbRpc("kolekta_admin_delete_tenant", { p_admin: secret, p_tenant_id: tenantId });
 const sbAdminCreateFull = async (secret, name, members) => {
@@ -1187,6 +1192,25 @@ function StoredImage({ code, att, onClick, className, style }) {
   const src = useStoredSrc(code, att);
   if (!src) return <div className={className} style={{ ...style, display: "grid", placeItems: "center", background: "rgba(0,0,0,.06)", minHeight: 64 }}><ImageIcon size={20} style={{ opacity: 0.4 }} /></div>;
   return <img src={src} alt={att?.name || ""} onClick={onClick} className={className} style={style} />;
+}
+/* Foto lapangan disimpan sbg string: base64 lama ("data:…") atau path bucket baru. */
+const fotoAtt = (v) => (!v || typeof v !== "string") ? null : (v.startsWith("data:") ? { data: v } : { path: v });
+const buktiAtt = (b) => (b && b.path && !b.data) ? { path: b.path, name: b.name } : { data: b && b.data, name: b && b.name };
+function useFotoSrc(v) { return useStoredSrc(_activeCode, fotoAtt(v)); }
+/* Render foto lapangan (base64/path) + placeholder saat URL belum siap. */
+function FieldFoto({ value, onClick, className, style, alt }) {
+  return <StoredImage code={_activeCode} att={fotoAtt(value)} onClick={onClick} className={className} style={style} />;
+}
+/* Lightbox foto bukti: resolve base64/path -> signed URL utk tampil & unduh. */
+function FotoLightbox({ value, onClose, downloadName }) {
+  const src = useFotoSrc(value);
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
+      <button onClick={onClose} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
+      {src && <img src={src} alt="Bukti" className="max-h-full max-w-full rounded-lg object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()} />}
+      {src && <a href={src} target="_blank" rel="noopener" download={downloadName} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>}
+    </div>
+  );
 }
 
 /* ---------- Audit Log (append-only, immutable di server) ----------
@@ -2981,7 +3005,7 @@ function WorklogDetail({ entry, canDelete, onDelete }) {
               <button key={idx} type="button" onClick={() => openBukti(b)} title={`Buka ${b.name || "bukti"}`}
                 className="kpress flex flex-col items-center gap-1 rounded-lg p-2 text-center" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                 {b.type === "image"
-                  ? <img src={b.data} alt={b.name} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                  ? <StoredImage code={_activeCode} att={buktiAtt(b)} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
                   : <span className="flex h-20 w-full items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={28} style={{ color: T.red }} /></span>}
                 <span className="w-full truncate text-[10px] font-medium" style={{ color: T.sub }}>{b.name || (b.type === "image" ? "Gambar" : "PDF")}</span>
               </button>
@@ -3087,19 +3111,29 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
     if (!ok) { copy(docToPlain(text)); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
     setShowDoc(false); setDsig(null); setDsig2(null); setDForm({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   };
-  const save = () => {
+  const save = async () => {
     if (!catatan.trim()) { flash("Tulis dulu apa yang sudah dilakukan / hasilnya"); return; }
     const h = HASIL[hasil];
     const tl = tindakLanjut ? `\n\u2192 Tindak lanjut berikutnya: ${fmtTgl(tindakLanjut)}` : "";
     const body = `[${h.label}]${catatan.trim() ? " " + catatan.trim() : ""}${tl}`;
+    // Unggah foto lapangan & bukti ke Storage (simpan path). Gagal -> fallback base64.
+    let fotoRef = null;
+    if (foto) { try { const up = await sbUpload(_activeCode, "lapor", "foto-lapangan.jpg", foto); fotoRef = up.path; } catch { fotoRef = foto; } }
+    const buktiUp = [];
+    for (const b of bukti) {
+      if (b.path) { buktiUp.push(b); continue; }
+      try { const up = await sbUpload(_activeCode, "lapor", b.name || "bukti", b.data); buktiUp.push({ name: b.name, type: b.type, size: up.size || b.size, path: up.path }); }
+      catch { buktiUp.push(b); }
+    }
     patch(i.id, (x) => ({
       ...x,
       status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
       lastFollowUp: today0().toISOString().slice(0, 10),
       tindakLanjut: tindakLanjut || x.tindakLanjut || "",
-      aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: foto || null, lok: lok || null }, ...(x.aktivitas || [])],
+      aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
     }));
-    const buktiAll = [...(foto ? [{ name: "Foto lapangan", type: "image", data: foto }] : []), ...bukti];
+    const fotoBukti = fotoRef ? [{ name: "Foto lapangan", type: "image", ...(String(fotoRef).startsWith("data:") ? { data: fotoRef } : { path: fotoRef }) }] : [];
+    const buktiAll = [...fotoBukti, ...buktiUp];
     onSaveWorklog({ petugas: petugas || "", invoiceId: i.id, customer: i.customer || "", noInvoice: i.noInvoice || "", deskripsi: catatan.trim(), hasil, tindakLanjut: tindakLanjut || "", bukti: buktiAll });
     flash("Laporan tersimpan");
     onDone();
@@ -3550,15 +3584,17 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     flash("Ditandai lunas");
   };
   const logEskalasi = (level) => { patch(i.id, (x) => ({ ...x, eskalasi: [{ ts: today0().toISOString().slice(0, 10), level }, ...(x.eskalasi || [])] })); logAudit("eskalasi", ent, null, { level }); };
-  const logFollowup = () => {
+  const logFollowup = async () => {
     const h = HASIL[hasil];
     const body = `[${h.label}]${note.trim() ? " " + note.trim() : ""}`;
+    let fotoRef = null;
+    if (foto) { try { const up = await sbUpload(_activeCode, "lapor", "foto-lapangan.jpg", foto); fotoRef = up.path; } catch { fotoRef = foto; } }
     patch(i.id, (x) => ({
       ...x,
       status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
       lastFollowUp: today0().toISOString().slice(0, 10),
       tindakLanjut: tindakLanjut || x.tindakLanjut || "",
-      aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: foto || null, lok: lok || null }, ...(x.aktivitas || [])],
+      aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
     }));
     setNote(""); setHasil("lain"); setFoto(null); setLok(null); flash("Hasil kontak tercatat");
   };
@@ -3618,13 +3654,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
   return (
     <>
-    {fotoView && (
-      <div onClick={() => setFotoView(null)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
-        <button onClick={() => setFotoView(null)} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
-        <img src={fotoView} alt="Bukti kunjungan" className="max-h-full max-w-full rounded-lg object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()} />
-        <a href={fotoView} download={`bukti-${i.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
-      </div>
-    )}
+    {fotoView && <FotoLightbox value={fotoView} onClose={() => setFotoView(null)} downloadName={`bukti-${i.noInvoice || "kolekta"}.jpg`} />}
     {lunasAsk && (
       <div onClick={() => setLunasAsk(false)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
         <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -3773,7 +3803,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                     {i.aktivitas.map((a, idx) => (
                       <div key={idx} className="rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         <div className="flex gap-2">
-                          {a.foto && <img src={a.foto} alt="bukti" className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} onClick={() => setFotoView(a.foto)} />}
+                          {a.foto && <FieldFoto value={a.foto} onClick={() => setFotoView(a.foto)} className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} />}
                           <div className="min-w-0 flex-1">
                             <p className="text-[11px]" style={{ color: T.brass, fontFamily: MONO }}>{a.waktu ? fmtWaktu(a.waktu) : fmtTgl(a.ts).split(" ").slice(0, 2).join(" ")}</p>
                             <p className="text-xs" style={{ color: T.ink }}>{a.note}</p>
@@ -4860,7 +4890,7 @@ function RiwayatDetail({ inv, s, flash, copy, onClose, onOpen }) {
               <div className="grid grid-cols-3 gap-2">
                 {fotos.map((a, idx) => (
                   <button key={idx} onClick={() => setFotoView(a.foto)} className="overflow-hidden rounded-lg" style={{ border: `1px solid ${T.line}` }}>
-                    <img src={a.foto} alt={a.note || "bukti"} className="h-24 w-full object-cover" />
+                    <FieldFoto value={a.foto} alt={a.note || "bukti"} className="h-24 w-full object-cover" />
                   </button>
                 ))}
               </div>
@@ -4875,13 +4905,7 @@ function RiwayatDetail({ inv, s, flash, copy, onClose, onOpen }) {
         </div>
       </div>
 
-      {fotoView && (
-        <div onClick={(e) => { e.stopPropagation(); setFotoView(null); }} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
-          <button onClick={(e) => { e.stopPropagation(); setFotoView(null); }} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
-          <img src={fotoView} alt="Bukti" className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
-          <a href={fotoView} download={`bukti-${inv.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
-        </div>
-      )}
+      {fotoView && <FotoLightbox value={fotoView} onClose={() => setFotoView(null)} downloadName={`bukti-${inv.noInvoice || "kolekta"}.jpg`} />}
     </div>
   );
 }

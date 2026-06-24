@@ -6,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BUCKET = "kolekta-files";
-const MAX_BYTES = 6 * 1024 * 1024; // ~6 MB per file (cocok dengan batas 5 MB di klien)
+const MAX_BYTES = 10 * 1024 * 1024; // ~10 MB per file (cocok dengan batas 8 MB bukti Lapor di klien)
 const SIGN_TTL = 60 * 60 * 2; // 2 jam
 
 const admin = createClient(SB_URL, SERVICE_KEY, { auth: { persistSession: false } });
