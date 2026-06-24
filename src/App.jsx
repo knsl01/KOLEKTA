@@ -1135,6 +1135,60 @@ const sbChatConvos = async (code, role, me) =>
   (await sbRpc("kolekta_chat_convos", { p_code: code, p_role: role, p_me: me })) || [];
 const CHAT_ATT_MAX = 5 * 1024 * 1024; // 5 MB / file
 
+/* ---------- File broker (Supabase Storage via Edge Function kfile) ----------
+   File (foto/lampiran) disimpan di bucket privat, bukan base64 di database.
+   Broker memvalidasi kode login -> tenant, lalu upload/sign URL dengan service
+   role. Path dikunci per-tenant sehingga PT lain tak bisa mengakses. */
+const FN_URL = `${SB_URL}/functions/v1/kfile`;
+async function sbFn(action, body) {
+  const r = await fetch(FN_URL, {
+    method: "POST",
+    headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...(body || {}) }),
+  });
+  const txt = await r.text();
+  if (!r.ok) { let m = txt; try { m = JSON.parse(txt).error || txt; } catch {} throw new Error(String(m || r.status).slice(0, 160)); }
+  return txt ? JSON.parse(txt) : null;
+}
+/* Unggah satu dataURL ke bucket; balikan { path, size }. */
+async function sbUpload(code, scope, name, dataUrl) {
+  const [head, b64] = String(dataUrl).split(",");
+  const ct = (String(head).match(/data:([^;]+)/) || [])[1] || "application/octet-stream";
+  return await sbFn("up", { code, scope, name: name || "file", contentType: ct, b64: b64 || "" });
+}
+const _signCache = new Map(); // path -> signed url (TTL 2 jam dari server)
+/* Resolusi banyak path -> signed URL sekaligus (di-cache). */
+async function sbSignUrls(code, paths) {
+  const want = [...new Set((paths || []).filter((p) => p && !_signCache.has(p)))];
+  if (want.length) {
+    try {
+      const res = await sbFn("url", { code, paths: want });
+      const urls = (res && res.urls) || {};
+      for (const p of want) if (urls[p]) _signCache.set(p, urls[p]);
+    } catch {}
+  }
+  const out = {}; for (const p of (paths || [])) if (_signCache.has(p)) out[p] = _signCache.get(p); return out;
+}
+/* Hook: kembalikan src tampilan untuk lampiran (base64 lama langsung, path -> signed URL). */
+function useStoredSrc(code, att) {
+  const path = att && att.path; const data = att && att.data;
+  const [src, setSrc] = useState(data || (path ? _signCache.get(path) : null) || null);
+  useEffect(() => {
+    if (data) { setSrc(data); return; }
+    if (!path) { setSrc(null); return; }
+    if (_signCache.has(path)) { setSrc(_signCache.get(path)); return; }
+    let alive = true;
+    sbSignUrls(code, [path]).then((m) => { if (alive && m[path]) setSrc(m[path]); });
+    return () => { alive = false; };
+  }, [code, path, data]);
+  return src;
+}
+function StoredImage({ code, att, onClick, className, style }) {
+  const src = useStoredSrc(code, att);
+  if (!src) return <div className={className} style={{ ...style, display: "grid", placeItems: "center", background: "rgba(0,0,0,.06)", minHeight: 64 }}><ImageIcon size={20} style={{ opacity: 0.4 }} /></div>;
+  return <img src={src} alt={att?.name || ""} onClick={onClick} className={className} style={style} />;
+}
+
 /* ---------- Audit Log (append-only, immutable di server) ----------
    Penulisan log HANYA lewat RPC kolekta_audit_write (security-definer):
    tenant_id & role diturunkan dari kode di server, jadi antar-PT terpisah
@@ -1451,7 +1505,14 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
     if ((!body && atts.length === 0) || sending) return;
     setSending(true);
     try {
-      await sbChatSend(auth.code, meName, meRole, openConv, body, atts);
+      // Unggah lampiran ke Storage (simpan path, bukan base64). Gagal -> fallback base64.
+      const toSend = [];
+      for (const a of atts) {
+        if (a.path) { toSend.push({ name: a.name, type: a.type, size: a.size, path: a.path }); continue; }
+        try { const up = await sbUpload(auth.code, "chat", a.name, a.data); toSend.push({ name: a.name, type: a.type, size: up.size || a.size, path: up.path }); }
+        catch { toSend.push({ name: a.name, type: a.type, size: a.size, data: a.data }); }
+      }
+      await sbChatSend(auth.code, meName, meRole, openConv, body, toSend);
       setText(""); setAtts([]); setMention(null);
       const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
       if (incoming.length) {
@@ -1483,7 +1544,11 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
   };
 
   const readByOthers = (id) => reads.filter((r) => r.member !== meName && r.last_read_id >= id).length;
-  const openAtt = (att) => {
+  const openAtt = async (att) => {
+    if (att.path && !att.data) {
+      try { const m = await sbSignUrls(auth.code, [att.path]); const u = m[att.path]; if (u) { window.open(u, "_blank", "noopener"); return; } } catch {}
+      setErr("Gagal membuka lampiran"); setTimeout(() => setErr(""), 2500); return;
+    }
     try { const b = dataUrlToBlob(att.data); const u = URL.createObjectURL(b); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60000); }
     catch { const a = document.createElement("a"); a.href = att.data; a.download = att.name || "file"; a.click(); }
   };
@@ -1580,7 +1645,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
                         {(m.attachments || []).length > 0 && (
                           <div className="mb-1 flex flex-col gap-1.5">
                             {m.attachments.map((att, idx) => att.type === "image" ? (
-                              <img key={idx} src={att.data} alt={att.name} onClick={() => openAtt(att)} className="max-h-52 w-auto cursor-pointer rounded-lg object-cover" style={{ maxWidth: 240 }} />
+                              <StoredImage key={idx} code={auth.code} att={att} onClick={() => openAtt(att)} className="max-h-52 w-auto cursor-pointer rounded-lg object-cover" style={{ maxWidth: 240 }} />
                             ) : (
                               <button key={idx} onClick={() => openAtt(att)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left" style={{ background: mine ? "rgba(255,255,255,.18)" : T.bg, border: `1px solid ${mine ? "rgba(255,255,255,.25)" : T.line}` }}>
                                 <FileText size={16} style={{ color: mine ? "#fff" : T.brand2 }} />
