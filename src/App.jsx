@@ -6,9 +6,11 @@ import {
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
   Moon, Sun, ChevronLeft, ChevronRight, Paperclip, ArrowRight,
+  CheckCheck, Users, ArrowLeft, Image as ImageIcon, Phone, Video, FolderOpen, Eye,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
+import * as uploadQueue from "./uploadQueue.js";
 
 /* ---------- Tema (inline style, bukan arbitrary Tailwind) ---------- */
 /* Tiap tema punya varian terang (light) & gelap (dark); mode gelap berlaku untuk semua tema. */
@@ -83,7 +85,8 @@ const rp = (n) =>
 const rpc = (v) => {
   let n = Math.round(v || 0); const neg = n < 0 ? "-" : ""; n = Math.abs(n);
   const f = (x, d) => x.toFixed(d).replace(/\.0$/, "").replace(".", ",");
-  if (n >= 1e9) return `${neg}Rp${f(n / 1e9, 1)} M`;
+  if (n >= 1e12) return `${neg}Rp${f(n / 1e12, n < 1e13 ? 1 : 0)} T`;
+  if (n >= 1e9) return `${neg}Rp${f(n / 1e9, n < 1e10 ? 1 : 0)} M`;
   if (n >= 1e6) return `${neg}Rp${f(n / 1e6, n < 1e7 ? 1 : 0)} jt`;
   if (n >= 1e3) return `${neg}Rp${Math.round(n / 1e3)} rb`;
   return `${neg}Rp${n}`;
@@ -141,11 +144,18 @@ function dataUrlToBlob(dataUrl) {
   for (let n = 0; n < bin.length; n++) arr[n] = bin.charCodeAt(n);
   return new Blob([arr], { type: mime });
 }
-function openBukti(b) {
+async function openBukti(b) {
   try {
-    if (!b?.data) return;
-    if (!/^data:/.test(b.data)) { window.open(b.data, "_blank", "noopener"); return; }
-    const url = URL.createObjectURL(dataUrlToBlob(b.data));
+    if (b?.path && !b?.data) {
+      try { const m = await sbSignUrls(_activeCode, [b.path]); const u = m[b.path]; if (u) window.open(u, "_blank", "noopener"); } catch {}
+      return;
+    }
+    // Lampiran masih di antrian (belum terunggah): ambil blob lokal dari IndexedDB.
+    let data = b?.data;
+    if (!data && b?.localId) { try { data = await uploadQueue.getDataUrl(b.localId); } catch {} }
+    if (!data) return;
+    if (!/^data:/.test(data)) { window.open(data, "_blank", "noopener"); return; }
+    const url = URL.createObjectURL(dataUrlToBlob(data));
     const w = window.open(url, "_blank", "noopener");
     if (!w) { const a = document.createElement("a"); a.href = url; a.download = b.name || "bukti"; document.body.appendChild(a); a.click(); a.remove(); }
     setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -608,7 +618,7 @@ function printViaIframe(label, bodyHtml) {
     doc.open();
     doc.write(
       `<!doctype html><html><head><meta charset="utf-8"><title>${label}</title><style>${DOC_STYLE}</style></head>` +
-      `<body>${bodyHtml}<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},150)}<\/script></body></html>`
+      `<body>${bodyHtml}<script>(function(){var d=false;function go(){if(d)return;d=true;try{window.focus();window.print();}catch(e){}}function ready(){var g=document.images,n=g.length,c=0;if(!n){go();return;}function t(){if(++c>=n)go();}for(var k=0;k<n;k++){var m=g[k];if(m.complete)t();else{m.onload=t;m.onerror=t;}}setTimeout(go,1500);}if(document.readyState==="complete")ready();else window.addEventListener("load",ready);setTimeout(ready,300);})();<\/script></body></html>`
     );
     doc.close();
     setTimeout(cleanup, 5 * 60 * 1000); // pengaman bila onafterprint tak terpicu
@@ -1100,9 +1110,10 @@ async function sbRpc(fn, body) {
   }
   return txt ? JSON.parse(txt) : null;
 }
+let _activeCode = "";
 const sbLogin = async (code) => { const a = await sbRpc("kolekta_login", { p_code: code }); return a && a[0] ? a[0] : null; };
-const sbPull = async (code) => { const a = await sbRpc("kolekta_pull", { p_code: code }); return a && a[0] ? a[0] : null; };
-const sbPush = (code, data) => sbRpc("kolekta_push", { p_code: code, p_data: data });
+const sbPull = async (code) => { _activeCode = code || _activeCode; const a = await sbRpc("kolekta_pull", { p_code: code }); return a && a[0] ? a[0] : null; };
+const sbPush = (code, data) => { _activeCode = code || _activeCode; return sbRpc("kolekta_push", { p_code: code, p_data: data }); };
 const sbAdminList = async (secret) => (await sbRpc("kolekta_admin_list_tenants", { p_admin: secret })) || [];
 const sbAdminDelete = (secret, tenantId) => sbRpc("kolekta_admin_delete_tenant", { p_admin: secret, p_tenant_id: tenantId });
 const sbAdminCreateFull = async (secret, name, members) => {
@@ -1117,6 +1128,150 @@ const sbAdminDeleteMember = (secret, memberId) => sbRpc("kolekta_admin_delete_me
 const sbAdminAddMember = async (secret, tenantId, role, name) => { const a = await sbRpc("kolekta_admin_add_member", { p_admin: secret, p_tenant_id: tenantId, p_role: role, p_name: name }); return a && a[0] ? a[0] : null; };
 const sbAdminStorage = async (secret) => { const a = await sbRpc("kolekta_admin_storage", { p_admin: secret }); return a && a[0] ? a[0] : null; };
 const fmtBytes = (n) => { n = Number(n) || 0; if (n >= 1073741824) return (n / 1073741824).toFixed(2) + " GB"; if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB"; if (n >= 1024) return (n / 1024).toFixed(0) + " KB"; return n + " B"; };
+
+/* ---------- Chat (Realtime via polling, isolasi per-PT di server) ---------- */
+const sbChatSend = async (code, sender, role, conv, body, attachments) => {
+  const a = await sbRpc("kolekta_chat_send", { p_code: code, p_sender: sender, p_role: role, p_conv: conv, p_body: body || "", p_attachments: attachments || [] });
+  return a && a[0] ? a[0] : null;
+};
+const sbChatFetch = async (code, role, me, conv, after, limit) =>
+  (await sbRpc("kolekta_chat_fetch", { p_code: code, p_role: role, p_me: me, p_conv: conv, p_after: after || 0, p_limit: limit || 300 })) || [];
+const sbChatReads = async (code, role, me, conv) =>
+  (await sbRpc("kolekta_chat_reads", { p_code: code, p_role: role, p_me: me, p_conv: conv })) || [];
+const sbChatMarkRead = (code, me, role, conv, last) =>
+  sbRpc("kolekta_chat_mark_read", { p_code: code, p_me: me, p_role: role, p_conv: conv, p_last: last || 0 });
+const sbChatConvos = async (code, role, me) =>
+  (await sbRpc("kolekta_chat_convos", { p_code: code, p_role: role, p_me: me })) || [];
+const CHAT_ATT_MAX = 10 * 1024 * 1024; // 10 MB / file
+
+/* ---------- File broker (Supabase Storage via Edge Function kfile) ----------
+   File (foto/lampiran) disimpan di bucket privat, bukan base64 di database.
+   Broker memvalidasi kode login -> tenant, lalu upload/sign URL dengan service
+   role. Path dikunci per-tenant sehingga PT lain tak bisa mengakses. */
+const FN_URL = `${SB_URL}/functions/v1/kfile`;
+async function sbFn(action, body) {
+  const r = await fetch(FN_URL, {
+    method: "POST",
+    headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...(body || {}) }),
+  });
+  const txt = await r.text();
+  if (!r.ok) { let m = txt; try { m = JSON.parse(txt).error || txt; } catch {} throw new Error(String(m || r.status).slice(0, 160)); }
+  return txt ? JSON.parse(txt) : null;
+}
+/* Unggah satu dataURL ke bucket; balikan { path, size }. */
+async function sbUpload(code, scope, name, dataUrl) {
+  const [head, b64] = String(dataUrl).split(",");
+  const ct = (String(head).match(/data:([^;]+)/) || [])[1] || "application/octet-stream";
+  return await sbFn("up", { code, scope, name: name || "file", contentType: ct, b64: b64 || "" });
+}
+const _signCache = new Map(); // path -> signed url (TTL 2 jam dari server)
+/* Resolusi banyak path -> signed URL sekaligus (di-cache). */
+async function sbSignUrls(code, paths) {
+  const want = [...new Set((paths || []).filter((p) => p && !_signCache.has(p)))];
+  if (want.length) {
+    try {
+      const res = await sbFn("url", { code, paths: want });
+      const urls = (res && res.urls) || {};
+      for (const p of want) if (urls[p]) _signCache.set(p, urls[p]);
+    } catch {}
+  }
+  const out = {}; for (const p of (paths || [])) if (_signCache.has(p)) out[p] = _signCache.get(p); return out;
+}
+/* Admin (lintas-PT): kelola file Storage per PT lewat broker (pakai rahasia admin). */
+const sbAdminFiles = async (secret, tenantId) => ((await sbFn("admin-list", { admin: secret, tenant: tenantId })) || {}).files || [];
+const sbAdminFileUrls = async (secret, paths) => ((await sbFn("admin-url", { admin: secret, paths })) || {}).urls || {};
+const sbAdminFileDelete = (secret, paths) => sbFn("admin-del", { admin: secret, paths });
+/* Hook: kembalikan src tampilan untuk lampiran (base64 lama langsung, path -> signed URL). */
+function useStoredSrc(code, att) {
+  const path = att && att.path; const data = att && att.data; const localId = att && att.localId;
+  const [src, setSrc] = useState(data || (path ? _signCache.get(path) : null) || null);
+  useEffect(() => {
+    if (data) { setSrc(data); return; }
+    if (localId) {
+      // Ref antrian lokal: tampilkan blob dari IndexedDB selagi diunggah; bila
+      // upload sudah sukses (path siap) resolve signed URL — tahan walau ref telat ditukar.
+      let alive = true;
+      const resolve = () => {
+        const st = uploadQueue.getStatus(localId);
+        if (st && st.status === "success" && st.path) {
+          sbSignUrls(code, [st.path]).then((m) => { if (alive && m[st.path]) setSrc(m[st.path]); });
+        } else {
+          uploadQueue.getDataUrl(localId).then((d) => { if (alive && d) setSrc(d); });
+        }
+      };
+      resolve();
+      const unsub = uploadQueue.subscribe((e) => { if (e.id === localId) resolve(); });
+      return () => { alive = false; unsub(); };
+    }
+    if (!path) { setSrc(null); return; }
+    if (_signCache.has(path)) { setSrc(_signCache.get(path)); return; }
+    let alive = true;
+    sbSignUrls(code, [path]).then((m) => { if (alive && m[path]) setSrc(m[path]); });
+    return () => { alive = false; };
+  }, [code, path, data, localId]);
+  return src;
+}
+function StoredImage({ code, att, onClick, className, style }) {
+  const src = useStoredSrc(code, att);
+  if (!src) return <div className={className} style={{ ...style, display: "grid", placeItems: "center", background: "rgba(0,0,0,.06)", minHeight: 64 }}><ImageIcon size={20} style={{ opacity: 0.4 }} /></div>;
+  return <img src={src} alt={att?.name || ""} onClick={onClick} className={className} style={style} />;
+}
+/* Badge status upload latar belakang utk lampiran yg masih di antrian (localId).
+   Tampil: Menunggu / Mengunggah… / Gagal (+coba lagi). Sukses/non-lokal -> tak tampil. */
+function useUploadStatus(localId) {
+  const [st, setSt] = useState(() => (localId ? uploadQueue.getStatus(localId) : null));
+  useEffect(() => {
+    if (!localId) { setSt(null); return; }
+    setSt(uploadQueue.getStatus(localId));
+    return uploadQueue.subscribe((e) => { if (e.id === localId) setSt({ status: e.status, path: e.path, error: e.error }); });
+  }, [localId]);
+  return st;
+}
+function UploadBadge({ localId }) {
+  const st = useUploadStatus(localId);
+  if (!localId || !st || st.status === "success") return null;
+  const stop = (e) => { e.stopPropagation(); e.preventDefault(); };
+  const base = { position: "absolute", left: 4, bottom: 4, right: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 6, padding: "2px 4px", fontSize: 9, fontWeight: 700, color: "#fff", lineHeight: 1.2 };
+  if (st.status === "failed")
+    return (
+      <button onClick={(e) => { stop(e); uploadQueue.retry(localId); }} title={st.error || "Gagal mengunggah"} style={{ ...base, background: "rgba(176,70,58,.92)" }}>
+        <RotateCcw size={10} /> Coba lagi
+      </button>
+    );
+  if (st.status === "uploading")
+    return <span style={{ ...base, background: "rgba(12,59,46,.82)" }}><Cloud size={10} /> Mengunggah…</span>;
+  return <span style={{ ...base, background: "rgba(0,0,0,.6)" }}><Clock size={10} /> Menunggu</span>;
+}
+/* Foto lapangan disimpan sbg string: base64 lama ("data:…"), ref antrian
+   lokal ("local:<id>", belum terunggah), atau path bucket. */
+const fotoAtt = (v) => {
+  if (!v || typeof v !== "string") return null;
+  if (v.startsWith("data:")) return { data: v };
+  if (v.startsWith("local:")) return { localId: v.slice(6) };
+  return { path: v };
+};
+const buktiAtt = (b) => {
+  if (b && b.localId) return { localId: b.localId, name: b.name };
+  if (b && b.path && !b.data) return { path: b.path, name: b.name };
+  return { data: b && b.data, name: b && b.name };
+};
+function useFotoSrc(v) { return useStoredSrc(_activeCode, fotoAtt(v)); }
+/* Render foto lapangan (base64/path) + placeholder saat URL belum siap. */
+function FieldFoto({ value, onClick, className, style, alt }) {
+  return <StoredImage code={_activeCode} att={fotoAtt(value)} onClick={onClick} className={className} style={style} />;
+}
+/* Lightbox foto bukti: resolve base64/path -> signed URL utk tampil & unduh. */
+function FotoLightbox({ value, onClose, downloadName }) {
+  const src = useFotoSrc(value);
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
+      <button onClick={onClose} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
+      {src && <img src={src} alt="Bukti" className="max-h-full max-w-full rounded-lg object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()} />}
+      {src && <a href={src} target="_blank" rel="noopener" download={downloadName} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>}
+    </div>
+  );
+}
 
 /* ---------- Audit Log (append-only, immutable di server) ----------
    Penulisan log HANYA lewat RPC kolekta_audit_write (security-definer):
@@ -1207,7 +1362,7 @@ function parseImportRows(rows) {
       telp: String(pickv(row, ["no. wa", "no wa", "wa", "telp", "telepon", "hp"])).trim(),
       assignedTo: String(pickv(row, ["petugas", "kolektor", "collector"])).trim(),
       jaminanTipe, jaminan,
-      status, lastFollowUp: null, janjiBayar: null, pembayaran: [], eskalasi: [], aktivitas: [], dibuat: today0().toISOString().slice(0, 10),
+      status, lastFollowUp: null, janjiBayar: null, janjiNominal: null, pembayaran: [], eskalasi: [], aktivitas: [], dibuat: today0().toISOString().slice(0, 10),
     });
   }
   return out;
@@ -1263,6 +1418,398 @@ function Pill({ status }) {
   );
 }
 
+/* ---------- util chat ---------- */
+const CHAT_NAME_COLORS = ["#2563eb", "#dc2626", "#7c3aed", "#0891b2", "#ea580c", "#0d9488", "#c026d3", "#65a30d", "#db2777", "#4f46e5"];
+const chatColor = (name) => {
+  let h = 0; const s = name || "";
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return CHAT_NAME_COLORS[h % CHAT_NAME_COLORS.length];
+};
+const chatSameDay = (a, b) => {
+  const da = new Date(a), db = new Date(b);
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+};
+const chatDayLabel = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso), now = new Date(), yest = new Date(); yest.setDate(now.getDate() - 1);
+  if (chatSameDay(d, now)) return "Hari ini";
+  if (chatSameDay(d, yest)) return "Kemarin";
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+};
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/* Render isi pesan + sorot mention @nama */
+const renderChatBody = (body, names, mine, T) => {
+  if (!body) return null;
+  const valid = (names || []).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!valid.length) return body;
+  const re = new RegExp("@(?:" + valid.map(reEscape).join("|") + ")(?![\\p{L}\\p{N}_])", "gu");
+  const out = []; let last = 0, m, k = 0;
+  while ((m = re.exec(body))) {
+    if (m.index > last) out.push(body.slice(last, m.index));
+    out.push(<span key={"mn" + k++} style={{ fontWeight: 700, color: mine ? "#d6f0ff" : T.brand2 }}>{m[0]}</span>);
+    last = m.index + m[0].length;
+  }
+  if (last < body.length) out.push(body.slice(last));
+  return out;
+};
+/* Undangan panggilan (Jitsi) disisipkan sebagai pesan teks ber-marker */
+const CALL_RE = /^\[call:(audio|video)\]\s+(https?:\/\/\S+)/;
+const parseCall = (body) => { const m = CALL_RE.exec(body || ""); return m ? { kind: m[1], url: m[2] } : null; };
+const chatPreview = (body, hasAtt) => { const c = parseCall(body); if (c) return c.kind === "video" ? "📹 Panggilan video" : "📞 Panggilan suara"; return body || (hasAtt ? "📎 Lampiran" : ""); };
+
+/* ---------- Panel Chat (grup PT + japri atasan↔petugas) ---------- */
+function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread }) {
+  const [openConv, setOpenConv] = useState(null);
+  const [convos, setConvos] = useState([]);
+  const [msgs, setMsgs] = useState([]);
+  const [reads, setReads] = useState([]);
+  const [text, setText] = useState("");
+  const [atts, setAtts] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [busyAtt, setBusyAtt] = useState(false);
+  const [err, setErr] = useState("");
+  const [mention, setMention] = useState(null); // { query, start } saat mengetik @
+  const lastIdRef = useRef(0);
+  const pollRef = useRef(null);
+  const scrollerRef = useRef(null);
+  const taRef = useRef(null);
+  const imgInputRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  /* Nama yang bisa di-mention / disorot */
+  const allNames = useMemo(() => ["Atasan", ...(petugasNames || [])].filter(Boolean), [petugasNames]);
+  const mentionList = useMemo(() => {
+    if (!mention || openConv !== "group") return [];
+    return allNames.filter((n) => n !== meName).filter((n) => n.toLowerCase().includes(mention.query)).slice(0, 6);
+  }, [mention, allNames, openConv, meName]);
+
+  const convList = useMemo(() => {
+    const list = [{ conv: "group", title: ptName ? `Tim ${ptName}` : "Tim", kind: "group" }];
+    if (meRole === "atasan") {
+      (petugasNames || []).filter(Boolean).forEach((nm) => list.push({ conv: "dm:" + nm, title: nm, kind: "dm" }));
+    } else {
+      list.push({ conv: "dm:" + meName, title: "Atasan", kind: "dm" });
+    }
+    return list;
+  }, [petugasNames, meRole, meName, ptName]);
+
+  const sumOf = (k) => convos.find((c) => c.conv === k);
+  const totalUnread = useMemo(() => convos.reduce((a, c) => a + (c.unread || 0), 0), [convos]);
+  useEffect(() => { onUnread && onUnread(totalUnread); }, [totalUnread, onUnread]);
+
+  /* Daftar percakapan (saat di list) */
+  useEffect(() => {
+    if (openConv) return;
+    let alive = true, timer;
+    const tick = async () => {
+      try { const c = await sbChatConvos(auth.code, meRole, meName); if (alive) setConvos(c); } catch {}
+      if (alive) timer = setTimeout(tick, 6000);
+    };
+    tick();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [openConv, auth.code, meRole, meName]);
+
+  /* Pesan dalam satu percakapan (polling ~3s) */
+  useEffect(() => {
+    if (!openConv) return;
+    let alive = true;
+    lastIdRef.current = 0; setMsgs([]); setReads([]);
+    const mergeIn = (incoming) => setMsgs((p) => {
+      const m = new Map(p.map((x) => [x.id, x]));
+      incoming.forEach((x) => m.set(x.id, x));
+      return [...m.values()].sort((a, b) => a.id - b.id);
+    });
+    const tick = async () => {
+      if (!alive) return;
+      try {
+        const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
+        if (alive && incoming.length) {
+          lastIdRef.current = incoming[incoming.length - 1].id;
+          mergeIn(incoming);
+          sbChatMarkRead(auth.code, meName, meRole, openConv, lastIdRef.current).catch(() => {});
+        }
+        const rd = await sbChatReads(auth.code, meRole, meName, openConv);
+        if (alive) setReads(rd);
+      } catch {}
+      if (alive) pollRef.current = setTimeout(tick, 3000);
+    };
+    tick();
+    return () => { alive = false; clearTimeout(pollRef.current); };
+  }, [openConv, auth.code, meRole, meName]);
+
+  /* reset komposer saat pindah percakapan */
+  useEffect(() => { setText(""); setAtts([]); setMention(null); }, [openConv]);
+  /* auto-scroll hanya di area pesan (bukan seluruh halaman) */
+  useEffect(() => { const el = scrollerRef.current; if (el) el.scrollTop = el.scrollHeight; }, [msgs, openConv]);
+  /* kotak ketik tumbuh otomatis */
+  const autoGrow = () => { const el = taRef.current; if (!el) return; el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; };
+  useEffect(() => { autoGrow(); }, [text]);
+
+  const onText = (e) => {
+    const v = e.target.value; setText(v);
+    const caret = e.target.selectionStart ?? v.length;
+    const mm = v.slice(0, caret).match(/@(\w*)$/);
+    if (mm && openConv === "group") setMention({ query: mm[1].toLowerCase(), start: caret - mm[0].length });
+    else setMention(null);
+  };
+  const pickMention = (name) => {
+    setText((v) => {
+      const start = mention ? mention.start : v.length;
+      const after = v.slice(start + 1 + (mention ? mention.query.length : 0));
+      return v.slice(0, start) + "@" + name + " " + after;
+    });
+    setMention(null);
+    requestAnimationFrame(() => { taRef.current?.focus(); autoGrow(); });
+  };
+
+  const addImages = async (files) => {
+    setBusyAtt(true);
+    try {
+      const out = [];
+      for (const f of files) {
+        try { const data = await resizeImage(f, 1280, 0.62); out.push({ name: f.name || "foto.jpg", type: "image", size: Math.round((data.length * 3) / 4), data }); } catch {}
+      }
+      if (out.length) setAtts((p) => [...p, ...out]);
+    } finally { setBusyAtt(false); }
+  };
+  const addFiles = async (files) => {
+    setBusyAtt(true);
+    try {
+      const out = [];
+      for (const f of files) {
+        if (f.size > CHAT_ATT_MAX) { setErr(`${f.name}: file > 10 MB`); setTimeout(() => setErr(""), 2800); continue; }
+        try { const data = await readFileData(f); out.push({ name: f.name || "file", type: f.type && f.type.startsWith("image/") ? "image" : "file", size: f.size, data }); } catch {}
+      }
+      if (out.length) setAtts((p) => [...p, ...out]);
+    } finally { setBusyAtt(false); }
+  };
+
+  const sendMsg = async () => {
+    const body = text.trim();
+    if ((!body && atts.length === 0) || sending) return;
+    setSending(true);
+    try {
+      // Unggah lampiran ke Storage (simpan path, bukan base64). Gagal -> fallback base64.
+      const toSend = [];
+      for (const a of atts) {
+        if (a.path) { toSend.push({ name: a.name, type: a.type, size: a.size, path: a.path }); continue; }
+        try { const up = await sbUpload(auth.code, "chat", a.name, a.data); toSend.push({ name: a.name, type: a.type, size: up.size || a.size, path: up.path }); }
+        catch { toSend.push({ name: a.name, type: a.type, size: a.size, data: a.data }); }
+      }
+      await sbChatSend(auth.code, meName, meRole, openConv, body, toSend);
+      setText(""); setAtts([]); setMention(null);
+      const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
+      if (incoming.length) {
+        lastIdRef.current = incoming[incoming.length - 1].id;
+        setMsgs((p) => { const m = new Map(p.map((x) => [x.id, x])); incoming.forEach((x) => m.set(x.id, x)); return [...m.values()].sort((a, b) => a.id - b.id); });
+        sbChatMarkRead(auth.code, meName, meRole, openConv, lastIdRef.current).catch(() => {});
+      }
+    } catch (e) { setErr("Gagal mengirim pesan"); setTimeout(() => setErr(""), 2800); }
+    finally { setSending(false); }
+  };
+
+  const startCall = async (kind) => {
+    if (!openConv || sending) return;
+    const slug = (auth.tenantId || "x") + "-" + openConv + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const room = "Kolekta-" + slug.replace(/[^a-zA-Z0-9-]/g, "");
+    const url = "https://meet.jit.si/" + room + "#config.prejoinPageEnabled=false" + (kind === "audio" ? "&config.startWithVideoMuted=true" : "");
+    window.open(url, "_blank", "noopener");
+    setSending(true);
+    try {
+      await sbChatSend(auth.code, meName, meRole, openConv, `[call:${kind}] ${url}`, []);
+      const incoming = await sbChatFetch(auth.code, meRole, meName, openConv, lastIdRef.current, 300);
+      if (incoming.length) {
+        lastIdRef.current = incoming[incoming.length - 1].id;
+        setMsgs((p) => { const m = new Map(p.map((x) => [x.id, x])); incoming.forEach((x) => m.set(x.id, x)); return [...m.values()].sort((a, b) => a.id - b.id); });
+        sbChatMarkRead(auth.code, meName, meRole, openConv, lastIdRef.current).catch(() => {});
+      }
+    } catch { setErr("Gagal memulai panggilan"); setTimeout(() => setErr(""), 2800); }
+    finally { setSending(false); }
+  };
+
+  const readByOthers = (id) => reads.filter((r) => r.member !== meName && r.last_read_id >= id).length;
+  const openAtt = async (att) => {
+    if (att.path && !att.data) {
+      try { const m = await sbSignUrls(auth.code, [att.path]); const u = m[att.path]; if (u) { window.open(u, "_blank", "noopener"); return; } } catch {}
+      setErr("Gagal membuka lampiran"); setTimeout(() => setErr(""), 2500); return;
+    }
+    try { const b = dataUrlToBlob(att.data); const u = URL.createObjectURL(b); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60000); }
+    catch { const a = document.createElement("a"); a.href = att.data; a.download = att.name || "file"; a.click(); }
+  };
+
+  const activeTitle = openConv ? (convList.find((c) => c.conv === openConv)?.title || "Chat") : null;
+
+  return (
+    <div className="chat-panel fixed inset-0 z-[70] flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: T.surface, borderBottom: `1px solid ${T.line}` }}>
+        {openConv ? (
+          <button onClick={() => setOpenConv(null)} className="kpress shrink-0 rounded-lg p-1.5" style={{ color: T.ink }} aria-label="Kembali"><ArrowLeft size={20} /></button>
+        ) : (
+          <button onClick={onClose} className="kpress shrink-0 rounded-lg p-1.5" style={{ color: T.ink }} aria-label="Tutup"><X size={20} /></button>
+        )}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {openConv && (openConv === "group"
+            ? <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ background: T.brand2 + "1A", color: T.brand2 }}><Users size={18} /></span>
+            : <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold text-white" style={{ background: chatColor(activeTitle) }}>{(activeTitle || "?").slice(0, 1).toUpperCase()}</span>)}
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-bold" style={{ color: T.ink }}>{openConv ? activeTitle : "Chat"}</h2>
+            <p className="truncate text-[11px]" style={{ color: T.sub }}>{openConv ? (openConv === "group" ? "Grup tim · semua anggota PT" : "Japri") : (ptName || "")}</p>
+          </div>
+        </div>
+        {openConv && (
+          <div className="flex shrink-0 items-center gap-1">
+            <button onClick={() => startCall("audio")} disabled={sending} className="kpress rounded-full p-2" style={{ color: T.brand2 }} aria-label="Panggilan suara"><Phone size={20} /></button>
+            <button onClick={() => startCall("video")} disabled={sending} className="kpress rounded-full p-2" style={{ color: T.brand2 }} aria-label="Panggilan video"><Video size={20} /></button>
+          </div>
+        )}
+      </div>
+
+      {err && <div className="px-4 py-2 text-center text-xs font-semibold" style={{ background: T.red + "1A", color: T.red }}>{err}</div>}
+
+      {!openConv ? (
+        /* ---- Daftar percakapan ---- */
+        <div className="chat-list flex-1 overflow-y-auto p-3">
+          <div className="mx-auto max-w-2xl space-y-2">
+            {convList.map((c) => {
+              const sm = sumOf(c.conv);
+              return (
+                <button key={c.conv} onClick={() => setOpenConv(c.conv)}
+                  className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                  {c.kind === "group"
+                    ? <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full" style={{ background: T.brand2 + "1A", color: T.brand2 }}><Users size={20} /></span>
+                    : <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-base font-bold text-white" style={{ background: chatColor(c.title) }}>{c.title.slice(0, 1).toUpperCase()}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-semibold" style={{ color: T.ink }}>{c.title}</span>
+                      {sm?.last_at && <span className="ml-auto shrink-0 text-[10px]" style={{ color: T.sub }}>{fmtWaktu(sm.last_at)}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-xs" style={{ color: T.sub }}>
+                        {sm ? `${sm.last_sender === meName ? "Anda: " : ""}${chatPreview(sm.last_body, sm.last_has_att)}` : "Belum ada pesan"}
+                      </span>
+                      {sm?.unread > 0 && <span className="shrink-0 rounded-full px-1.5 text-center text-[11px] font-bold leading-5 text-white" style={{ background: T.brand2, minWidth: 20 }}>{sm.unread}</span>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+            <p className="px-1 pt-2 text-center text-[11px]" style={{ color: T.sub }}>Pesan terisolasi per-PT. Petugas hanya bisa chat grup tim & japri ke atasan.</p>
+          </div>
+        </div>
+      ) : (
+        /* ---- Ruang percakapan ---- */
+        <>
+          <div ref={scrollerRef} className="chat-room flex-1 overflow-y-auto px-3 py-4" style={{ background: T.bg }}>
+            <div className="mx-auto flex max-w-2xl flex-col" style={{ color: T.line }}>
+              {msgs.length === 0 && <p className="py-10 text-center text-xs" style={{ color: T.sub }}>Belum ada pesan. Mulai percakapan.</p>}
+              {msgs.map((m, i) => {
+                const mine = m.sender === meName;
+                const prev = msgs[i - 1], next = msgs[i + 1];
+                const newDay = !prev || !chatSameDay(prev.created_at, m.created_at);
+                const firstOfGroup = newDay || prev.sender !== m.sender;
+                const lastOfGroup = !next || !chatSameDay(next.created_at, m.created_at) || next.sender !== m.sender;
+                const rc = mine ? readByOthers(m.id) : 0;
+                const grp = openConv === "group";
+                const sc = chatColor(m.sender);
+                const call = parseCall(m.body);
+                return (
+                  <div key={m.id}>
+                    {newDay && (
+                      <div className="my-3 flex justify-center">
+                        <span className="rounded-full px-3 py-1 text-[11px] font-semibold shadow-sm" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>{chatDayLabel(m.created_at)}</span>
+                      </div>
+                    )}
+                    <div className="msg-in flex items-end gap-1.5" style={{ marginTop: firstOfGroup ? 8 : 2, justifyContent: mine ? "flex-end" : "flex-start" }}>
+                      {!mine && grp && (lastOfGroup
+                        ? <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: sc }}>{(m.sender || "?").slice(0, 1).toUpperCase()}</span>
+                        : <span className="h-7 w-7 shrink-0" />)}
+                      <div className="max-w-[80%] px-3 py-2 shadow-sm" style={{ background: mine ? T.brand2 : T.surface, color: mine ? "#fff" : T.ink, border: mine ? "none" : `1px solid ${T.line}`, borderRadius: 16, borderBottomRightRadius: mine && lastOfGroup ? 5 : 16, borderTopRightRadius: mine && !firstOfGroup ? 7 : 16, borderBottomLeftRadius: !mine && lastOfGroup ? 5 : 16, borderTopLeftRadius: !mine && !firstOfGroup ? 7 : 16 }}>
+                        {!mine && grp && firstOfGroup && <p className="mb-0.5 text-[11px] font-bold" style={{ color: sc }}>{m.sender}{m.sender_role === "atasan" ? " · Atasan" : ""}</p>}
+                        {(m.attachments || []).length > 0 && (
+                          <div className="mb-1 flex flex-col gap-1.5">
+                            {m.attachments.map((att, idx) => att.type === "image" ? (
+                              <StoredImage key={idx} code={auth.code} att={att} onClick={() => openAtt(att)} className="max-h-52 w-auto cursor-pointer rounded-lg object-cover" style={{ maxWidth: 240 }} />
+                            ) : (
+                              <button key={idx} onClick={() => openAtt(att)} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left" style={{ background: mine ? "rgba(255,255,255,.18)" : T.bg, border: `1px solid ${mine ? "rgba(255,255,255,.25)" : T.line}` }}>
+                                <FileText size={16} style={{ color: mine ? "#fff" : T.brand2 }} />
+                                <span className="min-w-0 flex-1 truncate text-xs font-medium">{att.name}</span>
+                                <span className="shrink-0 text-[10px] opacity-80">{humanSize(att.size || 0)}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {call ? (
+                          <button onClick={() => window.open(call.url, "_blank", "noopener")} className="kpress flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left" style={{ background: mine ? "rgba(255,255,255,.18)" : T.bg, border: `1px solid ${mine ? "rgba(255,255,255,.25)" : T.line}` }}>
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full" style={{ background: mine ? "rgba(255,255,255,.22)" : T.brand2 + "1A", color: mine ? "#fff" : T.brand2 }}>{call.kind === "video" ? <Video size={18} /> : <Phone size={18} />}</span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold">{call.kind === "video" ? "Panggilan video" : "Panggilan suara"}</span>
+                              <span className="block text-[11px]" style={{ color: mine ? "rgba(255,255,255,.8)" : T.sub }}>Ketuk untuk gabung</span>
+                            </span>
+                          </button>
+                        ) : (m.body && <p className="whitespace-pre-wrap break-words text-sm leading-snug">{renderChatBody(m.body, allNames, mine, T)}</p>)}
+                        <div className="mt-0.5 flex items-center justify-end gap-1">
+                          <span className="text-[10px]" style={{ color: mine ? "rgba(255,255,255,.75)" : T.sub }}>{fmtWaktu(m.created_at)}</span>
+                          {mine && (rc > 0
+                            ? <span className="inline-flex items-center gap-0.5 text-[10px]" style={{ color: "#bfe3ff" }}><CheckCheck size={13} />{grp && rc > 1 ? rc : ""}</span>
+                            : <Check size={13} style={{ color: "rgba(255,255,255,.7)" }} />)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Komposer */}
+          <div className="px-3 pt-2.5" style={{ background: T.surface, borderTop: `1px solid ${T.line}`, paddingBottom: "calc(0.625rem + env(safe-area-inset-bottom))" }}>
+            <div className="relative mx-auto max-w-2xl">
+              {mention && mentionList.length > 0 && (
+                <div className="mention-pop absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl shadow-lg" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                  <p className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Sebut anggota</p>
+                  {mentionList.map((n) => (
+                    <button key={n} onClick={() => pickMention(n)} className="kpress flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-black/5">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: chatColor(n) }}>{n.slice(0, 1).toUpperCase()}</span>
+                      <span className="truncate text-sm font-medium" style={{ color: T.ink }}>{n}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {atts.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {atts.map((a, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }}>
+                      {a.type === "image" ? <ImageIcon size={13} style={{ color: T.brand2 }} /> : <FileText size={13} style={{ color: T.brand2 }} />}
+                      <span className="max-w-[120px] truncate">{a.name}</span>
+                      <button onClick={() => setAtts((p) => p.filter((_, i) => i !== idx))} style={{ color: T.red }}><X size={13} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-end gap-2">
+                <input ref={imgInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { addImages([...e.target.files]); e.target.value = ""; }} />
+                <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { addFiles([...e.target.files]); e.target.value = ""; }} />
+                <button onClick={() => imgInputRef.current?.click()} disabled={busyAtt} className="kpress shrink-0 rounded-full p-2" style={{ color: T.brand2 }} aria-label="Kirim foto"><Camera size={20} /></button>
+                <button onClick={() => fileInputRef.current?.click()} disabled={busyAtt} className="kpress shrink-0 rounded-full p-2" style={{ color: T.brand2 }} aria-label="Lampirkan file"><Paperclip size={20} /></button>
+                <textarea ref={taRef} value={text} onChange={onText} rows={1} placeholder="Tulis pesan… (sebut dengan @)"
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape" && mention) { setMention(null); return; }
+                    if (mention && mentionList.length > 0 && (e.key === "Enter" || e.key === "Tab")) { e.preventDefault(); pickMention(mentionList[0]); return; }
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+                  }}
+                  className="max-h-28 min-h-[40px] min-w-0 flex-1 resize-none rounded-2xl px-3 py-2 text-sm outline-none" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }} />
+                <button onClick={sendMsg} disabled={sending || busyAtt || (!text.trim() && atts.length === 0)} className="kpress grid h-10 w-10 shrink-0 place-items-center rounded-full" style={{ background: T.brand2, color: "#fff", opacity: sending || (!text.trim() && atts.length === 0) ? 0.5 : 1 }} aria-label="Kirim"><Send size={18} /></button>
+              </div>
+              {busyAtt && <p className="mt-1 text-[11px]" style={{ color: T.sub }}>Memproses lampiran…</p>}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function KolektaApp() {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("hari");
@@ -1273,6 +1820,7 @@ export default function KolektaApp() {
   const [drawer, setDrawer] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
+  const [worklogView, setWorklogView] = useState("list");
   const [showFilter, setShowFilter] = useState(false);
   const [fStatus, setFStatus] = useState("all");
   const [fTipe, setFTipe] = useState("all");
@@ -1281,6 +1829,8 @@ export default function KolektaApp() {
   const [sortBy, setSortBy] = useState("overdue");
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
+  const [showChat, setShowChat] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
   const loadedRef = useRef(false);
   const pushTimer = useRef(null);
 
@@ -1326,6 +1876,33 @@ export default function KolektaApp() {
     }, 1200);
   }, [data, auth]);
 
+  /* Antrian unggah latar belakang: jalankan processor & tukar ref lokal
+     (local:<id>) menjadi path bucket begitu sebuah file selesai diunggah.
+     Dengan begitu DB hanya menyimpan path final, bukan base64. */
+  useEffect(() => {
+    uploadQueue.setUploader(sbUpload);
+    uploadQueue.start();
+    const unsub = uploadQueue.subscribe(({ id, status, path }) => {
+      if (status !== "success" || !path) return;
+      setData((d) => {
+        if (!d) return d;
+        const invoices = (d.invoices || []).map((inv) => {
+          const akt = (inv.aktivitas || []).map((a) =>
+            a && a.foto === `local:${id}` ? { ...a, foto: path } : a);
+          return akt === inv.aktivitas ? inv : { ...inv, aktivitas: akt };
+        });
+        const worklog = (d.worklog || []).map((w) => {
+          if (!(w.bukti || []).some((b) => b && b.localId === id)) return w;
+          const bukti = w.bukti.map((b) =>
+            b && b.localId === id ? { name: b.name, type: b.type, path } : b);
+          return { ...w, bukti };
+        });
+        return { ...d, invoices, worklog };
+      });
+    });
+    return unsub;
+  }, []);
+
   const doLogin = async (code) => {
     const info = await sbLogin(code);
     if (!info) throw new Error("Kode tidak dikenal");
@@ -1348,6 +1925,23 @@ export default function KolektaApp() {
   };
 
   const s = data?.settings;
+
+  /* Identitas untuk chat */
+  const meRole = auth?.role || "petugas";
+  const meName = auth ? (auth.memberName || (meRole === "atasan" ? "Atasan" : (s?.petugasAktif || "Petugas"))) : "";
+  const chatPetugas = useMemo(() => [...(s?.petugas || [])].filter(Boolean), [s]);
+
+  /* Polling lencana belum-dibaca chat (saat panel tertutup) */
+  useEffect(() => {
+    if (!auth || !meName || showChat) return;
+    let alive = true, timer;
+    const tick = async () => {
+      try { const c = await sbChatConvos(auth.code, meRole, meName); if (alive) setChatUnread(c.reduce((a, x) => a + (x.unread || 0), 0)); } catch {}
+      if (alive) timer = setTimeout(tick, 12000);
+    };
+    tick();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [auth, meName, meRole, showChat]);
 
   const allEnriched = useMemo(() => (data ? data.invoices.map((i) => enrich(i, s)) : []), [data, s]);
   const enriched = useMemo(
@@ -1525,7 +2119,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   const remove = (id) => setData((d) => ({ ...d, invoices: d.invoices.filter((i) => i.id !== id) }));
   const addInvoice = (inv) => {
     audit("tambah", `${inv.noInvoice} · ${inv.customer}`, null, { customer: inv.customer, noInvoice: inv.noInvoice, nominal: inv.nominal, status: inv.status });
-    setData((d) => ({ ...d, invoices: [{ ...inv, id: uid(), aktivitas: [], lastFollowUp: null, janjiBayar: null, pembayaran: [], eskalasi: [], dibuat: today0().toISOString().slice(0, 10) }, ...d.invoices] }));
+    setData((d) => ({ ...d, invoices: [{ ...inv, id: uid(), aktivitas: [], lastFollowUp: null, janjiBayar: null, janjiNominal: null, pembayaran: [], eskalasi: [], dibuat: today0().toISOString().slice(0, 10) }, ...d.invoices] }));
   };
   const addMany = (arr) => {
     audit("import", `${arr.length} tagihan`, null, { count: arr.length });
@@ -1533,6 +2127,8 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   };
   const addWorklog = (entry) => setData((d) => ({ ...d, worklog: [{ ...entry, id: uid(), ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString() }, ...(d.worklog || [])] }));
   const removeWorklog = (id) => setData((d) => ({ ...d, worklog: (d.worklog || []).filter((w) => w.id !== id) }));
+  const openLapor = () => { setWorklogView("pick"); setShowWorklog(true); };
+  const openRiwayatKerja = () => { setWorklogView("list"); setShowWorklog(true); };
 
   /* Riwayat kerja: petugas hanya melihat miliknya sendiri (tidak bisa lihat hasil petugas lain). */
   const worklogScoped = useMemo(() => {
@@ -1673,7 +2269,17 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 @keyframes kolektaSlide{from{transform:translateX(-100%)}to{transform:none}}
 .drawer-ov{animation:kolektaOv .2s ease}
 .drawer-pn{animation:kolektaSlide .26s cubic-bezier(.2,.7,.2,1)}
-@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim{animation:none}.kpress:active,.chip:active{transform:none}}
+@keyframes kolektaSlideR{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
+.lapor-step{animation:kolektaSlideR .3s cubic-bezier(.22,.61,.36,1)}
+@keyframes kolektaUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.chat-panel{animation:kolektaUp .26s cubic-bezier(.22,.61,.36,1)}
+.chat-room{animation:kolektaSlideR .28s cubic-bezier(.22,.61,.36,1)}
+.chat-list{animation:kolektaFade .24s cubic-bezier(.22,.61,.36,1)}
+@keyframes kolektaPop{from{opacity:0;transform:translateY(7px) scale(.97)}to{opacity:1;transform:none}}
+.msg-in{animation:kolektaPop .22s cubic-bezier(.22,.61,.36,1)}
+.mention-pop{animation:kolektaExpand .16s cubic-bezier(.22,.61,.36,1);transform-origin:bottom}
+.chat-bg{background-image:radial-gradient(currentColor 1px,transparent 1px);background-size:22px 22px}
+@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step,.chat-panel,.chat-room,.chat-list,.msg-in,.mention-pop{animation:none}.kpress:active,.chip:active{transform:none}}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
@@ -1690,7 +2296,16 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             {navItems.map((n) => (
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
-            <button onClick={() => setShowWorklog(true)}
+            <button onClick={openLapor}
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ color: T.brand2 }}>
+              <ClipboardList size={18} /><span>Lapor</span>
+            </button>
+            <button onClick={() => setShowChat(true)}
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
+              <MessageCircle size={18} /><span>Chat</span>
+              {chatUnread > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>}
+            </button>
+            <button onClick={openRiwayatKerja}
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
               <History size={18} /><span>Riwayat kerja</span>
               {worklogTodayN > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>}
@@ -1713,18 +2328,26 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         <div className="min-w-0 flex-1">
           <div className="mx-auto max-w-3xl px-3 pb-24 sm:px-5">
             {/* Header (HP) */}
-            <header className="flex items-center gap-3 pt-5 lg:hidden">
-          <button onClick={() => setDrawer(true)} className="flex flex-1 items-center gap-3 text-left">
-            <Logo size={40} />
+            <header className="flex items-center gap-2 pt-5 lg:hidden">
+          <button onClick={() => setDrawer(true)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+            <span className="shrink-0"><Logo size={40} /></span>
             <div className="min-w-0">
-              <div className="flex items-baseline gap-2">
-                <h1 className="text-xl font-bold tracking-tight" style={{ color: T.brand }}>Kolekta</h1>
-                <span className="text-xs" style={{ color: T.brass }}>collection control</span>
+              <div className="flex min-w-0 items-baseline gap-2">
+                <h1 className="shrink-0 text-xl font-bold tracking-tight" style={{ color: T.brand }}>Kolekta</h1>
+                <span className="truncate text-xs" style={{ color: T.brass }}>collection control</span>
               </div>
               <p className="truncate text-xs" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
             </div>
           </button>
-          <button onClick={() => setShowWorklog(true)} aria-label="Riwayat kerja"
+          <button onClick={() => setShowChat(true)} aria-label="Chat"
+            className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
+            <MessageCircle size={20} />
+            {chatUnread > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[11px] font-bold leading-[18px]"
+                style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>
+            )}
+          </button>
+          <button onClick={openRiwayatKerja} aria-label="Riwayat kerja"
             className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
             <History size={20} />
             {worklogTodayN > 0 && (
@@ -1753,6 +2376,10 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {/* ---------- HARI INI ---------- */}
         {tab === "hari" && (
           <div className="mt-4 space-y-4">
+            <button onClick={openLapor}
+              className="kpress flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-sm" style={{ background: T.brand }}>
+              <ClipboardList size={18} /> Lapor pekerjaan &amp; lapangan
+            </button>
             {s.peran === "petugas" && (() => {
               const me = tim.find((t) => t.nama === s.petugasAktif);
               if (!me || !me.target) return null;
@@ -1841,7 +2468,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                       <button key={i.id} onClick={() => { setTab("tagihan"); setOpenId(i.id); }} className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-black/5">
                         <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={lewat ? { background: T.red + "1A", color: T.red } : { background: T.green + "1A", color: T.green }}>{lewat ? "lewat" : "akan datang"}</span>
                         <span className="min-w-0 flex-1 truncate text-sm">{i.customer}</span>
-                        <span className="shrink-0 whitespace-nowrap text-xs" style={{ color: T.sub }}>{fmtTgl(i.janjiBayar).split(" ").slice(0, 2).join(" ")}</span>
+                        <span className="shrink-0 whitespace-nowrap text-xs" style={{ color: T.sub }}>{fmtTgl(i.janjiBayar).split(" ").slice(0, 2).join(" ")}{i.janjiNominal ? ` \u00B7 ${rp(i.janjiNominal)}` : ""}</span>
                       </button>
                     );
                   })}
@@ -2179,7 +2806,16 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                   </button>
                 );
               })}
-              <button onClick={() => { setShowWorklog(true); setDrawer(false); }}
+              <button onClick={() => { openLapor(); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ color: T.brand2 }}>
+                <ClipboardList size={18} /><span>Lapor</span>
+              </button>
+              <button onClick={() => { setShowChat(true); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <MessageCircle size={18} /><span>Chat</span>
+                {chatUnread > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>}
+              </button>
+              <button onClick={() => { openRiwayatKerja(); setDrawer(false); }}
                 className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
                 <History size={18} /><span>Riwayat kerja</span>
                 {worklogTodayN > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>}
@@ -2205,12 +2841,19 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           style={{ background: T.toast }}>{toast}</div>
       )}
 
+      {showChat && auth && (
+        <ChatPanel T={T} auth={auth} meName={meName} meRole={meRole}
+          ptName={auth.name || s?.perusahaan || ""} petugasNames={chatPetugas}
+          onClose={() => setShowChat(false)} onUnread={setChatUnread} />
+      )}
+
       <Kalkulator open={showCalc} onClose={() => setShowCalc(false)} />
       {showWorklog && (
         <WorklogModal onClose={() => setShowWorklog(false)}
           role={s.peran} petugasAktif={s.petugasAktif} petugasList={s.petugas || []}
           entries={worklogScoped} invoices={enriched}
-          onAdd={addWorklog} onRemove={removeWorklog} flash={flash} />
+          onAdd={addWorklog} onRemove={removeWorklog} flash={flash}
+          patch={patch} audit={audit} copy={copy} s={s} initialView={worklogView} />
       )}
     </div>
   );
@@ -2219,29 +2862,44 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 /* ---------- Riwayat Kerja Petugas (modal) ----------
    - Petugas: lapor pekerjaan harian → pilih PT, ketik yang sudah dilakukan, lampirkan bukti (PDF MOM / screenshot).
    - Atasan: lihat hasil kerja tiap petugas per hari. Petugas tidak bisa melihat hasil petugas lain. */
-function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoices, onAdd, onRemove, flash }) {
-  const [view, setView] = useState("list"); // list | add | detail
+function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoices, onAdd, onRemove, flash, patch, audit, copy, s, initialView }) {
+  const [view, setView] = useState(initialView || "list"); // list | pick | form | detail
   const [sel, setSel] = useState(null);
-  const [day, setDay] = useState(today0().toISOString().slice(0, 10));
+  const [formInv, setFormInv] = useState(null);
+  const [pickQ, setPickQ] = useState("");
+  const todayISO = today0().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(todayISO);
+  const [to, setTo] = useState(todayISO);
   const [who, setWho] = useState("all"); // atasan: "all" | nama petugas
   const isPetugas = role === "petugas";
+  const pickList = useMemo(() => {
+    const q = pickQ.trim().toLowerCase();
+    return invoices.filter((x) => !q || (x.customer || "").toLowerCase().includes(q) || (x.noInvoice || "").toLowerCase().includes(q));
+  }, [invoices, pickQ]);
 
-  const shiftDay = (n) => { const d = new Date(day + "T00:00:00"); d.setDate(d.getDate() + n); setDay(d.toISOString().slice(0, 10)); };
-  const dayEntries = useMemo(
+  const lo = from <= to ? from : to;
+  const hi = from <= to ? to : from;
+  const setRange = (f, t) => { setFrom(f); setTo(t); };
+  const shiftRange = (n) => { const d = new Date(); d.setDate(d.getDate() - n + 1); setRange(d.toISOString().slice(0, 10), todayISO); };
+  const rangeEntries = useMemo(
     () => entries
-      .filter((e) => e.ts === day && (isPetugas || who === "all" || e.petugas === who))
+      .filter((e) => e.ts >= lo && e.ts <= hi && (isPetugas || who === "all" || e.petugas === who))
       .sort((a, b) => new Date(b.waktu || 0) - new Date(a.waktu || 0)),
-    [entries, day, who, isPetugas]
+    [entries, lo, hi, who, isPetugas]
   );
   const grouped = useMemo(() => {
     const m = new Map();
-    dayEntries.forEach((e) => { const k = e.petugas || "Tanpa nama"; if (!m.has(k)) m.set(k, []); m.get(k).push(e); });
+    rangeEntries.forEach((e) => { const k = e.petugas || "Tanpa nama"; if (!m.has(k)) m.set(k, []); m.get(k).push(e); });
     return [...m.entries()];
-  }, [dayEntries]);
-  const isToday = day === today0().toISOString().slice(0, 10);
+  }, [rangeEntries]);
+  const isToday = lo === todayISO && hi === todayISO;
 
   const openDetail = (e) => { setSel(e); setView("detail"); };
-  const back = () => { setSel(null); setView("list"); };
+  const chooseInv = (inv) => { setFormInv(inv); setView("form"); };
+  const back = () => {
+    if (view === "form") { setFormInv(null); setView("pick"); }
+    else { setSel(null); setFormInv(null); setView("list"); }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
@@ -2254,13 +2912,14 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
           <div className="flex items-center gap-2">
             <History size={18} style={{ color: T.brand2 }} />
             <h2 className="truncate text-base font-bold" style={{ color: T.ink }}>
-              {view === "add" ? "Lapor pekerjaan" : view === "detail" ? "Detail pekerjaan" : isPetugas ? "Riwayat kerja saya" : "Riwayat kerja petugas"}
+              {view === "pick" ? "Pilih PT / debitur" : view === "form" ? "Lapor pekerjaan & lapangan" : view === "detail" ? "Detail pekerjaan" : isPetugas ? "Riwayat kerja saya" : "Riwayat kerja petugas"}
             </h2>
           </div>
           {view === "list" && <p className="text-[11px]" style={{ color: T.sub }}>{isPetugas ? "Hanya pekerjaan Anda yang tampil." : "Hasil kerja seluruh petugas."}</p>}
+          {view === "form" && formInv && <p className="truncate text-[11px]" style={{ color: T.sub }}>{formInv.customer}{formInv.noInvoice ? ` \u00B7 ${formInv.noInvoice}` : ""}</p>}
         </div>
-        {view === "list" && isPetugas && (
-          <button onClick={() => setView("add")} className="kpress flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>
+        {view === "list" && (
+          <button onClick={() => { setPickQ(""); setView("pick"); }} className="kpress flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>
             <Plus size={16} /> Lapor
           </button>
         )}
@@ -2268,10 +2927,38 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-4 py-4">
-          {view === "add" && (
-            <WorklogForm invoices={invoices} petugas={petugasAktif}
-              onCancel={back} flash={flash}
-              onSave={(entry) => { onAdd(entry); setDay(today0().toISOString().slice(0, 10)); back(); flash("Pekerjaan dilaporkan"); }} />
+          {view === "pick" && (
+            <div className="lapor-step space-y-3">
+              <input value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="Cari PT / no. invoice…" className={inputCls} style={inputSt} />
+              {pickList.length === 0 ? (
+                <div className="rounded-xl p-8 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+                  <Building2 size={26} className="mx-auto mb-2" style={{ color: T.line }} />
+                  <p className="text-sm font-medium" style={{ color: T.sub }}>{invoices.length === 0 ? "Belum ada tagihan yang ditugaskan ke Anda." : "Tidak ada PT yang cocok."}</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {pickList.map((x) => (
+                    <button key={x.id} onClick={() => chooseInv(x)} className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: T.brand2 + "1A" }}><Building2 size={16} style={{ color: T.brand2 }} /></span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold" style={{ color: T.ink }}>{x.customer}</p>
+                        <p className="truncate text-[11px]" style={{ color: T.sub }}>{x.noInvoice}{x.assignedTo ? ` \u00B7 ${x.assignedTo}` : ""} \u00B7 {rp(x.total)}</p>
+                      </div>
+                      <ChevronRight size={16} className="shrink-0" style={{ color: T.sub }} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {view === "form" && formInv && (
+            <div className="lapor-step">
+              <LaporForm invoice={formInv} s={s} petugas={petugasAktif}
+                flash={flash} copy={copy} patch={patch} audit={audit} onSaveWorklog={onAdd}
+                onCancel={() => { setFormInv(null); setView("pick"); }}
+                onDone={() => { setRange(todayISO, todayISO); setFormInv(null); setView("list"); }} />
+            </div>
           )}
 
           {view === "detail" && sel && (
@@ -2281,19 +2968,21 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
 
           {view === "list" && (
             <>
-              {/* Navigasi hari */}
-              <div className="mb-4 flex items-center gap-2 rounded-xl p-1.5" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-                <button onClick={() => shiftDay(-1)} aria-label="Hari sebelumnya" className="kpress rounded-lg p-1.5" style={{ color: T.sub }}><ChevronLeft size={18} /></button>
-                <div className="flex flex-1 items-center justify-center gap-2">
-                  <CalendarDays size={14} style={{ color: T.brand2 }} />
-                  <span className="text-sm font-semibold" style={{ color: T.ink }}>{isToday ? "Hari ini" : fmtTgl(day)}</span>
+              {/* Rentang tanggal */}
+              <div className="mb-4 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <div className="flex items-center gap-2">
+                  <CalendarDays size={15} className="shrink-0" style={{ color: T.brand2 }} />
+                  <input type="date" value={from} max={todayISO} onChange={(e) => e.target.value && setFrom(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink, colorScheme: "light" }} />
+                  <span className="shrink-0 text-[11px] font-semibold" style={{ color: T.sub }}>s/d</span>
+                  <input type="date" value={to} max={todayISO} onChange={(e) => e.target.value && setTo(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink, colorScheme: "light" }} />
                 </div>
-                <label className="kpress relative cursor-pointer rounded-lg px-2 py-1 text-[11px] font-semibold" style={{ color: T.brand2 }}>
-                  Pilih
-                  <input type="date" value={day} max={today0().toISOString().slice(0, 10)} onChange={(e) => e.target.value && setDay(e.target.value)}
-                    className="absolute inset-0 cursor-pointer opacity-0" style={{ colorScheme: "light" }} />
-                </label>
-                <button onClick={() => shiftDay(1)} disabled={isToday} aria-label="Hari berikutnya" className="kpress rounded-lg p-1.5" style={{ color: isToday ? T.line : T.sub }}><ChevronRight size={18} /></button>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {[["Hari ini", 1], ["7 hari", 7], ["30 hari", 30]].map(([lbl, n]) => (
+                    <button key={lbl} onClick={() => shiftRange(n)} className="kpress rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}>{lbl}</button>
+                  ))}
+                </div>
               </div>
 
               {/* Filter per petugas (atasan) */}
@@ -2309,15 +2998,15 @@ function WorklogModal({ onClose, role, petugasAktif, petugasList, entries, invoi
                 </div>
               )}
 
-              {dayEntries.length === 0 ? (
+              {rangeEntries.length === 0 ? (
                 <div className="rounded-xl p-8 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
                   <History size={28} className="mx-auto mb-2" style={{ color: T.line }} />
-                  <p className="text-sm font-medium" style={{ color: T.sub }}>Belum ada laporan pekerjaan untuk hari ini.</p>
+                  <p className="text-sm font-medium" style={{ color: T.sub }}>{isToday ? "Belum ada laporan pekerjaan untuk hari ini." : "Tidak ada laporan pada rentang tanggal ini."}</p>
                   {isPetugas && <p className="mt-1 text-xs" style={{ color: T.sub }}>Tekan <b>Lapor</b> untuk mencatat apa yang sudah Anda lakukan.</p>}
                 </div>
               ) : isPetugas ? (
                 <div className="space-y-2">
-                  {dayEntries.map((e) => <WorklogRow key={e.id} entry={e} onClick={() => openDetail(e)} />)}
+                  {rangeEntries.map((e) => <WorklogRow key={e.id} entry={e} onClick={() => openDetail(e)} />)}
                 </div>
               ) : (
                 <div className="space-y-5">
@@ -2386,6 +3075,13 @@ function WorklogDetail({ entry, canDelete, onDelete }) {
         <p className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: T.ink }}>{entry.deskripsi}</p>
       </div>
 
+      {entry.tindakLanjut && (
+        <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Tindak lanjut berikutnya</p>
+          <p className="inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: T.brand2 }}><CalendarClock size={15} /> {fmtTgl(entry.tindakLanjut)}</p>
+        </div>
+      )}
+
       <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Bukti ({bukti.length})</p>
         {bukti.length === 0 ? (
@@ -2395,9 +3091,12 @@ function WorklogDetail({ entry, canDelete, onDelete }) {
             {bukti.map((b, idx) => (
               <button key={idx} type="button" onClick={() => openBukti(b)} title={`Buka ${b.name || "bukti"}`}
                 className="kpress flex flex-col items-center gap-1 rounded-lg p-2 text-center" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                {b.type === "image"
-                  ? <img src={b.data} alt={b.name} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
-                  : <span className="flex h-20 w-full items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={28} style={{ color: T.red }} /></span>}
+                <span className="relative h-20 w-full">
+                  {b.type === "image"
+                    ? <StoredImage code={_activeCode} att={buktiAtt(b)} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                    : <span className="flex h-20 w-full items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={28} style={{ color: T.red }} /></span>}
+                  <UploadBadge localId={b.localId} />
+                </span>
                 <span className="w-full truncate text-[10px] font-medium" style={{ color: T.sub }}>{b.name || (b.type === "image" ? "Gambar" : "PDF")}</span>
               </button>
             ))}
@@ -2422,20 +3121,57 @@ function WorklogDetail({ entry, canDelete, onDelete }) {
   );
 }
 
-function WorklogForm({ invoices, petugas, onSave, onCancel, flash }) {
-  const [invId, setInvId] = useState("");
-  const [deskripsi, setDeskripsi] = useState("");
+function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWorklog, onCancel, onDone }) {
+  const ent = `${i.noInvoice} \u00B7 ${i.customer}`;
+  const [hasil, setHasil] = useState("lain");
+  const [catatan, setCatatan] = useState("");
+  const [tindakLanjut, setTindakLanjut] = useState(i.tindakLanjut || "");
+  const [foto, setFoto] = useState(null);
+  const [lok, setLok] = useState(null);
+  const [busyLoc, setBusyLoc] = useState(false);
   const [bukti, setBukti] = useState([]);
-  const [busy, setBusy] = useState(false);
+  const [busyFiles, setBusyFiles] = useState(false);
+  const fotoRef = useRef(null);
   const fileRef = useRef(null);
+  const [showDoc, setShowDoc] = useState(false);
+  const [docType, setDocType] = useState("pernyataan");
+  const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
+  const [dsig, setDsig] = useState(null);
+  const [dsig2, setDsig2] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
-  const onPick = async (e) => {
+  const onPickFoto = async (e) => {
+    const file = e.target.files?.[0]; e.target.value = "";
+    if (!file) return;
+    try {
+      flash("Memproses foto…");
+      const base = await resizeImage(file, 960, 0.72);
+      let loc = lok;
+      if (!loc) { try { loc = await getLoc(); setLok(loc); } catch {} }
+      let address = "";
+      if (loc) { try { address = (await reverseGeocode(loc.lat, loc.lng)) || ""; } catch {} }
+      const waktu = new Intl.DateTimeFormat("id-ID", { dateStyle: "long", timeStyle: "short" }).format(new Date());
+      const stamped = (loc || address)
+        ? await stampImage(base, { lat: loc?.lat, lng: loc?.lng, acc: loc?.acc, address, waktu, brand: s.perusahaan?.trim() || "" })
+        : base;
+      setFoto(stamped);
+      flash(loc ? "Foto + lokasi tercap" : "Foto siap (lokasi tak tersedia)");
+    } catch { flash("Gagal memproses foto"); }
+  };
+  const grabLoc = async () => {
+    setBusyLoc(true);
+    try { setLok(await getLoc()); flash("Lokasi diambil"); }
+    catch { flash("Lokasi tidak tersedia / izin ditolak"); }
+    setBusyLoc(false);
+  };
+  const onPickFiles = async (e) => {
     const files = [...(e.target.files || [])]; e.target.value = "";
     if (!files.length) return;
-    setBusy(true);
+    setBusyFiles(true);
     const out = [];
     for (const f of files) {
-      if (f.size > 8 * 1048576) { flash(`${f.name} terlalu besar (maks 8 MB)`); continue; }
+      if (f.size > 10 * 1048576) { flash(`${f.name} terlalu besar (maks 10 MB)`); continue; }
       try {
         if (f.type.startsWith("image/")) {
           const data = await resizeImage(f, 1280, 0.7);
@@ -2447,47 +3183,101 @@ function WorklogForm({ invoices, petugas, onSave, onCancel, flash }) {
       } catch { flash(`Gagal membaca ${f.name}`); }
     }
     setBukti((prev) => [...prev, ...out]);
-    setBusy(false);
+    setBusyFiles(false);
   };
-
-  const save = () => {
-    if (!invId) { flash("Pilih PT / debitur dulu"); return; }
-    if (!deskripsi.trim()) { flash("Tulis dulu apa yang sudah dilakukan"); return; }
-    const inv = invoices.find((x) => x.id === invId);
-    onSave({
-      petugas: petugas || "",
-      invoiceId: invId,
-      customer: inv?.customer || "",
-      noInvoice: inv?.noInvoice || "",
-      deskripsi: deskripsi.trim(),
-      bukti,
-    });
+  const docMeta = (jenis) =>
+    jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
+    : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
+    : { gen: suratPernyataan, label: "Surat Pernyataan" };
+  const sigMapFor = (jenis, a, b) =>
+    jenis === "mom" ? { SIGN1: a, SIGN2: b }
+    : jenis === "bast" ? { SIGN1: a }
+    : { SIGN: a };
+  const createDoc = () => {
+    const f = { jumlah: Number((dForm.jumlah + "").replace(/[^0-9]/g, "")) || i.total, tgl: dForm.tgl, kondisi: dForm.kondisi, pembahasan: dForm.pembahasan, kesepakatan: dForm.kesepakatan };
+    const { gen, label } = docMeta(docType);
+    const text = gen(i, s, f);
+    const ok = printDoc(label, text, sigMapFor(docType, dsig, dsig2));
+    patch(i.id, (x) => ({ ...x, dokumen: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), jenis: docType, sig: dsig || null, sig2: dsig2 || null, jumlah: f.jumlah, tgl: f.tgl, kondisi: f.kondisi, pembahasan: f.pembahasan, kesepakatan: f.kesepakatan }, ...(x.dokumen || [])] }));
+    if (audit) audit("dokumen", ent, null, { jenis: label, jumlah: f.jumlah });
+    if (!ok) { copy(docToPlain(text)); flash("Popup diblokir — teks disalin"); } else flash(label + " dibuat");
+    setShowDoc(false); setDsig(null); setDsig2(null); setDForm({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
+  };
+  const save = async () => {
+    if (savingRef.current) return;            // cegah simpan ganda saat unggah masih jalan
+    if (!catatan.trim()) { flash("Tulis dulu apa yang sudah dilakukan / hasilnya"); return; }
+    savingRef.current = true; setSaving(true);
+    try {
+      const h = HASIL[hasil];
+      const tl = tindakLanjut ? `\n\u2192 Tindak lanjut berikutnya: ${fmtTgl(tindakLanjut)}` : "";
+      const body = `[${h.label}]${catatan.trim() ? " " + catatan.trim() : ""}${tl}`;
+      // Antrekan foto & bukti ke upload queue (IndexedDB). Laporan TIDAK menunggu
+      // upload selesai; uploader latar belakang menukar ref lokal -> path nanti.
+      let fotoRef = null, fotoId = null;
+      if (foto) { fotoId = await uploadQueue.enqueue({ code: _activeCode, scope: "lapor", name: "foto-lapangan.jpg", dataUrl: foto }); fotoRef = `local:${fotoId}`; }
+      const buktiUp = [];
+      for (const b of bukti) {
+        if (b.path) { buktiUp.push(b); continue; }
+        const id = await uploadQueue.enqueue({ code: _activeCode, scope: "lapor", name: b.name || "bukti", dataUrl: b.data });
+        buktiUp.push({ name: b.name, type: b.type, localId: id });
+      }
+      patch(i.id, (x) => ({
+        ...x,
+        status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
+        lastFollowUp: today0().toISOString().slice(0, 10),
+        tindakLanjut: tindakLanjut || x.tindakLanjut || "",
+        aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
+      }));
+      const fotoBukti = fotoId ? [{ name: "Foto lapangan", type: "image", localId: fotoId }] : [];
+      const buktiAll = [...fotoBukti, ...buktiUp];
+      onSaveWorklog({ petugas: petugas || "", invoiceId: i.id, customer: i.customer || "", noInvoice: i.noInvoice || "", deskripsi: catatan.trim(), hasil, tindakLanjut: tindakLanjut || "", bukti: buktiAll });
+      flash("Laporan tersimpan \u2014 bukti diunggah di latar belakang");
+      onDone();
+    } catch (err) {
+      savingRef.current = false; setSaving(false);   // reset hanya bila gagal; sukses langsung menutup form
+      flash("Gagal menyimpan laporan \u2014 coba lagi");
+    }
   };
 
   return (
     <div className="space-y-3">
       <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-        <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Untuk PT / debitur</p>
-        <select value={invId} onChange={(e) => setInvId(e.target.value)} className={inputCls} style={inputSt}>
-          <option value="">— pilih PT / debitur —</option>
-          {invoices.map((i) => <option key={i.id} value={i.id}>{i.customer}{i.noInvoice ? ` · ${i.noInvoice}` : ""}</option>)}
+        <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Hasil kontak / kunjungan</p>
+        <select value={hasil} onChange={(e) => setHasil(e.target.value)} className={inputCls} style={inputSt}>
+          {HASIL_ORDER.map((k) => <option key={k} value={k}>{HASIL[k].label}</option>)}
         </select>
-        {invoices.length === 0 && <p className="mt-1 text-[11px]" style={{ color: T.red }}>Belum ada tagihan yang ditugaskan ke Anda.</p>}
       </div>
 
       <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Apa yang sudah Anda lakukan? <span style={{ color: T.red }}>*</span></p>
-        <textarea value={deskripsi} onChange={(e) => setDeskripsi(e.target.value)} rows={4}
-          placeholder="Contoh: Kunjungan ke kantor PT, bertemu bagian keuangan. Hasil MOM: janji bayar 50% minggu depan, sisanya akhir bulan."
+        <textarea value={catatan} onChange={(e) => setCatatan(e.target.value)} rows={4}
+          placeholder="Contoh: Kunjungan ke kantor PT, bertemu bagian keuangan. Hasil: janji bayar 50% minggu depan, sisanya akhir bulan."
           className={inputCls} style={{ ...inputSt, resize: "vertical" }} />
+        <div className="mt-2 flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-medium" style={{ color: T.sub }}>Tindak lanjut berikutnya</span>
+          <input type="date" value={tindakLanjut} onChange={(e) => setTindakLanjut(e.target.value)} className={inputCls} style={inputSt} />
+          {tindakLanjut && <button onClick={() => setTindakLanjut("")}><X size={14} style={{ color: T.sub }} /></button>}
+        </div>
       </div>
 
       <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-        <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Bukti (PDF hasil MOM, screenshot, dll.)</p>
-        <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple onChange={onPick} className="hidden" />
-        <button onClick={() => fileRef.current?.click()} disabled={busy}
-          className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px dashed ${T.line}` }}>
-          <Upload size={16} /> {busy ? "Memproses…" : "Lampirkan file"}
+        <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Foto + lokasi &amp; bukti</p>
+        <input ref={fotoRef} type="file" accept="image/*" capture="environment" onChange={onPickFoto} className="hidden" />
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => fotoRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: foto ? T.green + "1A" : T.bg, color: foto ? T.green : T.brand2, border: `1px solid ${T.line}` }}><Camera size={14} /> {foto ? "Foto \u2713" : "Foto + lokasi"}</button>
+          <button onClick={grabLoc} disabled={busyLoc} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: lok ? T.green + "1A" : T.bg, color: lok ? T.green : T.brand2, border: `1px solid ${T.line}` }}><MapPin size={14} /> {busyLoc ? "Mengambil…" : lok ? "Lokasi \u2713" : "Ambil lokasi"}</button>
+        </div>
+        {(foto || lok) && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+            {foto && <img src={foto} alt="bukti" className="h-10 w-10 rounded object-cover" style={{ border: `1px solid ${T.line}` }} />}
+            {lok && <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: T.sub }}>{lok.lat}, {lok.lng} (\u00B1{lok.acc}m)</span>}
+            <button onClick={() => { setFoto(null); setLok(null); }} className="ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" style={{ color: T.red }}>Hapus</button>
+          </div>
+        )}
+        <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple onChange={onPickFiles} className="hidden" />
+        <button onClick={() => fileRef.current?.click()} disabled={busyFiles}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px dashed ${T.line}` }}>
+          <Upload size={16} /> {busyFiles ? "Memproses…" : "Lampirkan file (PDF MOM, screenshot)"}
         </button>
         {bukti.length > 0 && (
           <div className="mt-2 space-y-1.5">
@@ -2498,7 +3288,7 @@ function WorklogForm({ invoices, petugas, onSave, onCancel, flash }) {
                   : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={16} style={{ color: T.red }} /></span>}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium" style={{ color: T.ink }}>{b.name}</p>
-                  <p className="text-[10px]" style={{ color: T.sub }}>{b.type === "image" ? "Gambar" : b.type === "pdf" ? "PDF" : "File"}{b.size ? ` · ${humanSize(b.size)}` : ""}</p>
+                  <p className="text-[10px]" style={{ color: T.sub }}>{b.type === "image" ? "Gambar" : b.type === "pdf" ? "PDF" : "File"}{b.size ? ` \u00B7 ${humanSize(b.size)}` : ""}</p>
                 </div>
                 <button onClick={() => setBukti((prev) => prev.filter((_, n) => n !== idx))} aria-label="Hapus"><X size={15} style={{ color: T.sub }} /></button>
               </div>
@@ -2507,9 +3297,50 @@ function WorklogForm({ invoices, petugas, onSave, onCancel, flash }) {
         )}
       </div>
 
+      <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <button onClick={() => setShowDoc((v) => !v)} className="flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold" style={{ background: T.brass + "1A", color: T.brass }}>
+          <FileSignature size={15} /> {showDoc ? "Tutup dokumen + tanda tangan" : "Buat dokumen + tanda tangan (PDF)"}
+        </button>
+        {showDoc && (
+          <div className="mt-2 sub-fade">
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              <button onClick={() => setDocType("pernyataan")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
+              <button onClick={() => setDocType("mom")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "mom" ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>MOM / Visit Report</button>
+              {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
+            </div>
+            {docType === "pernyataan" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <input value={grpID(dForm.jumlah)} onChange={(e) => setDForm({ ...dForm, jumlah: onlyDigits(e.target.value) })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
+                <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
+              </div>
+            ) : docType === "mom" ? (
+              <div className="space-y-2 sub-fade">
+                <textarea value={dForm.pembahasan} onChange={(e) => setDForm({ ...dForm, pembahasan: e.target.value })} rows={2} placeholder="Hasil pembahasan / poin pertemuan…" className={inputCls} style={inputSt} />
+                <textarea value={dForm.kesepakatan} onChange={(e) => setDForm({ ...dForm, kesepakatan: e.target.value })} rows={2} placeholder="Kesepakatan / tindak lanjut…" className={inputCls} style={inputSt} />
+                <div>
+                  <p className="mb-1 text-[11px] font-medium" style={{ color: T.sub }}>Target penyelesaian (opsional)</p>
+                  <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
+                </div>
+              </div>
+            ) : (
+              <input value={dForm.kondisi} onChange={(e) => setDForm({ ...dForm, kondisi: e.target.value })} placeholder="Kondisi / kelengkapan unit" className={inputCls} style={inputSt} />
+            )}
+            <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan {docType === "mom" ? "debitur / customer" : "debitur"}</p>
+            <SignaturePad onChange={setDsig} />
+            {docType === "mom" && (
+              <>
+                <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan petugas / atasan</p>
+                <SignaturePad onChange={setDsig2} />
+              </>
+            )}
+            <button onClick={createDoc} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Buat &amp; cetak (PDF)</button>
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-2 pb-2">
-        <button onClick={onCancel} className="flex-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
-        <button onClick={save} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand }}>Simpan laporan</button>
+        <button onClick={onCancel} disabled={saving} className="flex-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}`, opacity: saving ? 0.45 : 1 }}>Batal</button>
+        <button onClick={save} disabled={saving} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand, opacity: saving ? 0.6 : 1 }}>{saving ? "Menyimpan…" : "Simpan laporan"}</button>
       </div>
     </div>
   );
@@ -2781,6 +3612,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const logAudit = audit || (() => {});
   const [note, setNote] = useState("");
   const [janji, setJanji] = useState(i.janjiBayar || "");
+  const [janjiNom, setJanjiNom] = useState(i.janjiNominal || "");
   const [contact, setContact] = useState({ tipe: i.tipe || "perusahaan", pic: i.pic || "", telp: i.telp || "", alamat: i.alamat || "", jaminanTipe: i.jaminanTipe || "none", jaminan: i.jaminan || "", assignedTo: i.assignedTo || "" });
   const [lvl, setLvl] = useState(null);
   const [bayar, setBayar] = useState("");
@@ -2789,6 +3621,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [fotoView, setFotoView] = useState(null);
   const [lok, setLok] = useState(null);
   const [busyLoc, setBusyLoc] = useState(false);
+  const fuRef = useRef(false); // guard anti-duplikat catat hasil kontak
   const fotoRef = useRef(null);
   const [showDoc, setShowDoc] = useState(false);
   const [sub, setSub] = useState("tagih");
@@ -2852,17 +3685,26 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     flash("Ditandai lunas");
   };
   const logEskalasi = (level) => { patch(i.id, (x) => ({ ...x, eskalasi: [{ ts: today0().toISOString().slice(0, 10), level }, ...(x.eskalasi || [])] })); logAudit("eskalasi", ent, null, { level }); };
-  const logFollowup = () => {
-    const h = HASIL[hasil];
-    const body = `[${h.label}]${note.trim() ? " " + note.trim() : ""}`;
-    patch(i.id, (x) => ({
-      ...x,
-      status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
-      lastFollowUp: today0().toISOString().slice(0, 10),
-      tindakLanjut: tindakLanjut || x.tindakLanjut || "",
-      aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: foto || null, lok: lok || null }, ...(x.aktivitas || [])],
-    }));
-    setNote(""); setHasil("lain"); setFoto(null); setLok(null); flash("Hasil kontak tercatat");
+  const logFollowup = async () => {
+    if (fuRef.current) return;                // cegah catat ganda saat klik beruntun
+    fuRef.current = true;
+    try {
+      const h = HASIL[hasil];
+      const body = `[${h.label}]${note.trim() ? " " + note.trim() : ""}`;
+      // Antrekan foto ke upload queue; tidak menunggu upload selesai.
+      let fotoRef = null;
+      if (foto) { const id = await uploadQueue.enqueue({ code: _activeCode, scope: "lapor", name: "foto-lapangan.jpg", dataUrl: foto }); fotoRef = `local:${id}`; }
+      patch(i.id, (x) => ({
+        ...x,
+        status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
+        lastFollowUp: today0().toISOString().slice(0, 10),
+        tindakLanjut: tindakLanjut || x.tindakLanjut || "",
+        aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
+      }));
+      setNote(""); setHasil("lain"); setFoto(null); setLok(null); flash("Hasil kontak tercatat");
+    } finally {
+      fuRef.current = false;
+    }
   };
   const onPickFoto = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
@@ -2920,13 +3762,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const urgent = i.status !== "lunas" && i.daysOverdue > 0;
   return (
     <>
-    {fotoView && (
-      <div onClick={() => setFotoView(null)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
-        <button onClick={() => setFotoView(null)} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
-        <img src={fotoView} alt="Bukti kunjungan" className="max-h-full max-w-full rounded-lg object-contain" style={{ boxShadow: "0 8px 40px rgba(0,0,0,.5)" }} onClick={(e) => e.stopPropagation()} />
-        <a href={fotoView} download={`bukti-${i.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
-      </div>
-    )}
+    {fotoView && <FotoLightbox value={fotoView} onClose={() => setFotoView(null)} downloadName={`bukti-${i.noInvoice || "kolekta"}.jpg`} />}
     {lunasAsk && (
       <div onClick={() => setLunasAsk(false)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
         <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -2987,8 +3823,8 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
       {open && (
         <div className="border-t px-3 pb-3 pt-3" style={{ borderColor: T.line }}>
           {/* Sub-tab nav */}
-          <div className="mb-3 grid grid-cols-4 gap-1 rounded-xl p-1" style={{ background: T.bg }}>
-            {[["tagih", "Tagih", Wallet], ["lapangan", "Lapangan", Camera], ["eskalasi", "Eskalasi", Send], ["profil", "Profil", User]].map(([k, lbl, Ic]) => (
+          <div className="mb-3 grid grid-cols-3 gap-1 rounded-xl p-1" style={{ background: T.bg }}>
+            {[["tagih", "Tagih", Wallet], ["eskalasi", "Eskalasi", Send], ["profil", "Profil", User]].map(([k, lbl, Ic]) => (
               <button key={k} onClick={() => setSub(k)}
                 className="kpress flex flex-col items-center justify-center gap-0.5 rounded-lg py-1.5 text-[11px] font-semibold transition-colors"
                 style={sub === k ? { background: T.surface, color: T.brand2, boxShadow: "0 1px 2px rgba(0,0,0,.08)" } : { color: T.sub }}>
@@ -3038,44 +3874,31 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
 
               {i.status === "janji_bayar" && (
                 <div className="mt-3">
-                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Tanggal janji bayar</p>
+                  <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Janji bayar (tanggal &amp; nominal)</p>
                   <div className="flex gap-2">
                     <input type="date" className={inputCls} style={inputSt} value={janji} onChange={(e) => setJanji(e.target.value)} />
-                    <button onClick={() => { patch(i.id, (x) => ({ ...x, janjiBayar: janji })); logAudit("janji", ent, { janjiBayar: i.janjiBayar || null }, { janjiBayar: janji }); flash("Janji bayar disimpan"); }}
+                    <input value={grpID(janjiNom)} onChange={(e) => setJanjiNom(onlyDigits(e.target.value))} inputMode="numeric" placeholder={`Nominal (${rp(i.total)})`} className={inputCls} style={inputSt} />
+                    <button onClick={() => { patch(i.id, (x) => ({ ...x, janjiBayar: janji, janjiNominal: janjiNom ? Number(janjiNom) : null })); logAudit("janji", ent, { janjiBayar: i.janjiBayar || null }, { janjiBayar: janji }); flash("Janji bayar disimpan"); }}
                       className="kpress shrink-0 rounded-lg px-4 text-xs font-semibold text-white" style={{ background: T.brand2 }}>Simpan</button>
                   </div>
+                  {janji && (() => {
+                    const txt = `Selamat ${greeting()}, ${sapaanWA(i)} \uD83D\uDE4F\n\nIzin mengingatkan janji pembayaran untuk tagihan *${i.noInvoice}*.\nTanggal janji bayar: *${fmtTgl(janji)}*${janjiNom ? `\nNominal dijanjikan: *${rp(Number(janjiNom))}*` : ""}\n\nTotal tagihan saat ini: *${rp(i.total)}*\n\nMohon dapat ditepati sesuai janji ya, Pak/Bu. Terima kasih \uD83D\uDE4F\n\u2014 ${s.perusahaan?.trim() || "Kolekta"}`;
+                    const link = waLink(i.telp, txt);
+                    return (
+                      <button onClick={() => { if (link) window.open(link, "_blank"); else copy(txt); }}
+                        className="kpress mt-2 flex w-full items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.green }}>
+                        <MessageCircle size={14} /> {link ? "Ingatkan janji bayar via WA" : "Salin pengingat (no. WA kosong)"}
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
             </div>
           )}
 
-          {/* ===== LAPANGAN ===== */}
-          {sub === "lapangan" && (
-            <div className="sub-fade">
-              <p className="mb-1 text-xs font-medium" style={{ color: T.sub }}>Catat hasil kontak / kunjungan</p>
-              <select value={hasil} onChange={(e) => setHasil(e.target.value)} className={`${inputCls} mb-2`} style={inputSt}>
-                {HASIL_ORDER.map((k) => <option key={k} value={k}>{HASIL[k].label}</option>)}
-              </select>
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Deskripsi / catatan…" className={inputCls} style={inputSt} />
-              <div className="mt-2 flex items-center gap-2">
-                <span className="shrink-0 text-[11px] font-medium" style={{ color: T.sub }}>Tindak lanjut berikutnya</span>
-                <input type="date" value={tindakLanjut} onChange={(e) => setTindakLanjut(e.target.value)} className={inputCls} style={inputSt} />
-                {tindakLanjut && <button onClick={() => setTindakLanjut("")}><X size={14} style={{ color: T.sub }} /></button>}
-              </div>
-              <input ref={fotoRef} type="file" accept="image/*" capture="environment" onChange={onPickFoto} className="hidden" />
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button onClick={() => fotoRef.current?.click()} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: foto ? T.green + "1A" : T.bg, color: foto ? T.green : T.brand2, border: `1px solid ${T.line}` }}><Camera size={14} /> {foto ? "Foto ✓" : "Foto + lokasi"}</button>
-                <button onClick={grabLoc} disabled={busyLoc} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: lok ? T.green + "1A" : T.bg, color: lok ? T.green : T.brand2, border: `1px solid ${T.line}` }}><MapPin size={14} /> {busyLoc ? "Mengambil…" : lok ? "Lokasi ✓" : "Ambil lokasi"}</button>
-              </div>
-              {(foto || lok) && (
-                <div className="mt-2 flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                  {foto && <img src={foto} alt="bukti" className="h-10 w-10 rounded object-cover" style={{ border: `1px solid ${T.line}` }} />}
-                  {lok && <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: T.sub }}>{lok.lat}, {lok.lng} (±{lok.acc}m)</span>}
-                  <button onClick={() => { setFoto(null); setLok(null); }} className="ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" style={{ color: T.red }}>Hapus lampiran</button>
-                </div>
-              )}
-              <button onClick={logFollowup} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Catat hasil kontak</button>
-
+          {/* ===== Riwayat kunjungan & arsip dokumen (read-only) — pindah ke tab Profil ===== */}
+          {sub === "profil" && (i.aktivitas?.length > 0 || i.dokumen?.length > 0) && (
+            <div className="sub-fade mt-3 border-t pt-3" style={{ borderColor: T.line }}>
               {i.aktivitas?.length > 0 && (
                 <div className="mt-3">
                   <button onClick={() => setOpenRiwayat((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
@@ -3088,7 +3911,12 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                     {i.aktivitas.map((a, idx) => (
                       <div key={idx} className="rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         <div className="flex gap-2">
-                          {a.foto && <img src={a.foto} alt="bukti" className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} onClick={() => setFotoView(a.foto)} />}
+                          {a.foto && (
+                            <span className="relative h-14 w-14 shrink-0">
+                              <FieldFoto value={a.foto} onClick={() => setFotoView(a.foto)} className="h-14 w-14 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                              <UploadBadge localId={fotoAtt(a.foto)?.localId} />
+                            </span>
+                          )}
                           <div className="min-w-0 flex-1">
                             <p className="text-[11px]" style={{ color: T.brass, fontFamily: MONO }}>{a.waktu ? fmtWaktu(a.waktu) : fmtTgl(a.ts).split(" ").slice(0, 2).join(" ")}</p>
                             <p className="text-xs" style={{ color: T.ink }}>{a.note}</p>
@@ -3102,46 +3930,6 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                 </div>
               )}
 
-              <button onClick={() => setShowDoc((v) => !v)}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold"
-                style={{ background: T.brass + "1A", color: T.brass }}>
-                <FileSignature size={15} /> {showDoc ? "Tutup dokumen lapangan" : "Buat dokumen + tanda tangan"}
-              </button>
-              {showDoc && (
-                <div className="mt-2 rounded-lg p-2.5" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    <button onClick={() => setDocType("pernyataan")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "pernyataan" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Surat Pernyataan</button>
-                    <button onClick={() => setDocType("mom")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "mom" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>MOM / Visit Report</button>
-                    {i.jaminanTipe && i.jaminanTipe !== "none" && <button onClick={() => setDocType("bast")} className="chip flex-1 rounded-full px-2.5 py-1 text-xs font-medium" style={docType === "bast" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>BAST Penarikan</button>}
-                  </div>
-                  {docType === "pernyataan" ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <input value={grpID(dForm.jumlah)} onChange={(e) => setDForm({ ...dForm, jumlah: onlyDigits(e.target.value) })} inputMode="numeric" placeholder={`Jumlah (${rp(i.total)})`} className={inputCls} style={inputSt} />
-                      <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
-                    </div>
-                  ) : docType === "mom" ? (
-                    <div className="space-y-2 sub-fade">
-                      <textarea value={dForm.pembahasan} onChange={(e) => setDForm({ ...dForm, pembahasan: e.target.value })} rows={2} placeholder="Hasil pembahasan / poin pertemuan…" className={inputCls} style={inputSt} />
-                      <textarea value={dForm.kesepakatan} onChange={(e) => setDForm({ ...dForm, kesepakatan: e.target.value })} rows={2} placeholder="Kesepakatan / tindak lanjut…" className={inputCls} style={inputSt} />
-                      <div>
-                        <p className="mb-1 text-[11px] font-medium" style={{ color: T.sub }}>Target penyelesaian (opsional)</p>
-                        <input type="date" value={dForm.tgl} onChange={(e) => setDForm({ ...dForm, tgl: e.target.value })} className={inputCls} style={inputSt} />
-                      </div>
-                    </div>
-                  ) : (
-                    <input value={dForm.kondisi} onChange={(e) => setDForm({ ...dForm, kondisi: e.target.value })} placeholder="Kondisi / kelengkapan unit" className={inputCls} style={inputSt} />
-                  )}
-                  <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan {docType === "mom" ? "debitur / customer" : "debitur"}</p>
-                  <SignaturePad onChange={setDsig} />
-                  {docType === "mom" && (
-                    <>
-                      <p className="mb-1 mt-2 text-[11px] font-semibold" style={{ color: T.sub }}>Tanda tangan petugas / atasan</p>
-                      <SignaturePad onChange={setDsig2} />
-                    </>
-                  )}
-                  <button onClick={createDoc} className="mt-2 w-full rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Buat &amp; cetak (PDF)</button>
-                </div>
-              )}
               {i.dokumen?.length > 0 && (
                 <div className="mt-3">
                   <button onClick={() => setOpenArsip((v) => !v)} className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium" style={{ color: T.sub }}>
@@ -4215,7 +5003,7 @@ function RiwayatDetail({ inv, s, flash, copy, onClose, onOpen }) {
               <div className="grid grid-cols-3 gap-2">
                 {fotos.map((a, idx) => (
                   <button key={idx} onClick={() => setFotoView(a.foto)} className="overflow-hidden rounded-lg" style={{ border: `1px solid ${T.line}` }}>
-                    <img src={a.foto} alt={a.note || "bukti"} className="h-24 w-full object-cover" />
+                    <FieldFoto value={a.foto} alt={a.note || "bukti"} className="h-24 w-full object-cover" />
                   </button>
                 ))}
               </div>
@@ -4230,13 +5018,7 @@ function RiwayatDetail({ inv, s, flash, copy, onClose, onOpen }) {
         </div>
       </div>
 
-      {fotoView && (
-        <div onClick={(e) => { e.stopPropagation(); setFotoView(null); }} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.82)" }}>
-          <button onClick={(e) => { e.stopPropagation(); setFotoView(null); }} className="absolute right-4 top-4 rounded-full p-2" style={{ background: "rgba(255,255,255,.15)", color: "#fff" }} aria-label="Tutup"><X size={20} /></button>
-          <img src={fotoView} alt="Bukti" className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
-          <a href={fotoView} download={`bukti-${inv.noInvoice || "kolekta"}.jpg`} onClick={(e) => e.stopPropagation()} className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold text-white" style={{ background: T.brand }}>Unduh foto</a>
-        </div>
-      )}
+      {fotoView && <FotoLightbox value={fotoView} onClose={() => setFotoView(null)} downloadName={`bukti-${inv.noInvoice || "kolekta"}.jpg`} />}
     </div>
   );
 }
@@ -4504,6 +5286,12 @@ function AdminPanel({ th, onBack }) {
   const [addRole, setAddRole] = useState("petugas");
   const [addName, setAddName] = useState("");
   const [panel, setPanel] = useState("tenants");       // tenants | audit
+  const [fileOpen, setFileOpen] = useState("");        // tenant_id panel file dibuka
+  const [fileCache, setFileCache] = useState({});      // tenant_id -> daftar file
+  const [fileUrls, setFileUrls] = useState({});        // path -> signed url (thumbnail/buka)
+  const [loadingFiles, setLoadingFiles] = useState("");
+  const [fDel, setFDel] = useState("");                // path konfirmasi hapus
+  const [fBusy, setFBusy] = useState(false);
 
   const DELETE_CODE = "12345";
   const STORAGE_CAP = 500 * 1048576; // ~500 MB (kuota database Supabase free)
@@ -4539,6 +5327,36 @@ function AdminPanel({ th, onBack }) {
   };
 
   const loadStorage = async () => { try { setStorage(await sbAdminStorage(secret)); } catch {} };
+
+  // Daftar & hapus file Storage per PT (lewat broker, rahasia admin).
+  const loadFiles = async (t, force) => {
+    if (fileCache[t.tenant_id] && !force) return;
+    setLoadingFiles(t.tenant_id);
+    try {
+      const list = await sbAdminFiles(secret, t.tenant_id);
+      setFileCache((c) => ({ ...c, [t.tenant_id]: list }));
+      const imgs = list.filter((f) => (f.mimetype || "").startsWith("image/")).map((f) => f.path);
+      if (imgs.length) { try { const u = await sbAdminFileUrls(secret, imgs); setFileUrls((m) => ({ ...m, ...u })); } catch {} }
+    } catch (e) { setMsg(errText(e.message)); }
+    setLoadingFiles("");
+  };
+  const toggleFiles = (t) => {
+    if (fileOpen === t.tenant_id) { setFileOpen(""); return; }
+    setFileOpen(t.tenant_id); setFDel(""); loadFiles(t);
+  };
+  const openFile = async (f) => {
+    let url = fileUrls[f.path];
+    if (!url) { try { const u = await sbAdminFileUrls(secret, [f.path]); url = u[f.path]; setFileUrls((m) => ({ ...m, ...u })); } catch {} }
+    if (url) window.open(url, "_blank", "noopener");
+  };
+  const confirmDeleteFile = async (t, f) => {
+    setFBusy(true); setMsg("");
+    try { await sbAdminFileDelete(secret, [f.path]); await loadFiles(t, true); setFDel(""); loadStorage(); setMsg("File dihapus ✓"); }
+    catch (e) { setMsg(errText(e.message)); }
+    setFBusy(false);
+  };
+  const cleanName = (n) => String(n || "file").replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, "");
+  const scopeLabel = (s) => (s === "lapor" ? "Foto lapangan" : s === "chat" ? "Lampiran chat" : (s || "File"));
 
   const open = async () => {
     if (!secret.trim()) return setMsg("Masukkan rahasia admin.");
@@ -4764,17 +5582,21 @@ function AdminPanel({ th, onBack }) {
                                   <button onClick={() => setMEdit("")} className="shrink-0 rounded-lg px-2.5 text-[11px] font-semibold" style={{ background: th.bg, color: th.sub, border: `1px solid ${th.line}` }}>Batal</button>
                                 </div>
                               ) : (
-                                <div className="flex items-center gap-2 rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
-                                  <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: roleColor(m.role) + "1A", color: roleColor(m.role) }}>{m.role === "atasan" ? "Atasan" : "Petugas"}</span>
-                                  <span className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: th.ink }}>{m.member_name}</span>
-                                  <span className="shrink-0 text-[12px] font-bold" style={{ color: roleColor(m.role), fontFamily: MONO }}>{m.code}</span>
-                                  <button onClick={() => copyCode(m.code)} title="Salin kode" className="shrink-0 rounded-md p-1" style={{ color: th.sub }}><Copy size={13} /></button>
-                                  {m.member_id && !m.legacy && (
-                                    <>
-                                      <button onClick={() => startRenameMember(m)} title="Ubah nama" className="shrink-0 rounded-md p-1" style={{ color: th.brand2 }}><Pencil size={13} /></button>
-                                      <button onClick={() => { setMDel(m.member_id); setMDelCode(""); setMsg(""); }} title="Hapus anggota" className="shrink-0 rounded-md p-1" style={{ color: th.red }}><Trash2 size={13} /></button>
-                                    </>
-                                  )}
+                                <div className="rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+                                  <div className="flex items-center gap-2">
+                                    <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: roleColor(m.role) + "1A", color: roleColor(m.role) }}>{m.role === "atasan" ? "Atasan" : "Petugas"}</span>
+                                    <span className="min-w-0 flex-1 text-xs font-semibold" style={{ color: th.ink }}>{m.member_name}</span>
+                                  </div>
+                                  <div className="mt-1.5 flex items-center gap-2">
+                                    <span className="text-[12px] font-bold" style={{ color: roleColor(m.role), fontFamily: MONO }}>{m.code}</span>
+                                    <button onClick={() => copyCode(m.code)} title="Salin kode" className="shrink-0 rounded-md p-1" style={{ color: th.sub }}><Copy size={13} /></button>
+                                    {m.member_id && !m.legacy && (
+                                      <div className="ml-auto flex items-center gap-1">
+                                        <button onClick={() => startRenameMember(m)} title="Ubah nama" className="shrink-0 rounded-md p-1" style={{ color: th.brand2 }}><Pencil size={13} /></button>
+                                        <button onClick={() => { setMDel(m.member_id); setMDelCode(""); setMsg(""); }} title="Hapus anggota" className="shrink-0 rounded-md p-1" style={{ color: th.red }}><Trash2 size={13} /></button>
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                               {mDel && m.member_id === mDel && (
@@ -4808,6 +5630,58 @@ function AdminPanel({ th, onBack }) {
                               + Tambah anggota
                             </button>
                           )}
+
+                          {/* File tersimpan di Storage (foto lapangan + lampiran chat) — admin bisa hapus */}
+                          <div className="mt-1 border-t pt-2" style={{ borderColor: th.line }}>
+                            <button onClick={() => toggleFiles(t)} className="flex w-full items-center gap-1.5 text-left">
+                              <FolderOpen size={14} style={{ color: th.brand2 }} />
+                              <span className="text-[11px] font-semibold" style={{ color: th.ink }}>File tersimpan</span>
+                              {fileCache[t.tenant_id] && <span className="text-[10px]" style={{ color: th.sub }}>({fileCache[t.tenant_id].length})</span>}
+                              <ChevronDown size={13} style={{ marginLeft: "auto", color: th.sub, transform: fileOpen === t.tenant_id ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                            </button>
+                            {fileOpen === t.tenant_id && (
+                              <div className="mt-2">
+                                {loadingFiles === t.tenant_id && !fileCache[t.tenant_id] ? (
+                                  <p className="text-[11px]" style={{ color: th.sub }}>Memuat file…</p>
+                                ) : (fileCache[t.tenant_id] || []).length === 0 ? (
+                                  <p className="text-[11px]" style={{ color: th.sub }}>Belum ada file tersimpan.</p>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {(fileCache[t.tenant_id] || []).map((f) => {
+                                      const isImg = (f.mimetype || "").startsWith("image/");
+                                      const url = fileUrls[f.path];
+                                      return (
+                                        <div key={f.path} className="rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+                                          <div className="flex items-center gap-2">
+                                            {isImg && url ? (
+                                              <img src={url} alt="" onClick={() => openFile(f)} className="h-9 w-9 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${th.line}` }} />
+                                            ) : (
+                                              <div className="grid h-9 w-9 shrink-0 place-items-center rounded" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
+                                                {isImg ? <ImageIcon size={15} style={{ color: th.sub }} /> : <FileText size={15} style={{ color: th.sub }} />}
+                                              </div>
+                                            )}
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate text-[11px] font-medium" style={{ color: th.ink }}>{cleanName(f.name)}</p>
+                                              <p className="text-[10px]" style={{ color: th.sub }}>{scopeLabel(f.scope)}{f.size ? ` · ${fmtBytes(f.size)}` : ""}</p>
+                                            </div>
+                                            <button onClick={() => openFile(f)} title="Buka file" className="shrink-0 rounded-md p-1.5" style={{ color: th.brand2, border: `1px solid ${th.line}` }}><Eye size={13} /></button>
+                                            <button onClick={() => { setFDel(f.path); setMsg(""); }} title="Hapus file" className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}` }}><Trash2 size={13} /></button>
+                                          </div>
+                                          {fDel === f.path && (
+                                            <div className="mt-1.5 flex items-center gap-1.5">
+                                              <span className="text-[11px]" style={{ color: th.red }}>Hapus file ini permanen?</span>
+                                              <button disabled={fBusy} onClick={() => confirmDeleteFile(t, f)} className="ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-white" style={{ background: th.red, opacity: fBusy ? 0.6 : 1 }}>{fBusy ? "Menghapus…" : "Hapus"}</button>
+                                              <button onClick={() => setFDel("")} className="shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold" style={{ background: th.bg, color: th.sub, border: `1px solid ${th.line}` }}>Batal</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

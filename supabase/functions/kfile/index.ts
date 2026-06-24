@@ -1,0 +1,166 @@
+// Kolekta file broker (Supabase Edge Function)
+// Menjaga isolasi per-PT untuk Storage: validasi kode login -> tenant,
+// upload pakai service role ke prefix tenant, dan beri signed URL untuk tampil.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+const SB_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const BUCKET = "kolekta-files";
+const MAX_BYTES = 10 * 1024 * 1024; // ~10 MB per file (cocok dengan batas 8 MB bukti Lapor di klien)
+const SIGN_TTL = 60 * 60 * 2; // 2 jam
+
+const admin = createClient(SB_URL, SERVICE_KEY, { auth: { persistSession: false } });
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+
+async function tenantOf(code: string): Promise<string | null> {
+  if (!code) return null;
+  const { data, error } = await admin.rpc("kolekta_tenant_of", { p_code: code });
+  if (error) return null;
+  const tid = typeof data === "string" ? data : (Array.isArray(data) ? data[0] : null);
+  return tid || null;
+}
+
+// Verifikasi rahasia admin Kolekta (lintas-PT) lewat RPC kolekta_is_admin.
+async function isAdmin(secret: string): Promise<boolean> {
+  if (!secret) return false;
+  const { data, error } = await admin.rpc("kolekta_is_admin", { p_admin: secret });
+  if (error) return false;
+  return data === true || (Array.isArray(data) && data[0] === true);
+}
+
+// Daftar file 1 tenant di bucket (2 tingkat: {tenant}/{scope}/{file}).
+async function listTenantFiles(tenant: string) {
+  const out: any[] = [];
+  const { data: scopes } = await admin.storage.from(BUCKET).list(tenant, { limit: 1000 });
+  for (const entry of (scopes || [])) {
+    if (entry.id == null) {
+      // folder scope -> daftar isinya
+      const scope = entry.name;
+      const { data: files } = await admin.storage.from(BUCKET).list(`${tenant}/${scope}`, { limit: 1000 });
+      for (const f of (files || [])) {
+        if (f.id == null) continue;
+        out.push({
+          path: `${tenant}/${scope}/${f.name}`, name: f.name, scope,
+          size: f.metadata?.size ?? null, mimetype: f.metadata?.mimetype ?? null,
+          created_at: f.created_at ?? null,
+        });
+      }
+    } else {
+      out.push({
+        path: `${tenant}/${entry.name}`, name: entry.name, scope: "",
+        size: entry.metadata?.size ?? null, mimetype: entry.metadata?.mimetype ?? null,
+        created_at: entry.created_at ?? null,
+      });
+    }
+  }
+  return out;
+}
+
+const safeName = (n: string) =>
+  (n || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "file";
+
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const len = bin.length;
+  const out = new Uint8Array(len);
+  for (let i = 0; i < len; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json(405, { error: "method" });
+
+  let payload: any;
+  try { payload = await req.json(); } catch { return json(400, { error: "bad_json" }); }
+
+  const action = payload?.action;
+
+  // ----- Aksi admin (lintas-PT): butuh rahasia admin, bukan kode login -----
+  if (action === "admin-list" || action === "admin-url" || action === "admin-del") {
+    try {
+      if (!(await isAdmin(String(payload?.admin || "")))) return json(401, { error: "invalid_admin" });
+      if (action === "admin-list") {
+        const tenant = String(payload?.tenant || "").replace(/[^a-zA-Z0-9_-]/g, "");
+        if (!tenant) return json(400, { error: "no_tenant" });
+        return json(200, { files: await listTenantFiles(tenant) });
+      }
+      const paths: string[] = Array.isArray(payload?.paths) ? payload.paths.filter((p: any) => typeof p === "string") : [];
+      if (action === "admin-url") {
+        const urls: Record<string, string> = {};
+        if (paths.length) {
+          const { data } = await admin.storage.from(BUCKET).createSignedUrls(paths, SIGN_TTL);
+          for (const row of (data || [])) if (row.signedUrl && row.path) urls[row.path] = row.signedUrl;
+        }
+        return json(200, { urls });
+      }
+      // admin-del
+      if (paths.length) {
+        const { error } = await admin.storage.from(BUCKET).remove(paths);
+        if (error) return json(500, { error: "del_failed", detail: error.message });
+      }
+      return json(200, { removed: paths.length });
+    } catch (e: any) {
+      return json(500, { error: "exception", detail: String(e?.message || e) });
+    }
+  }
+
+  const code = String(payload?.code || "");
+  const tid = await tenantOf(code);
+  if (!tid) return json(401, { error: "invalid_code" });
+
+  try {
+    if (action === "up") {
+      // payload: { scope, name, contentType, b64 }
+      const scope = String(payload.scope || "misc").replace(/[^a-z]/g, "") || "misc";
+      const name = safeName(String(payload.name || "file"));
+      const contentType = String(payload.contentType || "application/octet-stream");
+      const b64 = String(payload.b64 || "");
+      if (!b64) return json(400, { error: "empty" });
+      const bytes = b64ToBytes(b64);
+      if (bytes.byteLength > MAX_BYTES) return json(413, { error: "too_large" });
+      const path = `${tid}/${scope}/${crypto.randomUUID()}-${name}`;
+      const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType, upsert: false });
+      if (error) return json(500, { error: "upload_failed", detail: error.message });
+      return json(200, { path, size: bytes.byteLength });
+    }
+
+    if (action === "url") {
+      // payload: { paths: [...] } -> { urls: { path: signedUrl } }
+      const paths: string[] = Array.isArray(payload.paths) ? payload.paths : [];
+      const mine = paths.filter((p) => typeof p === "string" && p.startsWith(tid + "/"));
+      const urls: Record<string, string> = {};
+      if (mine.length) {
+        const { data, error } = await admin.storage.from(BUCKET).createSignedUrls(mine, SIGN_TTL);
+        if (error) return json(500, { error: "sign_failed", detail: error.message });
+        for (const row of (data || [])) {
+          if (row.signedUrl && row.path) urls[row.path] = row.signedUrl;
+        }
+      }
+      return json(200, { urls });
+    }
+
+    if (action === "del") {
+      // payload: { paths: [...] } -> hapus file milik tenant ini saja
+      const paths: string[] = Array.isArray(payload.paths) ? payload.paths : [];
+      const mine = paths.filter((p) => typeof p === "string" && p.startsWith(tid + "/"));
+      if (mine.length) {
+        const { error } = await admin.storage.from(BUCKET).remove(mine);
+        if (error) return json(500, { error: "del_failed", detail: error.message });
+      }
+      return json(200, { removed: mine.length });
+    }
+
+    return json(400, { error: "unknown_action" });
+  } catch (e) {
+    return json(500, { error: "exception", detail: String(e?.message || e) });
+  }
+});
