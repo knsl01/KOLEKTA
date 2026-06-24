@@ -292,6 +292,17 @@ function rollupProyek(list) {
   return { count: list.length, aktifCount: aktif.length, nilai, tertunggak, terbayar, worstOverdue, overdueCount, nextDue, allLunas };
 }
 
+/* Kunci penyatuan customer: nama PT/orang yang "sama" harus jadi satu kesatuan.
+   Normalisasi: huruf kecil, tanda baca → spasi, lalu rapatkan spasi ganda.
+   Jadi "PT. Maju Jaya", "pt maju  jaya", "PT Maju Jaya," → kunci sama
+   ("pt maju jaya"), tanpa mengubah kunci nama normal (hindari data lama yatim). */
+const custKeyOf = (name) =>
+  String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+
 function enrich(inv, s) {
   const due = new Date(inv.tglJatuhTempo + "T00:00:00");
   const odRaw = dayDiff(today0(), due);
@@ -1049,7 +1060,7 @@ function statementText(name, list, s, mode = "full") {
   const now = new Date();
   const tgl = fmtTgl(now.toISOString().slice(0, 10));
   const noSOA = `......./SOA/${ROMAN[now.getMonth()]}/${now.getFullYear()}`;
-  const rows = list.filter((i) => i.customer.trim().toLowerCase() === name.trim().toLowerCase());
+  const rows = list.filter((i) => custKeyOf(i.customer) === custKeyOf(name));
   const totOut = rows.filter((i) => i.status !== "lunas").reduce((a, i) => a + i.total, 0);
   const totBayar = rows.reduce((a, i) => a + (i.terbayar || 0), 0);
   const totTagih = rows.reduce((a, i) => a + i.total, 0);
@@ -1104,14 +1115,44 @@ ${jabatan}`;
 function tagihWaText(name, rows, s, mode = "range") {
   const aktif = rows.filter((i) => i.status !== "lunas");
   const totOut = aktif.reduce((a, i) => a + i.total, 0);
+  const totPokok = aktif.reduce((a, i) => a + (i.sisaPokok ?? i.nominal ?? 0), 0);
+  const totDenda = aktif.reduce((a, i) => a + (i.denda || 0), 0);
+  const maxOd = aktif.reduce((a, i) => Math.max(a, i.daysOverdue || 0), 0);
   const pt = s.perusahaan?.trim() || "kami";
+  const pic = (aktif.find((i) => i.pic && i.pic.trim()) || {}).pic;
+  const today = fmtTgl(today0().toISOString().slice(0, 10));
+
   let rincian = "";
   if (mode === "full") {
-    rincian = "\n\n" + aktif.map((i) => `• ${i.noInvoice} — JT ${fmtTgl(i.tglJatuhTempo)} — ${rp(i.total)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hr)` : ""}`).join("\n");
+    rincian = "\n\nRincian tagihan:\n" + aktif.map((i, n) =>
+      `${n + 1}. *${i.noInvoice}*${proyekKey(i) ? ` — ${proyekKey(i)}` : ""}\n    Jatuh tempo ${fmtTgl(i.tglJatuhTempo)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hari)` : ""}\n    Tagihan: ${rp(i.total)}`
+    ).join("\n");
   } else if (mode === "range") {
-    rincian = `\n\nTagihan: ${invoiceRange(aktif)}`;
+    rincian = `\n\nUntuk invoice: ${invoiceRange(aktif)} (${aktif.length} tagihan).`;
   }
-  return `Yth. ${name},\n\nIzin mengingatkan, saat ini terdapat *${aktif.length}* tagihan yang masih perlu diselesaikan kepada ${pt} dengan total *${rp(totOut)}*.${rincian}\n\nMohon konfirmasi rencana pembayarannya. Terima kasih.`;
+
+  const dendaLine = totDenda > 0 ? `\n  • Denda keterlambatan: ${rp(totDenda)}` : "";
+  const odLine = maxOd > 0 ? `\n\nTunggakan terlama telah mencapai *${maxOd} hari* sejak jatuh tempo.` : "";
+
+  return (
+`Kepada Yth.
+*${name}*${pic ? `\nu.p. ${pic}` : ""}
+
+Dengan hormat,
+
+Izin menyampaikan posisi tagihan Bapak/Ibu kepada *${pt}* per ${today}, dengan rincian sebagai berikut:${rincian}
+
+Total kewajiban: *${rp(totOut)}*
+  • Pokok: ${rp(totPokok)}${dendaLine}
+Jumlah tagihan: ${aktif.length} invoice${odLine}
+
+Mohon kesediaannya untuk mengonfirmasi rencana penyelesaian pembayaran. Apabila pembayaran telah dilakukan, mohon abaikan pesan ini dan kirimkan buktinya.
+
+Terima kasih atas perhatian dan kerja samanya.
+
+Hormat kami,
+*${pt}*${s.kontakKantor?.trim() ? `\n${s.kontakKantor.trim()}` : ""}`
+  );
 }
 
 /* ---------- Backup JSON ---------- */
@@ -2018,7 +2059,7 @@ export default function KolektaApp() {
     for (const i of enriched) {
       const nm = proyekKey(i); if (!nm) continue;
       const k = nm.toLowerCase();
-      if (!m.has(k)) m.set(k, { nama: nm, cust: (i.customer || "").trim().toLowerCase() });
+      if (!m.has(k)) m.set(k, { nama: nm, cust: custKeyOf(i.customer) });
     }
     return [...m.values()];
   }, [enriched]);
@@ -2185,7 +2226,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   const proyekGroups = useMemo(() => {
     const m = new Map();
     for (const i of filtered) {
-      const key = `${(i.customer || "").trim().toLowerCase()}|||${proyekLabel(i).toLowerCase()}`;
+      const key = `${custKeyOf(i.customer)}|||${proyekLabel(i).toLowerCase()}`;
       if (!m.has(key)) m.set(key, { customer: i.customer || "—", proyek: proyekLabel(i), items: [] });
       m.get(key).items.push(i);
     }
@@ -2226,7 +2267,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   // Terapkan perubahan profil ke SEMUA invoice milik 1 customer sekaligus.
   const bulkPatchByCustomer = (custName, patchObj) => setData((d) => ({
     ...d,
-    invoices: d.invoices.map((i) => (i.customer || "").trim().toLowerCase() === custName.trim().toLowerCase() ? { ...i, ...patchObj } : i),
+    invoices: d.invoices.map((i) => custKeyOf(i.customer) === custKeyOf(custName) ? { ...i, ...patchObj } : i),
   }));
   const addWorklog = (entry) => setData((d) => ({ ...d, worklog: [{ ...entry, id: uid(), ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString() }, ...(d.worklog || [])] }));
   const removeWorklog = (id) => setData((d) => ({ ...d, worklog: (d.worklog || []).filter((w) => w.id !== id) }));
@@ -2648,7 +2689,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <button onClick={() => { try { exportExcel(enriched, s); audit("export", "Excel daftar tagihan", null, { count: enriched.length }); flash("Excel diunduh"); } catch { flash("Export gagal di lingkungan ini"); } }}
                 className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><FileSpreadsheet size={16} /><span className="hidden sm:inline">Excel</span></button>
-              <button onClick={() => setShowAdd((v) => !v)}
+              <button onClick={() => setShowBulkAdd(true)}
                 className="flex items-center gap-1 rounded-lg px-3 text-sm font-semibold text-white shadow-sm"
                 style={{ background: T.brand }}><Plus size={16} /><span className="hidden sm:inline">Tambah</span></button>
             </div>
@@ -3680,7 +3721,7 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "", projects 
   const [f, setF] = useState({ customer: "", noInvoice: "", nominal: "", tglJatuhTempo: "", pic: "", telp: "", tipe: "perusahaan", proyek: "", alamat: "", jaminanTipe: "none", jaminan: "", assignedTo: defaultPetugas });
   // Saran proyek: utamakan proyek pada customer yang sama, lalu semua proyek lain.
   const proyekSaran = useMemo(() => {
-    const cust = f.customer.trim().toLowerCase();
+    const cust = custKeyOf(f.customer);
     const mine = [], other = [];
     for (const p of projects) {
       if (!p || !p.nama) continue;
@@ -3742,7 +3783,7 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "", projects 
 }
 
 /* ===================== MODUL PELANGGAN ===================== */
-const custKeyOf = (name) => (name || "").trim().toLowerCase();
+
 
 /* Daftar pelanggan: agregasi invoice per customer. */
 function PelangganTab({ enriched, data, onOpen, onBulkAdd }) {
