@@ -28,6 +28,42 @@ async function tenantOf(code: string): Promise<string | null> {
   return tid || null;
 }
 
+// Verifikasi rahasia admin Kolekta (lintas-PT) lewat RPC kolekta_is_admin.
+async function isAdmin(secret: string): Promise<boolean> {
+  if (!secret) return false;
+  const { data, error } = await admin.rpc("kolekta_is_admin", { p_admin: secret });
+  if (error) return false;
+  return data === true || (Array.isArray(data) && data[0] === true);
+}
+
+// Daftar file 1 tenant di bucket (2 tingkat: {tenant}/{scope}/{file}).
+async function listTenantFiles(tenant: string) {
+  const out: any[] = [];
+  const { data: scopes } = await admin.storage.from(BUCKET).list(tenant, { limit: 1000 });
+  for (const entry of (scopes || [])) {
+    if (entry.id == null) {
+      // folder scope -> daftar isinya
+      const scope = entry.name;
+      const { data: files } = await admin.storage.from(BUCKET).list(`${tenant}/${scope}`, { limit: 1000 });
+      for (const f of (files || [])) {
+        if (f.id == null) continue;
+        out.push({
+          path: `${tenant}/${scope}/${f.name}`, name: f.name, scope,
+          size: f.metadata?.size ?? null, mimetype: f.metadata?.mimetype ?? null,
+          created_at: f.created_at ?? null,
+        });
+      }
+    } else {
+      out.push({
+        path: `${tenant}/${entry.name}`, name: entry.name, scope: "",
+        size: entry.metadata?.size ?? null, mimetype: entry.metadata?.mimetype ?? null,
+        created_at: entry.created_at ?? null,
+      });
+    }
+  }
+  return out;
+}
+
 const safeName = (n: string) =>
   (n || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "file";
 
@@ -47,6 +83,36 @@ Deno.serve(async (req) => {
   try { payload = await req.json(); } catch { return json(400, { error: "bad_json" }); }
 
   const action = payload?.action;
+
+  // ----- Aksi admin (lintas-PT): butuh rahasia admin, bukan kode login -----
+  if (action === "admin-list" || action === "admin-url" || action === "admin-del") {
+    try {
+      if (!(await isAdmin(String(payload?.admin || "")))) return json(401, { error: "invalid_admin" });
+      if (action === "admin-list") {
+        const tenant = String(payload?.tenant || "").replace(/[^a-zA-Z0-9_-]/g, "");
+        if (!tenant) return json(400, { error: "no_tenant" });
+        return json(200, { files: await listTenantFiles(tenant) });
+      }
+      const paths: string[] = Array.isArray(payload?.paths) ? payload.paths.filter((p: any) => typeof p === "string") : [];
+      if (action === "admin-url") {
+        const urls: Record<string, string> = {};
+        if (paths.length) {
+          const { data } = await admin.storage.from(BUCKET).createSignedUrls(paths, SIGN_TTL);
+          for (const row of (data || [])) if (row.signedUrl && row.path) urls[row.path] = row.signedUrl;
+        }
+        return json(200, { urls });
+      }
+      // admin-del
+      if (paths.length) {
+        const { error } = await admin.storage.from(BUCKET).remove(paths);
+        if (error) return json(500, { error: "del_failed", detail: error.message });
+      }
+      return json(200, { removed: paths.length });
+    } catch (e: any) {
+      return json(500, { error: "exception", detail: String(e?.message || e) });
+    }
+  }
+
   const code = String(payload?.code || "");
   const tid = await tenantOf(code);
   if (!tid) return json(401, { error: "invalid_code" });

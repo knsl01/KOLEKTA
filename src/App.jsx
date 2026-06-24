@@ -6,7 +6,7 @@ import {
   BarChart3, ClipboardList, Send, Menu, SlidersHorizontal, CalendarClock, FileSignature, Truck, Camera, MapPin,
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
   Moon, Sun, ChevronLeft, ChevronRight, Paperclip, ArrowRight,
-  CheckCheck, Users, ArrowLeft, Image as ImageIcon, Phone, Video,
+  CheckCheck, Users, ArrowLeft, Image as ImageIcon, Phone, Video, FolderOpen, Eye,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -1138,7 +1138,7 @@ const sbChatMarkRead = (code, me, role, conv, last) =>
   sbRpc("kolekta_chat_mark_read", { p_code: code, p_me: me, p_role: role, p_conv: conv, p_last: last || 0 });
 const sbChatConvos = async (code, role, me) =>
   (await sbRpc("kolekta_chat_convos", { p_code: code, p_role: role, p_me: me })) || [];
-const CHAT_ATT_MAX = 5 * 1024 * 1024; // 5 MB / file
+const CHAT_ATT_MAX = 10 * 1024 * 1024; // 10 MB / file
 
 /* ---------- File broker (Supabase Storage via Edge Function kfile) ----------
    File (foto/lampiran) disimpan di bucket privat, bukan base64 di database.
@@ -1174,6 +1174,10 @@ async function sbSignUrls(code, paths) {
   }
   const out = {}; for (const p of (paths || [])) if (_signCache.has(p)) out[p] = _signCache.get(p); return out;
 }
+/* Admin (lintas-PT): kelola file Storage per PT lewat broker (pakai rahasia admin). */
+const sbAdminFiles = async (secret, tenantId) => ((await sbFn("admin-list", { admin: secret, tenant: tenantId })) || {}).files || [];
+const sbAdminFileUrls = async (secret, paths) => ((await sbFn("admin-url", { admin: secret, paths })) || {}).urls || {};
+const sbAdminFileDelete = (secret, paths) => sbFn("admin-del", { admin: secret, paths });
 /* Hook: kembalikan src tampilan untuk lampiran (base64 lama langsung, path -> signed URL). */
 function useStoredSrc(code, att) {
   const path = att && att.path; const data = att && att.data;
@@ -1517,7 +1521,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
     try {
       const out = [];
       for (const f of files) {
-        if (f.size > CHAT_ATT_MAX) { setErr(`${f.name}: file > 5 MB`); setTimeout(() => setErr(""), 2800); continue; }
+        if (f.size > CHAT_ATT_MAX) { setErr(`${f.name}: file > 10 MB`); setTimeout(() => setErr(""), 2800); continue; }
         try { const data = await readFileData(f); out.push({ name: f.name || "file", type: f.type && f.type.startsWith("image/") ? "image" : "file", size: f.size, data }); } catch {}
       }
       if (out.length) setAtts((p) => [...p, ...out]);
@@ -3079,7 +3083,7 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
     setBusyFiles(true);
     const out = [];
     for (const f of files) {
-      if (f.size > 8 * 1048576) { flash(`${f.name} terlalu besar (maks 8 MB)`); continue; }
+      if (f.size > 10 * 1048576) { flash(`${f.name} terlalu besar (maks 10 MB)`); continue; }
       try {
         if (f.type.startsWith("image/")) {
           const data = await resizeImage(f, 1280, 0.7);
@@ -5173,6 +5177,12 @@ function AdminPanel({ th, onBack }) {
   const [addRole, setAddRole] = useState("petugas");
   const [addName, setAddName] = useState("");
   const [panel, setPanel] = useState("tenants");       // tenants | audit
+  const [fileOpen, setFileOpen] = useState("");        // tenant_id panel file dibuka
+  const [fileCache, setFileCache] = useState({});      // tenant_id -> daftar file
+  const [fileUrls, setFileUrls] = useState({});        // path -> signed url (thumbnail/buka)
+  const [loadingFiles, setLoadingFiles] = useState("");
+  const [fDel, setFDel] = useState("");                // path konfirmasi hapus
+  const [fBusy, setFBusy] = useState(false);
 
   const DELETE_CODE = "12345";
   const STORAGE_CAP = 500 * 1048576; // ~500 MB (kuota database Supabase free)
@@ -5208,6 +5218,36 @@ function AdminPanel({ th, onBack }) {
   };
 
   const loadStorage = async () => { try { setStorage(await sbAdminStorage(secret)); } catch {} };
+
+  // Daftar & hapus file Storage per PT (lewat broker, rahasia admin).
+  const loadFiles = async (t, force) => {
+    if (fileCache[t.tenant_id] && !force) return;
+    setLoadingFiles(t.tenant_id);
+    try {
+      const list = await sbAdminFiles(secret, t.tenant_id);
+      setFileCache((c) => ({ ...c, [t.tenant_id]: list }));
+      const imgs = list.filter((f) => (f.mimetype || "").startsWith("image/")).map((f) => f.path);
+      if (imgs.length) { try { const u = await sbAdminFileUrls(secret, imgs); setFileUrls((m) => ({ ...m, ...u })); } catch {} }
+    } catch (e) { setMsg(errText(e.message)); }
+    setLoadingFiles("");
+  };
+  const toggleFiles = (t) => {
+    if (fileOpen === t.tenant_id) { setFileOpen(""); return; }
+    setFileOpen(t.tenant_id); setFDel(""); loadFiles(t);
+  };
+  const openFile = async (f) => {
+    let url = fileUrls[f.path];
+    if (!url) { try { const u = await sbAdminFileUrls(secret, [f.path]); url = u[f.path]; setFileUrls((m) => ({ ...m, ...u })); } catch {} }
+    if (url) window.open(url, "_blank", "noopener");
+  };
+  const confirmDeleteFile = async (t, f) => {
+    setFBusy(true); setMsg("");
+    try { await sbAdminFileDelete(secret, [f.path]); await loadFiles(t, true); setFDel(""); loadStorage(); setMsg("File dihapus ✓"); }
+    catch (e) { setMsg(errText(e.message)); }
+    setFBusy(false);
+  };
+  const cleanName = (n) => String(n || "file").replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, "");
+  const scopeLabel = (s) => (s === "lapor" ? "Foto lapangan" : s === "chat" ? "Lampiran chat" : (s || "File"));
 
   const open = async () => {
     if (!secret.trim()) return setMsg("Masukkan rahasia admin.");
@@ -5481,6 +5521,58 @@ function AdminPanel({ th, onBack }) {
                               + Tambah anggota
                             </button>
                           )}
+
+                          {/* File tersimpan di Storage (foto lapangan + lampiran chat) — admin bisa hapus */}
+                          <div className="mt-1 border-t pt-2" style={{ borderColor: th.line }}>
+                            <button onClick={() => toggleFiles(t)} className="flex w-full items-center gap-1.5 text-left">
+                              <FolderOpen size={14} style={{ color: th.brand2 }} />
+                              <span className="text-[11px] font-semibold" style={{ color: th.ink }}>File tersimpan</span>
+                              {fileCache[t.tenant_id] && <span className="text-[10px]" style={{ color: th.sub }}>({fileCache[t.tenant_id].length})</span>}
+                              <ChevronDown size={13} style={{ marginLeft: "auto", color: th.sub, transform: fileOpen === t.tenant_id ? "none" : "rotate(-90deg)", transition: "transform .15s" }} />
+                            </button>
+                            {fileOpen === t.tenant_id && (
+                              <div className="mt-2">
+                                {loadingFiles === t.tenant_id && !fileCache[t.tenant_id] ? (
+                                  <p className="text-[11px]" style={{ color: th.sub }}>Memuat file…</p>
+                                ) : (fileCache[t.tenant_id] || []).length === 0 ? (
+                                  <p className="text-[11px]" style={{ color: th.sub }}>Belum ada file tersimpan.</p>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {(fileCache[t.tenant_id] || []).map((f) => {
+                                      const isImg = (f.mimetype || "").startsWith("image/");
+                                      const url = fileUrls[f.path];
+                                      return (
+                                        <div key={f.path} className="rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+                                          <div className="flex items-center gap-2">
+                                            {isImg && url ? (
+                                              <img src={url} alt="" onClick={() => openFile(f)} className="h-9 w-9 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${th.line}` }} />
+                                            ) : (
+                                              <div className="grid h-9 w-9 shrink-0 place-items-center rounded" style={{ background: th.bg, border: `1px solid ${th.line}` }}>
+                                                {isImg ? <ImageIcon size={15} style={{ color: th.sub }} /> : <FileText size={15} style={{ color: th.sub }} />}
+                                              </div>
+                                            )}
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate text-[11px] font-medium" style={{ color: th.ink }}>{cleanName(f.name)}</p>
+                                              <p className="text-[10px]" style={{ color: th.sub }}>{scopeLabel(f.scope)}{f.size ? ` · ${fmtBytes(f.size)}` : ""}</p>
+                                            </div>
+                                            <button onClick={() => openFile(f)} title="Buka file" className="shrink-0 rounded-md p-1.5" style={{ color: th.brand2, border: `1px solid ${th.line}` }}><Eye size={13} /></button>
+                                            <button onClick={() => { setFDel(f.path); setMsg(""); }} title="Hapus file" className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}` }}><Trash2 size={13} /></button>
+                                          </div>
+                                          {fDel === f.path && (
+                                            <div className="mt-1.5 flex items-center gap-1.5">
+                                              <span className="text-[11px]" style={{ color: th.red }}>Hapus file ini permanen?</span>
+                                              <button disabled={fBusy} onClick={() => confirmDeleteFile(t, f)} className="ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-white" style={{ background: th.red, opacity: fBusy ? 0.6 : 1 }}>{fBusy ? "Menghapus…" : "Hapus"}</button>
+                                              <button onClick={() => setFDel("")} className="shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold" style={{ background: th.bg, color: th.sub, border: `1px solid ${th.line}` }}>Batal</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
