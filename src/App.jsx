@@ -71,7 +71,6 @@ const stLabel = (st) => STATUS_META[st].label;
 const NAV = [
   { id: "hari", icon: Bell, label: "Hari Ini" },
   { id: "tagihan", icon: Wallet, label: "Tagihan" },
-  { id: "pelanggan", icon: Users, label: "Pelanggan" },
   { id: "analitik", icon: BarChart3, label: "Analitik" },
   { id: "heatmap", icon: Flame, label: "Heat Map" },
   { id: "riwayat", icon: History, label: "Riwayat" },
@@ -1885,6 +1884,7 @@ export default function KolektaApp() {
   const [worklogView, setWorklogView] = useState("list");
   const [showFilter, setShowFilter] = useState(false);
   const [groupView, setGroupView] = useState(false);
+  const [bulkCust, setBulkCust] = useState("");   // pelanggan terpilih untuk aksi massal di tab Tagihan
   const [fStatus, setFStatus] = useState("all");
   const [fTipe, setFTipe] = useState("all");
   const [fJaminan, setFJaminan] = useState("all");
@@ -2399,6 +2399,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             {navItems.map((n) => (
               <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
             ))}
+            <SideBtn id="pelanggan" icon={Users} label="Pelanggan" />
             <button onClick={openLapor}
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ color: T.brand2 }}>
               <ClipboardList size={18} /><span>Lapor</span>
@@ -2470,7 +2471,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
         {/* Judul (PC) */}
         <div className="hidden pb-1 pt-7 lg:block">
-          <h2 className="text-xl font-bold tracking-tight" style={{ color: T.ink }}>{navItems.find((n) => n.id === tab)?.label}</h2>
+          <h2 className="text-xl font-bold tracking-tight" style={{ color: T.ink }}>{navItems.find((n) => n.id === tab)?.label || (tab === "pelanggan" ? "Pelanggan" : "")}</h2>
         </div>
 
         {/* Konten beranimasi */}
@@ -2709,6 +2710,24 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
             {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} projects={allProjects} onAdd={(inv) => { addInvoice(inv); setShowAdd(false); flash("Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
 
+            {/* Aksi massal per pelanggan (tagih WA / statement / eskalasi semua invoice 1 PT) */}
+            <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <div className="flex items-center gap-2">
+                <p className="shrink-0 text-xs font-semibold" style={{ color: T.sub }}>Aksi massal:</p>
+                <select value={bulkCust} onChange={(e) => setBulkCust(e.target.value)} className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-xs" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }}>
+                  <option value="">— pilih pelanggan —</option>
+                  {[...new Set(enriched.map((i) => i.customer).filter(Boolean))].sort((a, b) => a.localeCompare(b)).map((nm) => <option key={nm} value={nm}>{nm}</option>)}
+                </select>
+              </div>
+              {bulkCust && (
+                <div className="mt-2">
+                  <BulkActions custName={bulkCust} rows={enriched.filter((i) => custKeyOf(i.customer) === custKeyOf(bulkCust))} enriched={enriched} s={s}
+                    telp={enriched.find((i) => custKeyOf(i.customer) === custKeyOf(bulkCust))?.telp || ""}
+                    flash={flash} copy={copy} audit={audit} patch={patch} />
+                </div>
+              )}
+            </div>
+
             {groupView ? (
               <div className="space-y-4">
                 {proyekGroups.map((g) => (
@@ -2933,6 +2952,11 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                   </button>
                 );
               })}
+              <button onClick={() => { setTab("pelanggan"); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium"
+                style={tab === "pelanggan" ? { background: T.brand, color: "#fff" } : { color: T.sub }}>
+                <Users size={18} /><span>Pelanggan</span>
+              </button>
               <button onClick={() => { openLapor(); setDrawer(false); }}
                 className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ color: T.brand2 }}>
                 <ClipboardList size={18} /><span>Lapor</span>
@@ -2967,11 +2991,13 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         <BulkInvoiceForm
           lockedCustomer={showBulkAdd && showBulkAdd.customer ? showBulkAdd.customer : ""}
           petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""}
-          customers={data?.customers || {}} existing={allEnriched}
+          customers={data?.customers || {}} existing={allEnriched} flash={flash}
           onSave={(rows, prof) => {
             addMany(rows);
             if (prof && prof.key) patchCustomer(prof.key, () => prof.data);
             setShowBulkAdd(null);
+            // Buka pelanggan yang baru ditambah supaya perubahannya langsung terlihat.
+            if (prof && prof.key) { setTab("pelanggan"); setCustSel(prof.key); }
             flash(`${rows.length} invoice ditambahkan`);
           }}
           onCancel={() => setShowBulkAdd(null)} />
@@ -3792,7 +3818,51 @@ function PelangganTab({ enriched, data, onOpen, onBulkAdd }) {
   );
 }
 
-/* Detail 1 pelanggan: profil + ringkasan + aksi massal + invoice per proyek + file. */
+/* Aksi massal untuk SEMUA tagihan 1 pelanggan: tagih WA, statement/somasi
+   gabungan, dan eskalasi semua. Dokumen bisa ringkas (rentang/total saja). */
+function BulkActions({ custName, rows, enriched, s, telp, flash, copy, audit, patch }) {
+  const [docMode, setDocMode] = useState("range");
+  const aktif = rows.filter((i) => i.status !== "lunas");
+  const doStatement = () => {
+    const t = statementText(custName, enriched, s, docMode);
+    audit("export", "Statement " + custName);
+    if (printLetter("Statement " + custName, t)) flash("Statement dibuat");
+    else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); }
+  };
+  const doTagihWa = () => {
+    const text = tagihWaText(custName, rows, s, docMode);
+    const link = waLink(telp, text);
+    if (link) window.open(link, "_blank", "noopener");
+    else { copy(text); flash("No. WA kosong — pesan disalin"); }
+    audit("tagih", custName, null, { bulk: aktif.length });
+  };
+  const bulkEskalasi = () => {
+    if (!aktif.length) { flash("Tidak ada tagihan aktif"); return; }
+    const ts = today0().toISOString().slice(0, 10);
+    aktif.forEach((i) => patch(i.id, (x) => ({ ...x, eskalasi: [{ ts, level: recoLevel(i) }, ...(x.eskalasi || [])] })));
+    audit("eskalasi", custName, null, { bulk: aktif.length });
+    flash(`Eskalasi dicatat untuk ${aktif.length} invoice`);
+  };
+  return (
+    <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="truncate text-xs font-semibold" style={{ color: T.sub }}>Aksi semua tagihan · <b style={{ color: T.ink }}>{custName}</b> ({aktif.length} aktif)</p>
+        <select value={docMode} onChange={(e) => setDocMode(e.target.value)} className="shrink-0 rounded-lg px-2 py-1 text-[11px]" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }}>
+          <option value="full">Rinci per invoice</option>
+          <option value="range">Rentang (awal–akhir)</option>
+          <option value="ringkas">Ringkas (total saja)</option>
+        </select>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <button onClick={doTagihWa} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.green }}><Send size={14} /> Tagih WA</button>
+        <button onClick={doStatement} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.brand }}><Printer size={14} /> Statement</button>
+        <button onClick={bulkEskalasi} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.brand2 }}><AlertTriangle size={14} /> Eskalasi</button>
+      </div>
+    </div>
+  );
+}
+
+/* Detail 1 pelanggan: profil + ringkasan + invoice per proyek + file. */
 function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, patch, bulkPatchByCustomer, patchCustomer, renderCard, onBack, onBulkAdd }) {
   const rows = useMemo(() => enriched.filter((i) => custKeyOf(i.customer) === custKey), [enriched, custKey]);
   const stored = (data?.customers || {})[custKey] || {};
@@ -3810,7 +3880,6 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
 
   const [editP, setEditP] = useState(false);
   const [prof, setProf] = useState({ pic: stored.pic ?? rows[0]?.pic ?? "", telp: stored.telp ?? rows[0]?.telp ?? "", alamat: stored.alamat ?? rows[0]?.alamat ?? "" });
-  const [docMode, setDocMode] = useState("range");
   const [busyFile, setBusyFile] = useState(false);
   const fileRef = useRef(null);
   const files = stored.files || [];
@@ -3821,27 +3890,6 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
     patchCustomer(custKey, () => ({ nama: custName, pic: prof.pic.trim(), telp: prof.telp.trim(), alamat: prof.alamat.trim() }));
     audit("profil", custName, null, { bulk: rows.length });
     setEditP(false); flash("Profil diterapkan ke semua invoice");
-  };
-  const doStatement = () => {
-    const t = statementText(custName, enriched, s, docMode);
-    audit("export", "Statement " + custName);
-    if (printLetter("Statement " + custName, t)) flash("Statement dibuat");
-    else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); }
-  };
-  const doTagihWa = () => {
-    const text = tagihWaText(custName, rows, s, docMode);
-    const link = waLink(telp, text);
-    if (link) window.open(link, "_blank", "noopener");
-    else { copy(text); flash("No. WA kosong — pesan disalin"); }
-    audit("tagih", custName, null, { bulk: rows.filter((i) => i.status !== "lunas").length });
-  };
-  const bulkEskalasi = () => {
-    const aktif = rows.filter((i) => i.status !== "lunas");
-    if (!aktif.length) { flash("Tidak ada tagihan aktif"); return; }
-    const ts = today0().toISOString().slice(0, 10);
-    aktif.forEach((i) => patch(i.id, (x) => ({ ...x, eskalasi: [{ ts, level: recoLevel(i) }, ...(x.eskalasi || [])] })));
-    audit("eskalasi", custName, null, { bulk: aktif.length });
-    flash(`Eskalasi dicatat untuk ${aktif.length} invoice`);
   };
   const onPickFiles = async (e) => {
     const list = [...(e.target.files || [])]; e.target.value = "";
@@ -3882,7 +3930,10 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
             <div className="flex items-center gap-1.5"><Building2 size={16} style={{ color: T.brand2 }} /><h2 className="truncate text-base font-bold" style={{ color: T.ink }}>{custName}</h2></div>
             <p className="mt-0.5 text-[11px]" style={{ color: T.sub }}>{rows.length} invoice · {groups.length} proyek</p>
           </div>
-          <button onClick={() => setEditP((v) => !v)} className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Pencil size={13} /></button>
+          <div className="flex shrink-0 gap-1.5">
+            <button onClick={() => onBulkAdd(custName)} className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white" style={{ background: T.brand }}><Plus size={13} /> Invoice</button>
+            <button onClick={() => setEditP((v) => !v)} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Pencil size={13} /></button>
+          </div>
         </div>
         {editP ? (
           <div className="mt-3 space-y-2">
@@ -3909,23 +3960,8 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
         {card("Tertunggak", rp(roll.tertunggak), roll.tertunggak > 0 ? T.red : T.ink)}
       </div>
 
-      {/* Aksi massal */}
-      <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold" style={{ color: T.sub }}>Aksi untuk semua tagihan</p>
-          <select value={docMode} onChange={(e) => setDocMode(e.target.value)} className="rounded-lg px-2 py-1 text-[11px]" style={{ background: T.bg, border: `1px solid ${T.line}`, color: T.ink }}>
-            <option value="full">Rinci per invoice</option>
-            <option value="range">Rentang (awal–akhir)</option>
-            <option value="ringkas">Ringkas (total saja)</option>
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <button onClick={doTagihWa} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.green }}><Send size={14} /> Tagih WA</button>
-          <button onClick={doStatement} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.brand }}><Printer size={14} /> Statement</button>
-          <button onClick={bulkEskalasi} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold text-white" style={{ background: T.brand2 }}><AlertTriangle size={14} /> Eskalasi</button>
-          <button onClick={() => onBulkAdd(custName)} className="flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Plus size={14} /> Invoice</button>
-        </div>
-      </div>
+      {/* Aksi massal per pelanggan juga tersedia di tab Tagihan. */}
+      <BulkActions custName={custName} rows={rows} enriched={enriched} s={s} telp={telp} flash={flash} copy={copy} audit={audit} patch={patch} />
 
       {/* File pelanggan (AR & dokumen lain) */}
       <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -3963,7 +3999,7 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
 }
 
 /* Input banyak invoice sekaligus untuk 1 customer (profil diisi sekali, total berjalan). */
-function BulkInvoiceForm({ lockedCustomer, petugas = [], defaultPetugas = "", customers = {}, existing = [], onSave, onCancel }) {
+function BulkInvoiceForm({ lockedCustomer, petugas = [], defaultPetugas = "", customers = {}, existing = [], onSave, onCancel, flash = () => {} }) {
   const [cust, setCust] = useState(lockedCustomer || "");
   const stored = customers[custKeyOf(cust)] || {};
   const existingRows = useMemo(() => existing.filter((i) => custKeyOf(i.customer) === custKeyOf(cust)), [existing, cust]);
@@ -3987,7 +4023,8 @@ function BulkInvoiceForm({ lockedCustomer, petugas = [], defaultPetugas = "", cu
   const canSave = cust.trim() && validRows.length > 0;
 
   const save = () => {
-    if (!canSave) return;
+    if (!cust.trim()) { flash("Isi nama pelanggan / PT dulu"); return; }
+    if (validRows.length === 0) { flash("Lengkapi tiap invoice: no. invoice, nominal, dan jatuh tempo"); return; }
     const ts = today0().toISOString().slice(0, 10);
     const out = validRows.map((r) => ({
       id: uid(), customer: cust.trim(), noInvoice: r.noInvoice.trim(), nominal: Number(r.nominal),
@@ -4055,7 +4092,7 @@ function BulkInvoiceForm({ lockedCustomer, petugas = [], defaultPetugas = "", cu
         {existingRows.length > 0 && <p className="mb-2 text-right text-[11px]" style={{ color: T.sub }}>Total pelanggan jadi {rp(existingTotal + sumBaru)}</p>}
         <div className="flex gap-2">
           <button onClick={onCancel} className="flex-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
-          <button onClick={save} disabled={!canSave} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand, opacity: canSave ? 1 : 0.45 }}>Simpan {validRows.length || ""} invoice</button>
+          <button onClick={save} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand, opacity: canSave ? 1 : 0.6 }}>Simpan {validRows.length || ""} invoice</button>
         </div>
       </div>
     </div>
