@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
+import * as uploadQueue from "./uploadQueue.js";
 
 /* ---------- Tema (inline style, bukan arbitrary Tailwind) ---------- */
 /* Tiap tema punya varian terang (light) & gelap (dark); mode gelap berlaku untuk semua tema. */
@@ -149,9 +150,12 @@ async function openBukti(b) {
       try { const m = await sbSignUrls(_activeCode, [b.path]); const u = m[b.path]; if (u) window.open(u, "_blank", "noopener"); } catch {}
       return;
     }
-    if (!b?.data) return;
-    if (!/^data:/.test(b.data)) { window.open(b.data, "_blank", "noopener"); return; }
-    const url = URL.createObjectURL(dataUrlToBlob(b.data));
+    // Lampiran masih di antrian (belum terunggah): ambil blob lokal dari IndexedDB.
+    let data = b?.data;
+    if (!data && b?.localId) { try { data = await uploadQueue.getDataUrl(b.localId); } catch {} }
+    if (!data) return;
+    if (!/^data:/.test(data)) { window.open(data, "_blank", "noopener"); return; }
+    const url = URL.createObjectURL(dataUrlToBlob(data));
     const w = window.open(url, "_blank", "noopener");
     if (!w) { const a = document.createElement("a"); a.href = url; a.download = b.name || "bukti"; document.body.appendChild(a); a.click(); a.remove(); }
     setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -1180,16 +1184,32 @@ const sbAdminFileUrls = async (secret, paths) => ((await sbFn("admin-url", { adm
 const sbAdminFileDelete = (secret, paths) => sbFn("admin-del", { admin: secret, paths });
 /* Hook: kembalikan src tampilan untuk lampiran (base64 lama langsung, path -> signed URL). */
 function useStoredSrc(code, att) {
-  const path = att && att.path; const data = att && att.data;
+  const path = att && att.path; const data = att && att.data; const localId = att && att.localId;
   const [src, setSrc] = useState(data || (path ? _signCache.get(path) : null) || null);
   useEffect(() => {
     if (data) { setSrc(data); return; }
+    if (localId) {
+      // Ref antrian lokal: tampilkan blob dari IndexedDB selagi diunggah; bila
+      // upload sudah sukses (path siap) resolve signed URL — tahan walau ref telat ditukar.
+      let alive = true;
+      const resolve = () => {
+        const st = uploadQueue.getStatus(localId);
+        if (st && st.status === "success" && st.path) {
+          sbSignUrls(code, [st.path]).then((m) => { if (alive && m[st.path]) setSrc(m[st.path]); });
+        } else {
+          uploadQueue.getDataUrl(localId).then((d) => { if (alive && d) setSrc(d); });
+        }
+      };
+      resolve();
+      const unsub = uploadQueue.subscribe((e) => { if (e.id === localId) resolve(); });
+      return () => { alive = false; unsub(); };
+    }
     if (!path) { setSrc(null); return; }
     if (_signCache.has(path)) { setSrc(_signCache.get(path)); return; }
     let alive = true;
     sbSignUrls(code, [path]).then((m) => { if (alive && m[path]) setSrc(m[path]); });
     return () => { alive = false; };
-  }, [code, path, data]);
+  }, [code, path, data, localId]);
   return src;
 }
 function StoredImage({ code, att, onClick, className, style }) {
@@ -1197,9 +1217,45 @@ function StoredImage({ code, att, onClick, className, style }) {
   if (!src) return <div className={className} style={{ ...style, display: "grid", placeItems: "center", background: "rgba(0,0,0,.06)", minHeight: 64 }}><ImageIcon size={20} style={{ opacity: 0.4 }} /></div>;
   return <img src={src} alt={att?.name || ""} onClick={onClick} className={className} style={style} />;
 }
-/* Foto lapangan disimpan sbg string: base64 lama ("data:…") atau path bucket baru. */
-const fotoAtt = (v) => (!v || typeof v !== "string") ? null : (v.startsWith("data:") ? { data: v } : { path: v });
-const buktiAtt = (b) => (b && b.path && !b.data) ? { path: b.path, name: b.name } : { data: b && b.data, name: b && b.name };
+/* Badge status upload latar belakang utk lampiran yg masih di antrian (localId).
+   Tampil: Menunggu / Mengunggah… / Gagal (+coba lagi). Sukses/non-lokal -> tak tampil. */
+function useUploadStatus(localId) {
+  const [st, setSt] = useState(() => (localId ? uploadQueue.getStatus(localId) : null));
+  useEffect(() => {
+    if (!localId) { setSt(null); return; }
+    setSt(uploadQueue.getStatus(localId));
+    return uploadQueue.subscribe((e) => { if (e.id === localId) setSt({ status: e.status, path: e.path, error: e.error }); });
+  }, [localId]);
+  return st;
+}
+function UploadBadge({ localId }) {
+  const st = useUploadStatus(localId);
+  if (!localId || !st || st.status === "success") return null;
+  const stop = (e) => { e.stopPropagation(); e.preventDefault(); };
+  const base = { position: "absolute", left: 4, bottom: 4, right: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 6, padding: "2px 4px", fontSize: 9, fontWeight: 700, color: "#fff", lineHeight: 1.2 };
+  if (st.status === "failed")
+    return (
+      <button onClick={(e) => { stop(e); uploadQueue.retry(localId); }} title={st.error || "Gagal mengunggah"} style={{ ...base, background: "rgba(176,70,58,.92)" }}>
+        <RotateCcw size={10} /> Coba lagi
+      </button>
+    );
+  if (st.status === "uploading")
+    return <span style={{ ...base, background: "rgba(12,59,46,.82)" }}><Cloud size={10} /> Mengunggah…</span>;
+  return <span style={{ ...base, background: "rgba(0,0,0,.6)" }}><Clock size={10} /> Menunggu</span>;
+}
+/* Foto lapangan disimpan sbg string: base64 lama ("data:…"), ref antrian
+   lokal ("local:<id>", belum terunggah), atau path bucket. */
+const fotoAtt = (v) => {
+  if (!v || typeof v !== "string") return null;
+  if (v.startsWith("data:")) return { data: v };
+  if (v.startsWith("local:")) return { localId: v.slice(6) };
+  return { path: v };
+};
+const buktiAtt = (b) => {
+  if (b && b.localId) return { localId: b.localId, name: b.name };
+  if (b && b.path && !b.data) return { path: b.path, name: b.name };
+  return { data: b && b.data, name: b && b.name };
+};
 function useFotoSrc(v) { return useStoredSrc(_activeCode, fotoAtt(v)); }
 /* Render foto lapangan (base64/path) + placeholder saat URL belum siap. */
 function FieldFoto({ value, onClick, className, style, alt }) {
@@ -1819,6 +1875,33 @@ export default function KolektaApp() {
       sbPush(auth.code, data).catch(() => { setToast("Gagal sinkron ke server — tersimpan lokal"); setTimeout(() => setToast(""), 2500); });
     }, 1200);
   }, [data, auth]);
+
+  /* Antrian unggah latar belakang: jalankan processor & tukar ref lokal
+     (local:<id>) menjadi path bucket begitu sebuah file selesai diunggah.
+     Dengan begitu DB hanya menyimpan path final, bukan base64. */
+  useEffect(() => {
+    uploadQueue.setUploader(sbUpload);
+    uploadQueue.start();
+    const unsub = uploadQueue.subscribe(({ id, status, path }) => {
+      if (status !== "success" || !path) return;
+      setData((d) => {
+        if (!d) return d;
+        const invoices = (d.invoices || []).map((inv) => {
+          const akt = (inv.aktivitas || []).map((a) =>
+            a && a.foto === `local:${id}` ? { ...a, foto: path } : a);
+          return akt === inv.aktivitas ? inv : { ...inv, aktivitas: akt };
+        });
+        const worklog = (d.worklog || []).map((w) => {
+          if (!(w.bukti || []).some((b) => b && b.localId === id)) return w;
+          const bukti = w.bukti.map((b) =>
+            b && b.localId === id ? { name: b.name, type: b.type, path } : b);
+          return { ...w, bukti };
+        });
+        return { ...d, invoices, worklog };
+      });
+    });
+    return unsub;
+  }, []);
 
   const doLogin = async (code) => {
     const info = await sbLogin(code);
@@ -3008,9 +3091,12 @@ function WorklogDetail({ entry, canDelete, onDelete }) {
             {bukti.map((b, idx) => (
               <button key={idx} type="button" onClick={() => openBukti(b)} title={`Buka ${b.name || "bukti"}`}
                 className="kpress flex flex-col items-center gap-1 rounded-lg p-2 text-center" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                {b.type === "image"
-                  ? <StoredImage code={_activeCode} att={buktiAtt(b)} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
-                  : <span className="flex h-20 w-full items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={28} style={{ color: T.red }} /></span>}
+                <span className="relative h-20 w-full">
+                  {b.type === "image"
+                    ? <StoredImage code={_activeCode} att={buktiAtt(b)} className="h-20 w-full rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                    : <span className="flex h-20 w-full items-center justify-center rounded" style={{ background: T.red + "12" }}><FileText size={28} style={{ color: T.red }} /></span>}
+                  <UploadBadge localId={b.localId} />
+                </span>
                 <span className="w-full truncate text-[10px] font-medium" style={{ color: T.sub }}>{b.name || (b.type === "image" ? "Gambar" : "PDF")}</span>
               </button>
             ))}
@@ -3125,14 +3211,15 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
       const h = HASIL[hasil];
       const tl = tindakLanjut ? `\n\u2192 Tindak lanjut berikutnya: ${fmtTgl(tindakLanjut)}` : "";
       const body = `[${h.label}]${catatan.trim() ? " " + catatan.trim() : ""}${tl}`;
-      // Unggah foto lapangan & bukti ke Storage (simpan path). Gagal -> fallback base64.
-      let fotoRef = null;
-      if (foto) { try { const up = await sbUpload(_activeCode, "lapor", "foto-lapangan.jpg", foto); fotoRef = up.path; } catch { fotoRef = foto; } }
+      // Antrekan foto & bukti ke upload queue (IndexedDB). Laporan TIDAK menunggu
+      // upload selesai; uploader latar belakang menukar ref lokal -> path nanti.
+      let fotoRef = null, fotoId = null;
+      if (foto) { fotoId = await uploadQueue.enqueue({ code: _activeCode, scope: "lapor", name: "foto-lapangan.jpg", dataUrl: foto }); fotoRef = `local:${fotoId}`; }
       const buktiUp = [];
       for (const b of bukti) {
         if (b.path) { buktiUp.push(b); continue; }
-        try { const up = await sbUpload(_activeCode, "lapor", b.name || "bukti", b.data); buktiUp.push({ name: b.name, type: b.type, size: up.size || b.size, path: up.path }); }
-        catch { buktiUp.push(b); }
+        const id = await uploadQueue.enqueue({ code: _activeCode, scope: "lapor", name: b.name || "bukti", dataUrl: b.data });
+        buktiUp.push({ name: b.name, type: b.type, localId: id });
       }
       patch(i.id, (x) => ({
         ...x,
@@ -3141,10 +3228,10 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
         tindakLanjut: tindakLanjut || x.tindakLanjut || "",
         aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
       }));
-      const fotoBukti = fotoRef ? [{ name: "Foto lapangan", type: "image", ...(String(fotoRef).startsWith("data:") ? { data: fotoRef } : { path: fotoRef }) }] : [];
+      const fotoBukti = fotoId ? [{ name: "Foto lapangan", type: "image", localId: fotoId }] : [];
       const buktiAll = [...fotoBukti, ...buktiUp];
       onSaveWorklog({ petugas: petugas || "", invoiceId: i.id, customer: i.customer || "", noInvoice: i.noInvoice || "", deskripsi: catatan.trim(), hasil, tindakLanjut: tindakLanjut || "", bukti: buktiAll });
-      flash("Laporan tersimpan");
+      flash("Laporan tersimpan \u2014 bukti diunggah di latar belakang");
       onDone();
     } catch (err) {
       savingRef.current = false; setSaving(false);   // reset hanya bila gagal; sukses langsung menutup form
@@ -3534,6 +3621,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const [fotoView, setFotoView] = useState(null);
   const [lok, setLok] = useState(null);
   const [busyLoc, setBusyLoc] = useState(false);
+  const fuRef = useRef(false); // guard anti-duplikat catat hasil kontak
   const fotoRef = useRef(null);
   const [showDoc, setShowDoc] = useState(false);
   const [sub, setSub] = useState("tagih");
@@ -3598,18 +3686,25 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   };
   const logEskalasi = (level) => { patch(i.id, (x) => ({ ...x, eskalasi: [{ ts: today0().toISOString().slice(0, 10), level }, ...(x.eskalasi || [])] })); logAudit("eskalasi", ent, null, { level }); };
   const logFollowup = async () => {
-    const h = HASIL[hasil];
-    const body = `[${h.label}]${note.trim() ? " " + note.trim() : ""}`;
-    let fotoRef = null;
-    if (foto) { try { const up = await sbUpload(_activeCode, "lapor", "foto-lapangan.jpg", foto); fotoRef = up.path; } catch { fotoRef = foto; } }
-    patch(i.id, (x) => ({
-      ...x,
-      status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
-      lastFollowUp: today0().toISOString().slice(0, 10),
-      tindakLanjut: tindakLanjut || x.tindakLanjut || "",
-      aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
-    }));
-    setNote(""); setHasil("lain"); setFoto(null); setLok(null); flash("Hasil kontak tercatat");
+    if (fuRef.current) return;                // cegah catat ganda saat klik beruntun
+    fuRef.current = true;
+    try {
+      const h = HASIL[hasil];
+      const body = `[${h.label}]${note.trim() ? " " + note.trim() : ""}`;
+      // Antrekan foto ke upload queue; tidak menunggu upload selesai.
+      let fotoRef = null;
+      if (foto) { const id = await uploadQueue.enqueue({ code: _activeCode, scope: "lapor", name: "foto-lapangan.jpg", dataUrl: foto }); fotoRef = `local:${id}`; }
+      patch(i.id, (x) => ({
+        ...x,
+        status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
+        lastFollowUp: today0().toISOString().slice(0, 10),
+        tindakLanjut: tindakLanjut || x.tindakLanjut || "",
+        aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
+      }));
+      setNote(""); setHasil("lain"); setFoto(null); setLok(null); flash("Hasil kontak tercatat");
+    } finally {
+      fuRef.current = false;
+    }
   };
   const onPickFoto = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
@@ -3816,7 +3911,12 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
                     {i.aktivitas.map((a, idx) => (
                       <div key={idx} className="rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
                         <div className="flex gap-2">
-                          {a.foto && <FieldFoto value={a.foto} onClick={() => setFotoView(a.foto)} className="h-14 w-14 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} />}
+                          {a.foto && (
+                            <span className="relative h-14 w-14 shrink-0">
+                              <FieldFoto value={a.foto} onClick={() => setFotoView(a.foto)} className="h-14 w-14 cursor-pointer rounded object-cover" style={{ border: `1px solid ${T.line}` }} />
+                              <UploadBadge localId={fotoAtt(a.foto)?.localId} />
+                            </span>
+                          )}
                           <div className="min-w-0 flex-1">
                             <p className="text-[11px]" style={{ color: T.brass, fontFamily: MONO }}>{a.waktu ? fmtWaktu(a.waktu) : fmtTgl(a.ts).split(" ").slice(0, 2).join(" ")}</p>
                             <p className="text-xs" style={{ color: T.ink }}>{a.note}</p>
