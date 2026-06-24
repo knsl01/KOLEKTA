@@ -3052,6 +3052,8 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
   const [dForm, setDForm] = useState({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   const [dsig, setDsig] = useState(null);
   const [dsig2, setDsig2] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const onPickFoto = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
@@ -3116,31 +3118,38 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
     setShowDoc(false); setDsig(null); setDsig2(null); setDForm({ jumlah: "", tgl: "", kondisi: "", pembahasan: "", kesepakatan: "" });
   };
   const save = async () => {
+    if (savingRef.current) return;            // cegah simpan ganda saat unggah masih jalan
     if (!catatan.trim()) { flash("Tulis dulu apa yang sudah dilakukan / hasilnya"); return; }
-    const h = HASIL[hasil];
-    const tl = tindakLanjut ? `\n\u2192 Tindak lanjut berikutnya: ${fmtTgl(tindakLanjut)}` : "";
-    const body = `[${h.label}]${catatan.trim() ? " " + catatan.trim() : ""}${tl}`;
-    // Unggah foto lapangan & bukti ke Storage (simpan path). Gagal -> fallback base64.
-    let fotoRef = null;
-    if (foto) { try { const up = await sbUpload(_activeCode, "lapor", "foto-lapangan.jpg", foto); fotoRef = up.path; } catch { fotoRef = foto; } }
-    const buktiUp = [];
-    for (const b of bukti) {
-      if (b.path) { buktiUp.push(b); continue; }
-      try { const up = await sbUpload(_activeCode, "lapor", b.name || "bukti", b.data); buktiUp.push({ name: b.name, type: b.type, size: up.size || b.size, path: up.path }); }
-      catch { buktiUp.push(b); }
+    savingRef.current = true; setSaving(true);
+    try {
+      const h = HASIL[hasil];
+      const tl = tindakLanjut ? `\n\u2192 Tindak lanjut berikutnya: ${fmtTgl(tindakLanjut)}` : "";
+      const body = `[${h.label}]${catatan.trim() ? " " + catatan.trim() : ""}${tl}`;
+      // Unggah foto lapangan & bukti ke Storage (simpan path). Gagal -> fallback base64.
+      let fotoRef = null;
+      if (foto) { try { const up = await sbUpload(_activeCode, "lapor", "foto-lapangan.jpg", foto); fotoRef = up.path; } catch { fotoRef = foto; } }
+      const buktiUp = [];
+      for (const b of bukti) {
+        if (b.path) { buktiUp.push(b); continue; }
+        try { const up = await sbUpload(_activeCode, "lapor", b.name || "bukti", b.data); buktiUp.push({ name: b.name, type: b.type, size: up.size || b.size, path: up.path }); }
+        catch { buktiUp.push(b); }
+      }
+      patch(i.id, (x) => ({
+        ...x,
+        status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
+        lastFollowUp: today0().toISOString().slice(0, 10),
+        tindakLanjut: tindakLanjut || x.tindakLanjut || "",
+        aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
+      }));
+      const fotoBukti = fotoRef ? [{ name: "Foto lapangan", type: "image", ...(String(fotoRef).startsWith("data:") ? { data: fotoRef } : { path: fotoRef }) }] : [];
+      const buktiAll = [...fotoBukti, ...buktiUp];
+      onSaveWorklog({ petugas: petugas || "", invoiceId: i.id, customer: i.customer || "", noInvoice: i.noInvoice || "", deskripsi: catatan.trim(), hasil, tindakLanjut: tindakLanjut || "", bukti: buktiAll });
+      flash("Laporan tersimpan");
+      onDone();
+    } catch (err) {
+      savingRef.current = false; setSaving(false);   // reset hanya bila gagal; sukses langsung menutup form
+      flash("Gagal menyimpan laporan \u2014 coba lagi");
     }
-    patch(i.id, (x) => ({
-      ...x,
-      status: h.status || (x.status === "belum_dihubungi" ? "sudah_followup" : x.status),
-      lastFollowUp: today0().toISOString().slice(0, 10),
-      tindakLanjut: tindakLanjut || x.tindakLanjut || "",
-      aktivitas: [{ ts: today0().toISOString().slice(0, 10), waktu: new Date().toISOString(), note: body, foto: fotoRef, lok: lok || null }, ...(x.aktivitas || [])],
-    }));
-    const fotoBukti = fotoRef ? [{ name: "Foto lapangan", type: "image", ...(String(fotoRef).startsWith("data:") ? { data: fotoRef } : { path: fotoRef }) }] : [];
-    const buktiAll = [...fotoBukti, ...buktiUp];
-    onSaveWorklog({ petugas: petugas || "", invoiceId: i.id, customer: i.customer || "", noInvoice: i.noInvoice || "", deskripsi: catatan.trim(), hasil, tindakLanjut: tindakLanjut || "", bukti: buktiAll });
-    flash("Laporan tersimpan");
-    onDone();
   };
 
   return (
@@ -3243,8 +3252,8 @@ function LaporForm({ invoice: i, s, petugas, flash, copy, patch, audit, onSaveWo
       </div>
 
       <div className="flex gap-2 pb-2">
-        <button onClick={onCancel} className="flex-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>Batal</button>
-        <button onClick={save} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand }}>Simpan laporan</button>
+        <button onClick={onCancel} disabled={saving} className="flex-1 rounded-xl py-2.5 text-sm font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}`, opacity: saving ? 0.45 : 1 }}>Batal</button>
+        <button onClick={save} disabled={saving} className="flex-[2] rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: T.brand, opacity: saving ? 0.6 : 1 }}>{saving ? "Menyimpan…" : "Simpan laporan"}</button>
       </div>
     </div>
   );
