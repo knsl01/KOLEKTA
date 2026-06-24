@@ -3679,7 +3679,7 @@ function Stat({ label, value, sub, accent }) {
   return (
     <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <p className="text-xs" style={{ color: T.sub }}>{label}</p>
-      <p className="mt-1 whitespace-nowrap text-base font-bold sm:text-lg" style={{ fontFamily: MONO, color: accent || T.brand }}>{value}</p>
+      <p title={typeof value === "string" ? value : undefined} className="mt-1 truncate text-base font-bold sm:text-lg" style={{ fontFamily: MONO, color: accent || T.brand }}>{value}</p>
       <p className="text-[11px]" style={{ color: T.sub }}>{sub}</p>
     </div>
   );
@@ -3965,10 +3965,10 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
     flash("File dihapus");
   };
 
-  const card = (label, value, tone) => (
+  const card = (label, value, tone, full) => (
     <div className="rounded-xl p-3 text-center shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>{label}</p>
-      <p className="mt-0.5 text-sm font-bold" style={{ fontFamily: MONO, color: tone || T.ink }}>{value}</p>
+      <p title={full} className="mt-0.5 truncate text-sm font-bold" style={{ fontFamily: MONO, color: tone || T.ink }}>{value}</p>
     </div>
   );
 
@@ -4007,9 +4007,9 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        {card("Nilai", rp(roll.nilai))}
-        {card("Terbayar", rp(roll.terbayar), T.green)}
-        {card("Tertunggak", rp(roll.tertunggak), roll.tertunggak > 0 ? T.red : T.ink)}
+        {card("Nilai", rpc(roll.nilai), undefined, rp(roll.nilai))}
+        {card("Terbayar", rpc(roll.terbayar), T.green, rp(roll.terbayar))}
+        {card("Tertunggak", rpc(roll.tertunggak), roll.tertunggak > 0 ? T.red : T.ink, rp(roll.tertunggak))}
       </div>
 
       {/* Aksi massal dipindah ke tab Tagihan (pilih PT di sana). */}
