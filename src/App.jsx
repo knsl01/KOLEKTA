@@ -3960,8 +3960,7 @@ function CustomerDetail({ custKey, enriched, data, s, auth, flash, copy, audit, 
         {card("Tertunggak", rp(roll.tertunggak), roll.tertunggak > 0 ? T.red : T.ink)}
       </div>
 
-      {/* Aksi massal per pelanggan juga tersedia di tab Tagihan. */}
-      <BulkActions custName={custName} rows={rows} enriched={enriched} s={s} telp={telp} flash={flash} copy={copy} audit={audit} patch={patch} />
+      {/* Aksi massal dipindah ke tab Tagihan (pilih PT di sana). */}
 
       {/* File pelanggan (AR & dokumen lain) */}
       <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
