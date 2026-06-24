@@ -2223,14 +2223,25 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
   // Pengelompokan PT -> Proyek dari hasil filter (urutan mengikuti sort global:
   // grup dengan invoice paling atas muncul lebih dulu).
-  const proyekGroups = useMemo(() => {
+  // Pengelompokan per PELANGGAN (nama sama = satu kesatuan), proyek jadi
+  // sub-bagian di dalamnya. Urutan mengikuti sort global.
+  const customerGroups = useMemo(() => {
     const m = new Map();
     for (const i of filtered) {
-      const key = `${custKeyOf(i.customer)}|||${proyekLabel(i).toLowerCase()}`;
-      if (!m.has(key)) m.set(key, { customer: i.customer || "—", proyek: proyekLabel(i), items: [] });
-      m.get(key).items.push(i);
+      const k = custKeyOf(i.customer);
+      if (!m.has(k)) m.set(k, { key: k, customer: i.customer || "—", items: [] });
+      m.get(k).items.push(i);
     }
-    return [...m.values()].map((g) => ({ ...g, roll: rollupProyek(g.items) }));
+    return [...m.values()].map((g) => {
+      const pm = new Map();
+      for (const i of g.items) {
+        const pk = proyekLabel(i);
+        if (!pm.has(pk)) pm.set(pk, { proyek: pk, items: [] });
+        pm.get(pk).items.push(i);
+      }
+      const projects = [...pm.values()].map((p) => ({ ...p, roll: rollupProyek(p.items) }));
+      return { ...g, roll: rollupProyek(g.items), projects };
+    });
   }, [filtered]);
 
   const agenda = useMemo(() => {
@@ -2677,9 +2688,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari customer / no. invoice"
                   className="w-full bg-transparent py-2.5 text-sm outline-none" />
               </div>
-              <button onClick={() => setGroupView((v) => !v)} title={groupView ? "Tampilan daftar" : "Kelompokkan per proyek"}
+              <button onClick={() => setGroupView((v) => !v)} title={groupView ? "Tampilan daftar" : "Kelompokkan per pelanggan"}
                 className="chip flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
-                style={groupView ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><FolderOpen size={16} /></button>
+                style={groupView ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><Building2 size={16} /><span className="hidden sm:inline">Per PT</span></button>
               <button onClick={() => setShowFilter((v) => !v)}
                 className="chip flex items-center gap-1 rounded-lg px-3 text-sm font-semibold shadow-sm"
                 style={showFilter || fStatus !== "all" || fTipe !== "all" || fJaminan !== "all" ? { background: T.brand2, color: "#fff" } : { background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}><SlidersHorizontal size={16} style={{ transition: "transform .2s ease", transform: showFilter ? "rotate(90deg)" : "none" }} /></button>
@@ -2771,10 +2782,10 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
             {groupView ? (
               <div className="space-y-4">
-                {proyekGroups.map((g) => (
-                  <ProyekGroup key={`${g.customer}|||${g.proyek}`} g={g} renderCard={renderCard} />
+                {customerGroups.map((g) => (
+                  <CustomerGroup key={g.key} g={g} renderCard={renderCard} />
                 ))}
-                {proyekGroups.length === 0 && (
+                {customerGroups.length === 0 && (
                   <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
                     <p className="text-sm font-medium">Belum ada tagihan</p>
                     <p className="mt-1 text-xs" style={{ color: T.sub }}>Tap “Tambah” untuk memasukkan invoice pertama.</p>
@@ -4182,6 +4193,71 @@ function SignaturePad({ onChange }) {
         style={{ background: T.red + "14", color: T.red }}>
         <RotateCcw size={13} /> Ulangi / hapus tanda tangan
       </button>
+    </div>
+  );
+}
+
+/* Header grup PELANGGAN (nama sama = satu kesatuan) + rangkuman seluruh PT;
+   di dalamnya invoice dikelompokkan per proyek sebagai sub-bagian ringan.
+   Overdue tetap per-invoice; header hanya menonjolkan yang terparah & JT terdekat. */
+function CustomerGroup({ g, renderCard }) {
+  const [open, setOpen] = useState(true);
+  const r = g.roll;
+  const pct = r.nilai > 0 ? Math.min(100, Math.round((r.terbayar / r.nilai) * 100)) : 0;
+  const tone = r.allLunas ? T.green : r.worstOverdue > 60 ? T.red : r.worstOverdue > 0 ? T.amber : T.brand2;
+  const projects = g.projects || [];
+  const hideProjHeader = projects.length === 1 && projects[0].proyek === PROYEK_NONE;
+  return (
+    <div className="overflow-hidden rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-3 p-3 text-left" style={{ background: tone + "0E" }}>
+        <div className="h-9 w-1 shrink-0 rounded-full" style={{ background: tone }} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <Building2 size={14} className="shrink-0" style={{ color: T.brand2 }} />
+            <p className="truncate text-sm font-bold" style={{ color: T.ink }}>{g.customer}</p>
+          </div>
+          <p className="mt-0.5 text-[11px]" style={{ color: T.sub }}>{r.count} invoice · {projects.length} proyek</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+            {r.allLunas
+              ? <span className="rounded-full px-2 py-0.5" style={{ background: T.green + "1A", color: T.green }}>Lunas semua</span>
+              : r.worstOverdue > 0
+                ? <span className="rounded-full px-2 py-0.5" style={{ background: tone + "1A", color: tone }}>Telat terparah {r.worstOverdue} hr · {r.overdueCount} termin</span>
+                : <span className="rounded-full px-2 py-0.5" style={{ background: T.brand2 + "1A", color: T.brand2 }}>Belum jatuh tempo</span>}
+            {!r.allLunas && r.nextDue && <span className="rounded-full px-2 py-0.5" style={{ background: T.bg, color: T.sub }}>JT terdekat {fmtTgl(r.nextDue)}</span>}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO, color: r.allLunas ? T.green : T.ink }}>{rp(r.tertunggak)}</p>
+          <p className="text-[10px]" style={{ color: T.sub }}>tertunggak</p>
+        </div>
+        <ChevronDown size={16} style={{ color: T.sub, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+      </button>
+      {r.nilai > 0 && (
+        <div className="px-3 pb-1" style={{ background: tone + "0E" }}>
+          <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: T.line }}>
+            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: tone }} />
+          </div>
+          <p className="mt-1 text-[10px]" style={{ color: T.sub }}>Terbayar {rp(r.terbayar)} dari {rp(r.nilai)} ({pct}%)</p>
+        </div>
+      )}
+      {open && (
+        <div className="space-y-3 p-2" style={{ background: T.bg }}>
+          {projects.map((p) => (
+            <div key={p.proyek} className="space-y-2">
+              {!hideProjHeader && (
+                <div className="flex items-center justify-between gap-2 px-1 pt-1">
+                  <span className="flex min-w-0 items-center gap-1 text-[11px] font-semibold" style={{ color: T.brand2 }}>
+                    <FolderOpen size={12} className="shrink-0" /> <span className="truncate">{p.proyek}</span>
+                    <span className="shrink-0 font-medium" style={{ color: T.sub }}>· {p.items.length} termin</span>
+                  </span>
+                  <span className="shrink-0 text-[11px] font-bold" style={{ fontFamily: MONO, color: T.sub }}>{rp(p.roll.tertunggak)}</span>
+                </div>
+              )}
+              {p.items.map(renderCard)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
