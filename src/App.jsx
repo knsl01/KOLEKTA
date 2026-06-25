@@ -7,6 +7,7 @@ import {
   LogOut, Lock, ShieldCheck, Flame, CalendarDays, Grid3x3, Calculator as CalcIcon, Divide, Percent, Delete, History,
   Moon, Sun, ChevronLeft, ChevronRight, Paperclip, ArrowRight,
   CheckCheck, Users, ArrowLeft, Image as ImageIcon, Phone, Video, FolderOpen, Eye,
+  QrCode,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
@@ -96,30 +97,10 @@ const NAV = [
   { id: "set", icon: Settings, label: "Pengaturan" },
 ];
 
-/* Angka yang menghitung naik halus (count-up) saat nilainya berubah. */
-function useCountUp(target, dur = 750) {
-  const reduce = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const [val, setVal] = useState(reduce ? target : 0);
-  const fromRef = useRef(reduce ? target : 0);
-  const rafRef = useRef(0);
-  useEffect(() => {
-    if (reduce) { fromRef.current = target; setVal(target); return; }
-    const from = fromRef.current;
-    const to = Number(target) || 0;
-    if (from === to) return;
-    const t0 = performance.now();
-    const tick = (t) => {
-      const p = Math.min(1, (t - t0) / dur);
-      const e = 1 - Math.pow(1 - p, 3);
-      const cur = from + (to - from) * e;
-      fromRef.current = cur; setVal(cur);
-      if (p < 1) rafRef.current = requestAnimationFrame(tick);
-      else { fromRef.current = to; setVal(to); }
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [target, dur, reduce]);
-  return val;
+/* Angka langsung tampil di nilai akhirnya (tanpa animasi count-up).
+   Sebelumnya angka "bergerak" naik halus, tapi itu mengganggu — kini diam. */
+function useCountUp(target) {
+  return Number(target) || 0;
 }
 
 /* ---------- Helpers ---------- */
@@ -752,6 +733,15 @@ const fmtAuditTime = (iso) => {
 function loadAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; } }
 function saveAuth(a) { try { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); } catch {} }
 function clearAuth() { try { localStorage.removeItem(AUTH_KEY); } catch {} }
+
+/* Tema terakhir dipakai — disimpan global agar layar Login & Loading
+   (yang tampil sebelum data institusi termuat) tetap menyesuaikan tema. */
+const THEME_KEY = "kolekta:theme";
+function saveThemePref(tema, gelap) { try { localStorage.setItem(THEME_KEY, JSON.stringify({ tema, gelap })); } catch {} }
+function savedThemePalette() {
+  try { const t = JSON.parse(localStorage.getItem(THEME_KEY) || "null"); if (t) return themePalette(t.tema, t.gelap); } catch {}
+  return themePalette("hutan", false);
+}
 
 /* ---------- Import Excel/CSV ---------- */
 function pickv(row, names) {
@@ -1425,6 +1415,7 @@ export default function KolektaApp() {
   /* persist: cache lokal langsung + push ke server (debounce) */
   useEffect(() => {
     if (!loadedRef.current || !data || !auth) return;
+    saveThemePref(data.settings?.tema, data.settings?.gelap);
     (async () => { try { await window.storage.set(KEY + ":" + auth.tenantId, JSON.stringify(data)); } catch {} })();
     if (pushTimer.current) clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(() => {
@@ -1853,7 +1844,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   if (!auth) return <LoginScreen onLogin={doLogin} />;
 
   if (!data)
-    return <div className="flex h-screen items-center justify-center" style={{ background: T.bg, color: T.sub, fontFamily: SANS }}>Memuat Kolekta…</div>;
+    return <LoadingScreen th={savedThemePalette()} />;
 
   T = themePalette(data.settings.tema, data.settings.gelap);
   const glassKind = THEMES[data.settings.tema]?.glass; // "soft" | "pro" | undefined
@@ -5367,9 +5358,85 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
   );
 }
 
+/* ---------- Ilustrasi splash (dokumen + kalender + grafik terhubung) ---------- */
+function SplashArt({ th }) {
+  return (
+    <div className="relative mx-auto kol-float" style={{ width: 248, height: 156 }}>
+      {/* Bingkai garis putus-putus + node penghubung */}
+      <div className="absolute rounded-2xl" style={{ inset: "10px 18px 26px", border: `1.5px dashed ${th.line}` }} />
+      {/* Bayangan alas */}
+      <div className="absolute left-1/2 -translate-x-1/2" style={{ bottom: 10, width: 150, height: 22, borderRadius: 999, background: th.brand, opacity: 0.10, filter: "blur(3px)" }} />
+      {/* Chip kalender (kiri) */}
+      <div className="absolute left-0 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-xl shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+        <CalendarDays size={22} style={{ color: th.brand2 }} />
+      </div>
+      {/* Chip grafik (kanan) */}
+      <div className="absolute right-0 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-xl shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+        <BarChart3 size={22} style={{ color: th.brand2 }} />
+      </div>
+      {/* Dokumen tengah */}
+      <div className="absolute left-1/2 top-1/2 flex h-[92px] w-[74px] -translate-x-1/2 -translate-y-1/2 flex-col gap-2 rounded-xl p-2.5 shadow-md" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+        <div className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: th.green }}>
+          <Check size={12} className="text-white" />
+        </div>
+        <div className="h-1.5 w-full rounded-full" style={{ background: th.line }} />
+        <div className="h-1.5 w-3/4 rounded-full" style={{ background: th.line }} />
+        <div className="h-1.5 w-5/6 rounded-full" style={{ background: th.line }} />
+      </div>
+    </div>
+  );
+}
+
+/* Kartu keamanan kecil dipakai di Login & Loading */
+function SecurityNote({ th, title, desc }) {
+  return (
+    <div className="flex w-full items-start gap-3 rounded-2xl p-3.5 text-left" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+      <ShieldCheck size={22} className="mt-0.5 shrink-0" style={{ color: th.green }} />
+      <div>
+        <p className="text-[13px] font-bold" style={{ color: th.ink }}>{title}</p>
+        <p className="mt-0.5 text-[12px] leading-snug" style={{ color: th.sub }}>{desc}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Layar Loading (splash saat data institusi dimuat) ---------- */
+function LoadingScreen({ th }) {
+  return (
+    <div className="relative flex min-h-screen flex-col items-center justify-center p-6 text-center" style={{ background: th.bg, color: th.ink, fontFamily: SANS }}>
+      <div className="flex w-full max-w-sm flex-col items-center gap-7">
+        <div className="kol-fade-up flex flex-col items-center gap-3">
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
+            <Logo size={58} />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight" style={{ color: th.brand }}>Kolekta</h1>
+            <p className="text-sm font-medium" style={{ color: th.brass }}>Collection Control</p>
+          </div>
+        </div>
+
+        <SplashArt th={th} />
+
+        <div className="kol-fade-up" style={{ animationDelay: ".1s" }}>
+          <p className="text-lg font-bold" style={{ color: th.brand }}>Memuat Kolekta…</p>
+          <p className="mt-1 text-[13px] leading-relaxed" style={{ color: th.sub }}>Menyiapkan sistem kontrol dan monitoring koleksi institusi Anda</p>
+        </div>
+
+        <div className="kol-progress-bar h-1.5 w-56 rounded-full" style={{ background: th.line }}>
+          <span style={{ background: th.brand }} />
+        </div>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-7 mx-auto w-full max-w-sm px-6">
+        <SecurityNote th={th} title="Akses aman & terlindungi" desc="Kami memastikan data institusi Anda aman dengan sistem berlapis." />
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Layar Login (gerbang sebelum app) ---------- */
 function LoginScreen({ onLogin }) {
-  const th = themePalette("hutan", false);
+  const th = savedThemePalette();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -5383,39 +5450,69 @@ function LoginScreen({ onLogin }) {
     catch (e) { setErr(e.message === "Kode tidak dikenal" ? "Kode tidak dikenal / salah." : ("Gagal masuk: " + e.message)); setBusy(false); }
   };
 
+  if (adminMode) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-5" style={{ background: th.bg, color: th.ink, fontFamily: SANS }}>
+        <div className="w-full max-w-sm">
+          <AdminPanel th={th} onBack={() => setAdminMode(false)} />
+          <p className="mt-5 text-center text-[11px] leading-relaxed" style={{ color: th.sub }}>
+            by <span style={{ color: th.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center p-5" style={{ background: th.bg, color: th.ink, fontFamily: SANS }}>
+    <div className="flex min-h-screen flex-col items-center justify-center p-5" style={{ background: th.bg, color: th.ink, fontFamily: SANS }}>
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+        <div className="kol-fade-up mb-7 flex flex-col items-center gap-3 text-center">
           <div className="flex h-20 w-20 items-center justify-center rounded-2xl shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
             <Logo size={64} />
           </div>
           <div>
             <h1 className="text-3xl font-bold tracking-tight" style={{ color: th.brand }}>Kolekta</h1>
-            <p className="text-xs" style={{ color: th.brass }}>collection control</p>
+            <p className="text-sm font-semibold" style={{ color: th.brass }}>Collection Control</p>
+            <p className="mx-auto mt-2 max-w-[15rem] text-[13px] leading-relaxed" style={{ color: th.sub }}>Sistem kontrol dan monitoring koleksi institusi Anda</p>
           </div>
         </div>
 
-        {!adminMode ? (
-          <div className="rounded-2xl p-5 shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
-            <h2 className="mb-1 text-sm font-semibold">Masuk</h2>
-            <p className="mb-3 text-xs" style={{ color: th.sub }}>Masukkan kode akses institusi Anda (diberikan oleh admin).</p>
-            <input autoFocus value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="mis. KOL-XXXX-XXXX" className="w-full rounded-lg px-3 py-2.5 text-sm tracking-wide outline-none"
-              style={{ background: th.bg, border: `1px solid ${th.line}`, color: th.ink, fontFamily: MONO }} />
-            {err && <p className="mt-2 text-[12px]" style={{ color: th.red }}>{err}</p>}
-            <button disabled={busy} onClick={submit}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white"
-              style={{ background: th.brand, opacity: busy ? 0.6 : 1 }}>
-              <Lock size={15} /> {busy ? "Memeriksa…" : "Masuk"}
-            </button>
-            <button onClick={() => { setErr(""); setAdminMode(true); }} className="mt-3 w-full text-[11px] font-semibold" style={{ color: th.brand2 }}>
-              Panel admin
-            </button>
+        <div className="kol-fade-up rounded-2xl p-5 shadow-sm" style={{ background: th.surface, border: `1px solid ${th.line}`, animationDelay: ".08s" }}>
+          <h2 className="mb-1 text-lg font-bold" style={{ color: th.brand }}>Masuk</h2>
+          <p className="mb-4 text-[13px] leading-relaxed" style={{ color: th.sub }}>Masukkan kode akses institusi Anda (diberikan oleh admin).</p>
+
+          <label className="mb-1.5 block text-[13px] font-semibold" style={{ color: th.ink }}>Kode Akses Institusi</label>
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: th.bg, border: `1px solid ${err ? th.red : th.line}` }}>
+            <Building2 size={18} className="shrink-0" style={{ color: th.sub }} />
+            <input autoFocus value={code} onChange={(e) => { setCode(e.target.value); if (err) setErr(""); }} onKeyDown={(e) => e.key === "Enter" && submit()}
+              placeholder="mis. KOL-XXXX-XXXX" className="min-w-0 flex-1 bg-transparent text-sm tracking-wide outline-none"
+              style={{ color: th.ink, fontFamily: MONO }} />
+            <QrCode size={18} className="shrink-0" style={{ color: th.sub, opacity: 0.7 }} />
           </div>
-        ) : (
-          <AdminPanel th={th} onBack={() => setAdminMode(false)} />
-        )}
+          {err && <p className="mt-2 text-[12px]" style={{ color: th.red }}>{err}</p>}
+
+          <button disabled={busy} onClick={submit}
+            className="kpress mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white"
+            style={{ background: th.brand, opacity: busy ? 0.6 : 1 }}>
+            {busy ? <RefreshCw size={16} className="kol-spin" /> : <Lock size={16} />} {busy ? "Memeriksa…" : "Masuk"}
+          </button>
+
+          <div className="my-4 flex items-center gap-3">
+            <div className="h-px flex-1" style={{ background: th.line }} />
+            <span className="text-[11px] font-semibold tracking-wide" style={{ color: th.sub }}>ATAU</span>
+            <div className="h-px flex-1" style={{ background: th.line }} />
+          </div>
+
+          <button onClick={() => { setErr(""); setAdminMode(true); }}
+            className="kpress flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold"
+            style={{ background: "transparent", border: `1.5px solid ${th.brand}`, color: th.brand }}>
+            <ShieldCheck size={16} /> Masuk sebagai Panel Admin
+          </button>
+        </div>
+
+        <div className="kol-fade-up mt-4" style={{ animationDelay: ".16s" }}>
+          <SecurityNote th={th} title="Akses aman & terpercaya" desc="Seluruh akses dilindungi sistem keamanan berlapis untuk menjaga data institusi Anda." />
+        </div>
 
         <p className="mt-5 text-center text-[11px] leading-relaxed" style={{ color: th.sub }}>
           by <span style={{ color: th.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs

@@ -16,3 +16,48 @@ body {
 @media (max-width: 1024px) {
   input, select, textarea { font-size: 16px !important; }
 }
+
+/* ---------- Animasi splash / loading & login ---------- */
+@keyframes kol-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes kol-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+@keyframes kol-pulse-ring {
+  0%   { transform: scale(0.92); opacity: 0.55; }
+  70%  { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+/* Bar progres "indeterminate" yang meluncur bolak-balik */
+@keyframes kol-progress-slide {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 30%;  width: 55%; }
+  100% { left: 100%; width: 40%; }
+}
+@keyframes kol-spin { to { transform: rotate(360deg); } }
+
+.kol-fade-up   { animation: kol-fade-up .6s cubic-bezier(.22,.61,.36,1) both; }
+.kol-float     { animation: kol-float 3.6s ease-in-out infinite; }
+.kol-pulse-ring{ animation: kol-pulse-ring 2.2s ease-out infinite; }
+.kol-progress-bar { position: relative; overflow: hidden; }
+.kol-progress-bar > span {
+  position: absolute; top: 0; bottom: 0; border-radius: 999px;
+  animation: kol-progress-slide 1.5s ease-in-out infinite;
+}
+.kol-spin { animation: kol-spin 1s linear infinite; }
+
+/* Efek "ditekan" untuk tombol — global agar berlaku juga di Login/Loading
+   (yang tampil sebelum <style> in-app di-render). */
+.kpress { transition: transform .09s ease; }
+.kpress:active { transform: scale(.96); }
+@media (prefers-reduced-motion: reduce) { .kpress:active { transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .kol-fade-up, .kol-float, .kol-pulse-ring, .kol-progress-bar > span, .kol-spin {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+  }
+  .kol-progress-bar > span { left: 0 !important; width: 100% !important; }
+}
