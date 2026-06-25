@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useId } from "react";
 import {
   Plus, Search, Settings, Copy, Check, Trash2, Clock, AlertTriangle,
   Wallet, Bell, RotateCcw, X, MessageCircle, ChevronDown, FileText, Scale,
@@ -1335,14 +1335,15 @@ const emptyData = () => ({ settings: defaultSettings(), invoices: [] });
 
 /* ---------- Logo ---------- */
 function Logo({ size = 36 }) {
+  const gid = `kg-${useId()}`;
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-label="Kolekta" role="img">
       <defs>
-        <linearGradient id="kg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+        <linearGradient id={gid} x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
           <stop stopColor={T.brand2} /><stop offset="1" stopColor={T.brand} />
         </linearGradient>
       </defs>
-      <rect width="48" height="48" rx="12" fill="url(#kg)" />
+      <rect width="48" height="48" rx="12" fill={`url(#${gid})`} />
       <path d="M17 13 V35" stroke="#fff" strokeWidth="3.6" strokeLinecap="round" />
       <path d="M17 25 L31 13" stroke="#fff" strokeWidth="3.6" strokeLinecap="round" />
       <path d="M28.5 13 H32 V16.5" stroke={T.brass} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -2257,22 +2258,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <p className="truncate text-xs" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
             </div>
           </button>
-          <button onClick={() => setShowChat(true)} aria-label="Chat"
-            className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
-            <MessageCircle size={20} />
-            {chatUnread > 0 && (
-              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[11px] font-bold leading-[18px]"
-                style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>
-            )}
-          </button>
-          <button onClick={openRiwayatKerja} aria-label="Riwayat kerja"
-            className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
-            <History size={20} />
-            {worklogTodayN > 0 && (
-              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[11px] font-bold leading-[18px]"
-                style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>
-            )}
-          </button>
+          <span className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>
+            {s.peran === "petugas" ? (s.petugasAktif || "Petugas") : "Atasan"}
+          </span>
         </header>
 
         {/* Sub-nav Reports (HP) — muncul hanya di seksi Reports */}
@@ -2306,10 +2294,31 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {/* ---------- HARI INI ---------- */}
         {tab === "hari" && (
           <div className="mt-4 space-y-4">
-            <button onClick={openLapor}
-              className="kpress flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-sm" style={{ background: T.brand }}>
-              <ClipboardList size={18} /> Lapor pekerjaan &amp; lapangan
-            </button>
+            {/* KPI strip — ringkas, bukan pahlawan layar */}
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat label="Total piutang aktif" value={rpc(stats.totalPiutang)} sub={`${stats.nAktif} invoice`} />
+              <Stat label="Overdue" value={rpc(stats.totalOverdue)} sub={`${stats.nOverdue} invoice telat`} accent={T.red} />
+              <Stat label="Belum dihubungi" value={String(panels.belum.length)} sub="perlu aksi" accent={T.amber} />
+              <Stat label="Perlu ditagih ulang" value={String(panels.perlu.length)} sub="ngendap / ingkar" accent={T.brand2} />
+            </div>
+
+            {/* Quick Actions — mulai tugas dalam 1 ketuk */}
+            <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { icon: ClipboardList, label: "Lapor lapangan", on: openLapor },
+                  { icon: FileText, label: "Laporan harian", on: () => setShowLaporan((v) => !v) },
+                  { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
+                  { icon: CalcIcon, label: "Kalkulator", on: () => setShowCalc(true) },
+                ].map((a, i) => (
+                  <button key={i} onClick={a.on} className="kpress flex flex-col items-center gap-1.5">
+                    <span className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: T.brand2 + "14", color: T.brand }}><a.icon size={20} /></span>
+                    <span className="text-center text-[10.5px] font-medium leading-tight" style={{ color: T.sub }}>{a.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {s.peran === "petugas" && (() => {
               const me = tim.find((t) => t.nama === s.petugasAktif);
               if (!me || !me.target) return null;
@@ -2331,11 +2340,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 </div>
               );
             })()}
-            <button onClick={() => setShowLaporan((v) => !v)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold shadow-sm"
-              style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}>
-              <ClipboardList size={16} /> {showLaporan ? "Tutup laporan harian" : "Buat laporan harian"}
-            </button>
+
             {showLaporan && (
               <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                 <div className="mb-2 flex items-center gap-2">
@@ -2349,13 +2354,6 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: MONO }}>{docToPlain(laporanText)}</pre>
               </div>
             )}
-
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Total piutang aktif" value={rpc(stats.totalPiutang)} sub={`${stats.nAktif} invoice`} />
-              <Stat label="Overdue" value={rpc(stats.totalOverdue)} sub={`${stats.nOverdue} invoice telat`} accent={T.red} />
-              <Stat label="Belum dihubungi" value={String(panels.belum.length)} sub="perlu aksi" accent={T.amber} />
-              <Stat label="Perlu ditagih ulang" value={String(panels.perlu.length)} sub="ngendap / ingkar" accent={T.brand2} />
-            </div>
 
             <FollowPanel title="Perlu ditindaklanjuti hari ini" icon={Bell} color={T.red}
               empty="Tidak ada janji bayar lewat atau jadwal tindak lanjut yang jatuh tempo." items={panels.tindak}
