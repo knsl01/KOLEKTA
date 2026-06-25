@@ -1773,6 +1773,7 @@ export default function KolektaApp() {
   const [fJaminan, setFJaminan] = useState("all");
   const [fPetugas, setFPetugas] = useState("all");
   const [sortBy, setSortBy] = useState("overdue");
+  const [caseSeg, setCaseSeg] = useState("semua");
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
   const [showChat, setShowChat] = useState(false);
@@ -2025,6 +2026,21 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     });
   }, [enriched, query, fStatus, fTipe, fJaminan, fPetugas, sortBy]);
 
+  /* Cases — segmen cepat (di atas filter lengkap) */
+  const casePred = {
+    semua: () => true,
+    overdue: (i) => i.daysOverdue > 0,
+    followup: (i) => i.status === "belum_dihubungi" && i.daysOverdue > 0,
+    janji: (i) => !!i.janjiBayar || i.status === "janji_bayar",
+    kunjungan: (i) => Array.isArray(i.aktivitas) && i.aktivitas.some((a) => a && a.lok),
+  };
+  const caseCounts = useMemo(() => {
+    const c = {};
+    for (const k of Object.keys(casePred)) c[k] = filtered.filter(casePred[k]).length;
+    return c;
+  }, [filtered]);
+  const casesShown = useMemo(() => filtered.filter(casePred[caseSeg] || casePred.semua), [filtered, caseSeg]);
+
   const agenda = useMemo(() => {
     const aktif = enriched.filter((i) => i.status !== "lunas");
     const due7 = aktif.filter((i) => i.odRaw >= -7 && i.odRaw <= 0).sort((a, b) => new Date(a.tglJatuhTempo) - new Date(b.tglJatuhTempo));
@@ -2264,22 +2280,17 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         </header>
 
         {/* Sub-nav Reports (HP) — muncul hanya di seksi Reports */}
-        {["analitik", "heatmap", "riwayat"].includes(tab) && (
+        {["reports", "analitik", "heatmap", "riwayat"].includes(tab) && (
           <nav className="sticky top-2 z-20 mt-4 flex gap-1 overflow-x-auto rounded-xl p-1 shadow-sm lg:hidden"
             style={{ background: T.surface, border: `1px solid ${T.line}` }}>
             {[
+              { id: "reports", icon: Grid3x3, label: "Ringkasan" },
               { id: "analitik", icon: BarChart3, label: "Analitik" },
               { id: "heatmap", icon: Flame, label: "Heat Map" },
               { id: "riwayat", icon: History, label: "Riwayat" },
             ].map((n) => (
               <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={0} />
             ))}
-            <button onClick={openRiwayatKerja}
-              className="kpress flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium"
-              style={{ color: T.sub }}>
-              <ClipboardList size={16} className="shrink-0" />
-              <span className="truncate">Laporan</span>
-            </button>
           </nav>
         )}
 
@@ -2451,9 +2462,29 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           </div>
         )}
 
-        {/* ---------- TAGIHAN ---------- */}
+        {/* ---------- TAGIHAN (CASES) ---------- */}
         {tab === "tagihan" && (
           <div className="mt-4 space-y-3">
+            {/* Segmen cepat */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              {[
+                ["semua", "Semua"],
+                ["overdue", "Overdue"],
+                ["followup", "Follow-up"],
+                ["janji", "Janji bayar"],
+                ["kunjungan", "Kunjungan"],
+              ].map(([v, lbl]) => {
+                const on = caseSeg === v;
+                return (
+                  <button key={v} onClick={() => setCaseSeg(v)}
+                    className="chip flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
+                    style={on ? { background: T.brand, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>
+                    {lbl}
+                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: on ? "#FFFFFF2E" : T.bg, color: on ? "#fff" : T.sub }}>{caseCounts[v] ?? 0}</span>
+                  </button>
+                );
+              })}
+            </div>
             <div className="flex gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-lg px-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                 <Search size={16} style={{ color: T.sub }} />
@@ -2532,18 +2563,51 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} onAdd={(inv) => { addInvoice(inv); setShowAdd(false); flash("Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
 
             <div className="space-y-2">
-              {filtered.map((i) => (
+              {casesShown.map((i) => (
                 <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
                   onToggle={() => setOpenId(openId === i.id ? null : i.id)}
                   onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
                   patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
               ))}
-              {filtered.length === 0 && (
+              {casesShown.length === 0 && (
                 <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
-                  <p className="text-sm font-medium">Belum ada tagihan</p>
-                  <p className="mt-1 text-xs" style={{ color: T.sub }}>Tap “Tambah” untuk memasukkan invoice pertama.</p>
+                  <p className="text-sm font-medium">{filtered.length === 0 ? "Belum ada tagihan" : "Tidak ada kasus di segmen ini"}</p>
+                  <p className="mt-1 text-xs" style={{ color: T.sub }}>{filtered.length === 0 ? "Tap “Tambah” untuk memasukkan invoice pertama." : "Coba segmen lain atau reset filter."}</p>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ---------- REPORTS (RINGKASAN / HUB) ---------- */}
+        {tab === "reports" && (
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat label="Piutang aktif" value={rpc(analytics.outstanding)} sub="outstanding" />
+              <Stat label="DSO" value={`${analytics.dso} hr`} sub="rata-rata umur" accent={T.brand2} />
+              <Stat label="Tertagih bln ini" value={rpc(analytics.tertagihBulanIni)} sub="dari pembayaran" accent={T.green} />
+              <Stat label="PTP ditepati" value={analytics.ptp.rate == null ? "—" : `${analytics.ptp.rate}%`} sub={`${analytics.ptp.kept}/${analytics.ptp.total} janji`} accent={T.brand} />
+            </div>
+            <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <h2 className="mb-1 text-sm font-semibold">Laporan & analitik</h2>
+              <p className="mb-3 text-xs" style={{ color: T.sub }}>Semua laporan penagihan di satu tempat.</p>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                {[
+                  { icon: BarChart3, label: "Analitik & KPI", desc: "DSO, PTP, tren, leaderboard", on: () => setTab("analitik") },
+                  { icon: Flame, label: "Heat Map", desc: "Geografis, kalender, matriks", on: () => setTab("heatmap") },
+                  { icon: History, label: "Riwayat penagihan", desc: "Aktivitas & pembayaran", on: () => setTab("riwayat") },
+                  { icon: ClipboardList, label: "Laporan lapangan", desc: s.peran === "petugas" ? "Riwayat kerja saya" : "Hasil kerja petugas", on: openRiwayatKerja },
+                  { icon: MapPin, label: "Buat laporan", desc: "Lapor pekerjaan & kunjungan", on: openLapor },
+                  { icon: FileText, label: "Laporan harian", desc: "Ringkasan untuk atasan (PDF)", on: () => { if (!printLetter("Laporan Penagihan", laporanText)) { copy(docToPlain(laporanText)); flash("Popup diblokir — laporan disalin"); } } },
+                  { icon: FileSpreadsheet, label: "Collection report", desc: "Ekspor Excel semua tagihan", on: () => { try { exportExcel(enriched, s); audit("export", "Excel daftar tagihan", null, { count: enriched.length }); flash("Excel diunduh"); } catch { flash("Export gagal di lingkungan ini"); } } },
+                ].map((c, i) => (
+                  <button key={i} onClick={c.on} className="kpress flex flex-col items-start gap-2 rounded-xl p-3 text-left" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                    <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ background: T.brand2 + "14", color: T.brand }}><c.icon size={18} /></span>
+                    <span className="text-[13px] font-semibold leading-tight">{c.label}</span>
+                    <span className="text-[11px] leading-tight" style={{ color: T.sub }}>{c.desc}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -2739,13 +2803,13 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       <nav className="fixed inset-x-0 bottom-0 z-30 flex items-stretch border-t lg:hidden"
         style={{ background: T.surface, borderColor: T.line, paddingBottom: "max(env(safe-area-inset-bottom), 0px)" }}>
         {(() => {
-          const inReports = ["analitik", "heatmap", "riwayat"].includes(tab);
+          const inReports = ["reports", "analitik", "heatmap", "riwayat"].includes(tab);
           const inMore = ["audit", "set"].includes(tab);
           const items = [
             { key: "dash", icon: Grid3x3, label: "Dashboard", active: tab === "hari" && !showChat, badge: 0, on: () => setTab("hari") },
             { key: "cases", icon: Wallet, label: "Cases", active: tab === "tagihan" && !showChat, badge: 0, on: () => setTab("tagihan") },
             { key: "chat", icon: MessageCircle, label: "Chat", active: showChat, badge: chatUnread, on: () => setShowChat(true) },
-            { key: "reports", icon: BarChart3, label: "Reports", active: inReports && !showChat, badge: 0, on: () => { if (!inReports) setTab("analitik"); } },
+            { key: "reports", icon: BarChart3, label: "Reports", active: inReports && !showChat, badge: 0, on: () => { if (!inReports) setTab("reports"); } },
             { key: "more", icon: Menu, label: "More", active: inMore && !showChat, badge: 0, on: () => setDrawer(true) },
           ];
           return items.map((it) => (
