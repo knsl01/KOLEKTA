@@ -44,10 +44,10 @@ const THEMES = {
   kaca2: {
     name: "Liquid Glass Pro",
     glass: "pro",
-    // TRUE liquid glass (Vision Pro / iOS 26): dark-first, permukaan putih-translusen tipis + blur kuat,
-    // specular highlight & tepi cahaya via .theme-glass2. Token teks terang demi keterbacaan di atas kaca gelap.
-    light: { bg: "#0B1322", surface: "rgba(255,255,255,0.10)", ink: "#F3F7FC", sub: "#BAC6D8", brand: "#62A6EC", brand2: "#86BAF2", brass: "#E6BC6A", line: "rgba(255,255,255,0.22)", green: "#5FD0A0", amber: "#F0B64F", red: "#F2796D", slate: "#9DABC0", toast: "rgba(10,16,26,0.86)" },
-    dark: { bg: "#060B14", surface: "rgba(255,255,255,0.08)", ink: "#F3F7FC", sub: "#AEBBCE", brand: "#62A6EC", brand2: "#86BAF2", brass: "#E6BC6A", line: "rgba(255,255,255,0.18)", green: "#5FD0A0", amber: "#F0B64F", red: "#F2796D", slate: "#94A2B6", toast: "rgba(4,8,14,0.9)" },
+    // TRUE liquid glass (Vision Pro / iOS 26) — palet NETRAL: obsidian black + titanium silver + white frost,
+    // aksen champagne gold tipis. Permukaan putih-translusen + blur lembut, highlight radial natural via .theme-glass2.
+    light: { bg: "#121317", surface: "rgba(255,255,255,0.10)", ink: "#F4F5F7", sub: "#9DA3AD", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E0BE82", line: "rgba(255,255,255,0.18)", green: "#76C9A4", amber: "#E3C078", red: "#EA8E83", slate: "#8B919B", toast: "rgba(14,15,18,0.88)" },
+    dark: { bg: "#0A0B0E", surface: "rgba(255,255,255,0.075)", ink: "#F4F5F7", sub: "#969CA6", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E0BE82", line: "rgba(255,255,255,0.15)", green: "#76C9A4", amber: "#E3C078", red: "#EA8E83", slate: "#858B95", toast: "rgba(6,7,9,0.9)" },
   },
 };
 // Pemetaan tema lama → keluarga + mode (kompatibilitas data tersimpan).
@@ -2270,35 +2270,33 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 .theme-glass .rounded-xl,.theme-glass .rounded-2xl{border-color:rgba(255,255,255,.45);}
 .theme-glass.kglass-dark .rounded-xl,.theme-glass.kglass-dark .rounded-2xl{border-color:rgba(255,255,255,.10);}
 
-/* ===== TRUE LIQUID GLASS (Vision Pro / iOS 26) — tema "Liquid Glass Pro" ===== */
+/* ===== TRUE LIQUID GLASS (Vision Pro / iOS 26) — tema "Liquid Glass Pro" (palet netral obsidian/titanium) ===== */
 .theme-glass2{color-scheme:dark;background:
-  radial-gradient(900px 520px at 12% -6%, rgba(98,166,236,.30), transparent 60%),
-  radial-gradient(820px 540px at 112% 6%, rgba(230,188,106,.20), transparent 55%),
-  radial-gradient(760px 760px at 50% 122%, rgba(134,186,242,.18), transparent 60%),
-  linear-gradient(160deg,#0C1A2E 0%,#0A1018 52%,#0B1426 100%) fixed;}
+  radial-gradient(1000px 580px at 14% -8%, rgba(255,255,255,.07), transparent 62%),
+  radial-gradient(820px 560px at 112% 4%, rgba(224,190,130,.09), transparent 56%),
+  radial-gradient(900px 820px at 50% 124%, rgba(255,255,255,.045), transparent 62%),
+  linear-gradient(157deg,#181A1F 0%,#101115 52%,#141519 100%) fixed;}
 .theme-glass2.kglass-dark{background:
-  radial-gradient(900px 520px at 12% -6%, rgba(98,166,236,.24), transparent 60%),
-  radial-gradient(820px 540px at 112% 6%, rgba(230,188,106,.16), transparent 55%),
-  radial-gradient(760px 760px at 50% 122%, rgba(134,186,242,.14), transparent 60%),
-  linear-gradient(160deg,#070F1C 0%,#05080F 55%,#070F1E 100%) fixed;}
-/* Backdrop blur nyata + saturation boost pada semua kartu & chrome */
+  radial-gradient(1000px 580px at 14% -8%, rgba(255,255,255,.05), transparent 62%),
+  radial-gradient(820px 560px at 112% 4%, rgba(224,190,130,.07), transparent 56%),
+  radial-gradient(900px 820px at 50% 124%, rgba(255,255,255,.035), transparent 62%),
+  linear-gradient(157deg,#101115 0%,#08090C 55%,#0C0D11 100%) fixed;}
+/* Backdrop blur lembut + saturasi natural (netral, tidak vivid) */
 .theme-glass2 .shadow-sm,.theme-glass2 .shadow,.theme-glass2 .shadow-md,.theme-glass2 .shadow-lg,.theme-glass2 .shadow-xl,.theme-glass2 .shadow-2xl,
 .theme-glass2 nav.fixed,.theme-glass2 nav.sticky,.theme-glass2 aside,.theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
-  -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);}
-/* Glass surface: sheen diagonal (refraction) + specular highlight atas + tepi cahaya + drop shadow */
+  -webkit-backdrop-filter:blur(26px) saturate(135%);backdrop-filter:blur(26px) saturate(135%);}
+/* Glass surface natural: highlight radial dari sumber cahaya kiri-atas + tepi & specular halus + drop shadow lembut */
 .theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
-  background-image:linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.06) 34%, rgba(255,255,255,0.02) 100%)!important;
-  border:1px solid rgba(255,255,255,0.24)!important;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.45), inset 0 0 22px rgba(255,255,255,.05), 0 18px 44px -14px rgba(0,0,0,.62)!important;}
-/* Specular sweep tipis di tepi atas (light edge reflection) */
-.theme-glass2 .rounded-2xl{position:relative;}
-/* Bottom nav & sidebar: kaca lebih padat demi keterbacaan label */
-.theme-glass2 nav.fixed{background:linear-gradient(180deg, rgba(22,34,52,0.62), rgba(14,22,36,0.7))!important;border-top:1px solid rgba(255,255,255,.16)!important;box-shadow:0 -8px 30px rgba(0,0,0,.4)!important;}
-.theme-glass2 aside{background:linear-gradient(180deg, rgba(20,32,50,0.55), rgba(12,20,34,0.6))!important;border-right:1px solid rgba(255,255,255,.12)!important;}
+  background-image:radial-gradient(135% 110% at 12% -8%, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.045) 40%, rgba(255,255,255,0.015) 100%)!important;
+  border:1px solid rgba(255,255,255,0.16)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.26), inset 0 -16px 28px rgba(0,0,0,.10), 0 14px 40px -16px rgba(0,0,0,.55)!important;}
+/* Bottom nav & sidebar: kaca charcoal lebih padat demi keterbacaan label */
+.theme-glass2 nav.fixed{background:linear-gradient(180deg, rgba(34,36,42,0.64), rgba(18,19,23,0.72))!important;border-top:1px solid rgba(255,255,255,.12)!important;box-shadow:0 -8px 30px rgba(0,0,0,.4)!important;}
+.theme-glass2 aside{background:linear-gradient(180deg, rgba(30,32,38,0.58), rgba(16,17,21,0.64))!important;border-right:1px solid rgba(255,255,255,.10)!important;}
 /* Input/komponen rounded-lg: kaca ringan (tanpa blur berat) */
-.theme-glass2 .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))!important;}
-/* Overlay modal sedikit gelap + blur agar panel mengambang nyata */
-.theme-glass2 .drawer-ov{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);background:rgba(4,8,14,.5)!important;}
+.theme-glass2 .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))!important;}
+/* Overlay modal: gelap netral + blur agar panel mengambang nyata */
+.theme-glass2 .drawer-ov{-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);background:rgba(6,7,9,.5)!important;}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
