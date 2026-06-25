@@ -159,18 +159,25 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([arr], { type: mime });
 }
 async function openBukti(b) {
+  const dl = (href, name, revoke) => {
+    const a = document.createElement("a");
+    a.href = href; a.target = "_blank"; a.rel = "noopener";
+    if (name) a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    if (revoke) setTimeout(() => URL.revokeObjectURL(href), 60000);
+  };
   try {
     if (b?.path && !b?.data) {
-      try { const m = await sbSignUrls(_activeCode, [b.path]); const u = m[b.path]; if (u) window.open(u, "_blank", "noopener"); } catch {}
+      const m = await sbSignUrls(_activeCode, [b.path]);
+      const u = m[b.path];
+      if (u) dl(u, b.name); else alert("File tidak bisa dibuka (gagal ambil tautan dari server).");
       return;
     }
     if (!b?.data) return;
-    if (!/^data:/.test(b.data)) { window.open(b.data, "_blank", "noopener"); return; }
+    if (!/^data:/.test(b.data)) { dl(b.data, b.name); return; }
     const url = URL.createObjectURL(dataUrlToBlob(b.data));
-    const w = window.open(url, "_blank", "noopener");
-    if (!w) { const a = document.createElement("a"); a.href = url; a.download = b.name || "bukti"; document.body.appendChild(a); a.click(); a.remove(); }
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (_) {}
+    dl(url, b.name, true);
+  } catch (_) { alert("File tidak bisa dibuka."); }
 }
 function getLoc() {
   return new Promise((resolve, reject) => {
@@ -1790,8 +1797,11 @@ export default function KolektaApp() {
   const [fPetugas, setFPetugas] = useState("all");
   const [sortBy, setSortBy] = useState("overdue");
   const [caseSeg, setCaseSeg] = useState("semua");
+  const [caseExpand, setCaseExpand] = useState(() => new Set());
   const [custQ, setCustQ] = useState("");
   const [custSel, setCustSel] = useState(null);
+  const [waOpen, setWaOpen] = useState(false);
+  const [waTpl, setWaTpl] = useState("halus");
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
   const [showChat, setShowChat] = useState(false);
@@ -2068,6 +2078,16 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     return c;
   }, [filtered]);
   const casesShown = useMemo(() => filtered.filter(casePred[caseSeg] || casePred.semua), [filtered, caseSeg]);
+  /* Cases dikelompokkan per PT/customer (klik nama -> expand invoice-nya) */
+  const casesGrouped = useMemo(() => {
+    const m = new Map();
+    for (const i of casesShown) { const k = (i.customer || "—").trim() || "—"; if (!m.has(k)) m.set(k, []); m.get(k).push(i); }
+    return [...m.entries()].map(([customer, items]) => ({
+      customer, items, tipe: items[0]?.tipe || "perusahaan",
+      total: items.filter((x) => x.status !== "lunas").reduce((a, x) => a + x.total, 0),
+      maxDpd: Math.max(0, ...items.map((x) => x.daysOverdue)),
+    }));
+  }, [casesShown]);
 
   /* Pelanggan — daftar customer dikelompokkan dari invoice */
   const pelanggan = useMemo(() => {
@@ -2126,21 +2146,23 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   const fileRef = useRef(null);
   const jsonRef = useRef(null);
   const custFileRef = useRef(null);
-  /* Lampiran per-pelanggan (perpustakaan dokumen) — disimpan di data.customers[nama].files */
+  const custUploadFolder = useRef(null); // folder tujuan saat unggah
+  /* Lampiran per-pelanggan (perpustakaan dokumen) — disimpan di data.customers[nama] {files, folders} */
   const patchCustomer = (name, fn) => setData((d) => {
     const customers = { ...(d.customers || {}) };
-    customers[name] = fn(customers[name] || { files: [] });
+    customers[name] = fn(customers[name] || { files: [], folders: [] });
     return { ...d, customers };
   });
   const onCustFiles = async (e) => {
     const files = Array.from(e.target.files || []); e.target.value = "";
     if (!files.length || !custSel) return;
+    const folder = custUploadFolder.current || null;
     flash(`Mengunggah ${files.length} file…`);
     const added = [];
     for (const file of files) {
       try {
         const data0 = await readFileData(file);
-        let rec = { name: file.name, type: file.type || "file", size: file.size };
+        let rec = { name: file.name, type: file.type || "file", size: file.size, folder, ts: Date.now() };
         try { const up = await sbUpload(auth.code, "customer", file.name, data0); rec.path = up.path; rec.size = up.size || file.size; }
         catch { rec.data = data0; }
         added.push(rec);
@@ -2148,11 +2170,18 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     }
     if (added.length) {
       patchCustomer(custSel, (c) => ({ ...c, files: [...added, ...(c.files || [])] }));
-      audit("tambah", `${added.length} dokumen pelanggan · ${custSel}`, null, { count: added.length });
+      audit("tambah", `${added.length} dokumen pelanggan · ${custSel}`, null, { count: added.length, folder });
       flash(`${added.length} dokumen tersimpan`);
     } else flash("Tidak ada file yang tersimpan");
   };
-  const removeCustFile = (name, idx) => patchCustomer(name, (c) => ({ ...c, files: (c.files || []).filter((_, i) => i !== idx) }));
+  const custMkdir = (name, folderName) => { const f = (folderName || "").trim(); if (!f) return; patchCustomer(name, (c) => ({ ...c, folders: [...new Set([...(c.folders || []), f])] })); };
+  const custDeleteItems = (name, { fileIdxs = [], folderNames = [] }) => patchCustomer(name, (c) => {
+    const delFolders = new Set(folderNames);
+    const keepFiles = (c.files || []).filter((fl, i) => !fileIdxs.includes(i) && !delFolders.has(fl.folder));
+    const keepFolders = (c.folders || []).filter((fd) => !delFolders.has(fd));
+    return { ...c, files: keepFiles, folders: keepFolders };
+  });
+  const pickCustFiles = (folder) => { custUploadFolder.current = folder || null; custFileRef.current?.click(); };
   const onImportFile = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
     if (!file) return;
@@ -2730,13 +2759,39 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} onAdd={(list) => { const arr = Array.isArray(list) ? list : [list]; arr.forEach(addInvoice); setShowAdd(false); flash(arr.length > 1 ? `${arr.length} tagihan ditambahkan` : "Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
 
             <div className="space-y-2">
-              {casesShown.map((i) => (
-                <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
-                  onToggle={() => setOpenId(openId === i.id ? null : i.id)}
-                  onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
-                  patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
-              ))}
-              {casesShown.length === 0 && (
+              {casesGrouped.map((g) => {
+                const expanded = caseExpand.has(g.customer) || !!query.trim() || casesGrouped.length === 1;
+                return (
+                  <div key={g.customer} className="overflow-hidden rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                    <button onClick={() => setCaseExpand((set) => { const n = new Set(set); n.has(g.customer) ? n.delete(g.customer) : n.add(g.customer); return n; })}
+                      className="kpress flex w-full items-center gap-3 p-3 text-left">
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: T.brand2 + "14", color: T.brand }}>
+                        {g.tipe === "perorangan" ? <User size={18} /> : <Building2 size={18} />}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold">{g.customer}</p>
+                        <p className="truncate text-[11px]" style={{ color: T.sub }}>{g.items.length} invoice{g.maxDpd > 0 ? ` · telat s/d ${g.maxDpd} hr` : ""}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm font-bold" style={{ fontFamily: MONO }}>{rpc(g.total)}</p>
+                        <p className="text-[10px]" style={{ color: T.sub }}>outstanding</p>
+                      </div>
+                      <ChevronDown size={16} style={{ color: T.sub, transform: expanded ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+                    </button>
+                    {expanded && (
+                      <div className="space-y-2 border-t p-2" style={{ borderColor: T.line }}>
+                        {g.items.map((i) => (
+                          <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
+                            onToggle={() => setOpenId(openId === i.id ? null : i.id)}
+                            onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
+                            patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {casesGrouped.length === 0 && (
                 <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
                   <p className="text-sm font-medium">{filtered.length === 0 ? "Belum ada tagihan" : "Tidak ada kasus di segmen ini"}</p>
                   <p className="mt-1 text-xs" style={{ color: T.sub }}>{filtered.length === 0 ? "Tap “Tambah” untuk memasukkan invoice pertama." : "Coba segmen lain atau reset filter."}</p>
@@ -2808,9 +2863,20 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           const noInv = !!s.waTanpaInvoice;
           const invRef = noInv || nos.length === 0 ? "" : nos.length === 1 ? `untuk Invoice ${nos[0]} ` : `untuk Invoice ${nos[0]} s/d ${nos[nos.length - 1]} (${nos.length} invoice) `;
           const sap = tipe === "perorangan" ? `Bapak/Ibu ${custSel}` : (picN ? `Bapak/Ibu ${picN}` : `Bapak/Ibu dari ${custSel}`);
-          const waText = `Selamat ${greeting()}, ${sap} 🙏\n\nIzin mengingatkan tagihan ${invRef}dengan total *${rp(totalOut)}* yang telah jatuh tempo.\nMohon dapat diselesaikan atau dikonfirmasi jadwal pembayarannya. Terima kasih 🙏\n\n— ${s.perusahaan?.trim() || "Kolekta"}`;
+          const perus = s.perusahaan?.trim() || "Kolekta";
+          const waTplList = [
+            ["halus", "Reminder halus", `Selamat ${greeting()}, ${sap} 🙏\n\nIzin mengingatkan tagihan ${invRef}dengan total *${rp(totalOut)}*. Mohon dibantu proses pembayarannya ya. Terima kasih 🙏\n\n— ${perus}`],
+            ["tegas", "Reminder tegas", `${sap},\n\nTagihan ${invRef}sebesar *${rp(totalOut)}* telah jatuh tempo dan belum kami terima. Mohon segera diselesaikan untuk menghindari proses penagihan lebih lanjut.\n\n— ${perus}`],
+            ["jt", "Jatuh tempo hari ini", `Selamat ${greeting()}, ${sap} 🙏\n\nMengingatkan bahwa tagihan ${invRef}sebesar *${rp(totalOut)}* jatuh tempo hari ini. Mohon konfirmasi pembayarannya. Terima kasih 🙏\n\n— ${perus}`],
+            ["janji", "Tagih janji bayar", `${sap},\n\nMenindaklanjuti janji pembayaran sebelumnya untuk tagihan ${invRef}sebesar *${rp(totalOut)}*. Mohon dapat ditepati sesuai janji. Terima kasih 🙏\n\n— ${perus}`],
+            ["somasi", "Peringatan / somasi", `${sap},\n\nPERINGATAN atas tunggakan ${invRef}sebesar *${rp(totalOut)}* yang telah melewati jatuh tempo. Apabila tidak ada penyelesaian, kami akan menempuh upaya hukum sesuai ketentuan yang berlaku.\n\n— ${perus}`],
+            ["konfirmasi", "Konfirmasi pembayaran", `Selamat ${greeting()}, ${sap} 🙏\n\nMohon konfirmasi apakah pembayaran tagihan ${invRef}sebesar *${rp(totalOut)}* sudah diproses? Bila sudah, mohon kirim bukti transfernya. Terima kasih 🙏\n\n— ${perus}`],
+            ["terima", "Terima kasih (lunas)", `Selamat ${greeting()}, ${sap} 🙏\n\nTerima kasih atas pembayaran tagihan ${invRef}. Kami sangat menghargai kerja samanya 🙏\n\n— ${perus}`],
+          ];
+          const curTpl = waTplList.find((t) => t[0] === waTpl) || waTplList[0];
+          const waText = curTpl[2];
           const wl = waLink(tel, waText);
-          const files = (data.customers?.[custSel]?.files) || [];
+          const docs = data.customers?.[custSel] || { files: [], folders: [] };
           return (
             <div className="mt-4 space-y-3">
               <button onClick={() => setCustSel(null)} className="kpress flex items-center gap-1.5 text-sm font-semibold" style={{ color: T.brand2 }}>
@@ -2835,48 +2901,43 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 </div>
               </div>
 
-              {/* WA pelanggan (format invoice awal–akhir / tanpa nomor) */}
+              {/* Kirim pengingat WA — minimize + banyak template */}
               <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-semibold">Kirim pengingat WA</span>
-                  <button onClick={() => setData((d) => ({ ...d, settings: { ...d.settings, waTanpaInvoice: !d.settings.waTanpaInvoice } }))}
-                    className="chip rounded-full px-2.5 py-1 text-[11px] font-semibold" style={noInv ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>
-                    {noInv ? "Tanpa nomor invoice ✓" : "Tulis nomor invoice"}
-                  </button>
-                </div>
-                <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg p-2 text-[11px] leading-relaxed" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}>{waText}</pre>
-                <div className="flex gap-2">
-                  <button onClick={() => { if (wl) window.open(wl, "_blank", "noopener"); else { copy(waText); flash("No. WA kosong — pesan disalin"); } }}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.green }}>
-                    <MessageCircle size={15} /> {tel ? "Kirim WA" : "Salin (WA kosong)"}
-                  </button>
-                  <button onClick={() => { copy(waText); flash("Pesan disalin"); }} className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Copy size={15} /></button>
-                </div>
-              </div>
-
-              {/* Perpustakaan dokumen pelanggan */}
-              <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-semibold">Dokumen pelanggan ({files.length})</span>
-                  <button onClick={() => custFileRef.current?.click()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold" style={{ background: T.brand2 + "14", color: T.brand2 }}>
-                    <Upload size={14} /> Unggah (Excel/PDF/foto)
-                  </button>
-                </div>
-                {files.length === 0 ? (
-                  <p className="py-3 text-center text-[11px]" style={{ color: T.sub }}>Belum ada dokumen. Unggah kontrak, PO, faktur pajak, KTP/akta, dll.</p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {files.map((b, idx) => (
-                      <div key={idx} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                        <FileText size={15} style={{ color: T.brand2 }} className="shrink-0" />
-                        <button onClick={() => openBukti(b)} className="min-w-0 flex-1 truncate text-left text-xs font-medium">{b.name || "dokumen"}</button>
-                        {b.size ? <span className="shrink-0 text-[10px]" style={{ color: T.sub }}>{humanSize(b.size)}</span> : null}
-                        <button onClick={() => removeCustFile(custSel, idx)} className="shrink-0 rounded-md p-1" style={{ color: T.red }} aria-label="Hapus dokumen"><Trash2 size={13} /></button>
-                      </div>
-                    ))}
+                <button onClick={() => setWaOpen((v) => !v)} className="kpress flex w-full items-center gap-2 text-left">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: T.green + "1A", color: T.green }}><MessageCircle size={16} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">Kirim pengingat WA</span><span className="block truncate text-[11px]" style={{ color: T.sub }}>Template: {curTpl[1]}</span></span>
+                  <ChevronDown size={16} style={{ color: T.sub, transform: waOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+                </button>
+                {waOpen && (
+                  <div className="mt-3">
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {waTplList.map(([k, lbl]) => (
+                        <button key={k} onClick={() => setWaTpl(k)} className="chip rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                          style={waTpl === k ? { background: T.brand, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>{lbl}</button>
+                      ))}
+                    </div>
+                    <button onClick={() => setData((d) => ({ ...d, settings: { ...d.settings, waTanpaInvoice: !d.settings.waTanpaInvoice } }))}
+                      className="chip mb-2 rounded-full px-2.5 py-1 text-[11px] font-semibold" style={noInv ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>
+                      {noInv ? "Tanpa nomor invoice ✓" : "Tulis nomor invoice"}
+                    </button>
+                    <pre className="mb-2 max-h-36 overflow-auto whitespace-pre-wrap rounded-lg p-2 text-[11px] leading-relaxed" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}>{waText}</pre>
+                    <div className="flex gap-2">
+                      <button onClick={() => { if (wl) window.open(wl, "_blank", "noopener"); else { copy(waText); flash("No. WA kosong — pesan disalin"); } }}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.green }}>
+                        <MessageCircle size={15} /> {tel ? "Kirim WA" : "Salin (WA kosong)"}
+                      </button>
+                      <button onClick={() => { copy(waText); flash("Pesan disalin"); }} className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Copy size={15} /></button>
+                    </div>
                   </div>
                 )}
               </div>
+
+              {/* Perpustakaan dokumen pelanggan (folder + multi-hapus) */}
+              <CustomerDocs T={T} docs={docs}
+                onPick={(folder) => pickCustFiles(folder)}
+                onMkdir={(folderName) => custMkdir(custSel, folderName)}
+                onDelete={(payload) => { custDeleteItems(custSel, payload); flash("Dihapus"); }}
+                onOpen={(b) => openBukti(b)} />
 
               {/* Daftar invoice pelanggan */}
               <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -5684,8 +5745,11 @@ function AdminPanel({ th, onBack }) {
   const [fileCache, setFileCache] = useState({});      // tenant_id -> daftar file
   const [fileUrls, setFileUrls] = useState({});        // path -> signed url (thumbnail/buka)
   const [loadingFiles, setLoadingFiles] = useState("");
-  const [fDel, setFDel] = useState("");                // path konfirmasi hapus
+  const [fDel, setFDel] = useState("");                // path konfirmasi hapus (tunggal)
   const [fBusy, setFBusy] = useState(false);
+  const [fSelMode, setFSelMode] = useState("");        // tenant_id mode pilih banyak file
+  const [fSel, setFSel] = useState(() => new Set());   // path terpilih
+  const [fBulkCode, setFBulkCode] = useState("");      // konfirmasi hapus massal
 
   const DELETE_CODE = "12345";
   const STORAGE_CAP = 500 * 1048576; // ~500 MB (kuota database Supabase free)
@@ -5746,6 +5810,16 @@ function AdminPanel({ th, onBack }) {
   const confirmDeleteFile = async (t, f) => {
     setFBusy(true); setMsg("");
     try { await sbAdminFileDelete(secret, [f.path]); await loadFiles(t, true); setFDel(""); loadStorage(); setMsg("File dihapus ✓"); }
+    catch (e) { setMsg(errText(e.message)); }
+    setFBusy(false);
+  };
+  const toggleFSel = (path) => setFSel((s) => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n; });
+  const startFSel = (t) => { setFSelMode(t.tenant_id); setFSel(new Set()); setFBulkCode(""); setFDel(""); };
+  const cancelFSel = () => { setFSelMode(""); setFSel(new Set()); setFBulkCode(""); };
+  const confirmDeleteFiles = async (t) => {
+    const paths = [...fSel]; if (!paths.length) return;
+    setFBusy(true); setMsg("");
+    try { await sbAdminFileDelete(secret, paths); await loadFiles(t, true); loadStorage(); setMsg(`${paths.length} file dihapus ✓`); cancelFSel(); }
     catch (e) { setMsg(errText(e.message)); }
     setFBusy(false);
   };
@@ -6040,6 +6114,17 @@ function AdminPanel({ th, onBack }) {
                                 ) : (fileCache[t.tenant_id] || []).length === 0 ? (
                                   <p className="text-[11px]" style={{ color: th.sub }}>Belum ada file tersimpan.</p>
                                 ) : (
+                                  <>
+                                  <div className="mb-2 flex items-center gap-1.5">
+                                    {fSelMode === t.tenant_id ? (
+                                      <>
+                                        <span className="mr-auto text-[11px] font-semibold" style={{ color: th.sub }}>{fSel.size} dipilih</span>
+                                        <button onClick={cancelFSel} className="rounded-lg px-2.5 py-1 text-[11px] font-semibold" style={{ background: th.bg, color: th.sub, border: `1px solid ${th.line}` }}>Batal</button>
+                                      </>
+                                    ) : (
+                                      <button onClick={() => startFSel(t)} className="ml-auto flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold" style={{ background: th.bg, color: th.red, border: `1px solid ${th.line}` }}><Trash2 size={12} /> Pilih untuk hapus</button>
+                                    )}
+                                  </div>
                                   <div className="space-y-1.5">
                                     {(fileCache[t.tenant_id] || []).map((f) => {
                                       const isImg = (f.mimetype || "").startsWith("image/");
@@ -6047,6 +6132,9 @@ function AdminPanel({ th, onBack }) {
                                       return (
                                         <div key={f.path} className="rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.line}` }}>
                                           <div className="flex items-center gap-2">
+                                            {fSelMode === t.tenant_id && (
+                                              <button onClick={() => toggleFSel(f.path)} className="shrink-0">{fSel.has(f.path) ? <span className="grid h-5 w-5 place-items-center rounded-md text-white" style={{ background: th.red }}><Check size={12} /></span> : <span className="block h-5 w-5 rounded-md" style={{ border: `1.5px solid ${th.line}` }} />}</button>
+                                            )}
                                             {isImg && url ? (
                                               <img src={url} alt="" onClick={() => openFile(f)} className="h-9 w-9 shrink-0 cursor-pointer rounded object-cover" style={{ border: `1px solid ${th.line}` }} />
                                             ) : (
@@ -6059,9 +6147,9 @@ function AdminPanel({ th, onBack }) {
                                               <p className="text-[10px]" style={{ color: th.sub }}>{scopeLabel(f.scope)}{f.size ? ` · ${fmtBytes(f.size)}` : ""}</p>
                                             </div>
                                             <button onClick={() => openFile(f)} title="Buka file" className="shrink-0 rounded-md p-1.5" style={{ color: th.brand2, border: `1px solid ${th.line}` }}><Eye size={13} /></button>
-                                            <button onClick={() => { setFDel(f.path); setMsg(""); }} title="Hapus file" className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}` }}><Trash2 size={13} /></button>
+                                            {fSelMode !== t.tenant_id && <button onClick={() => { setFDel(f.path); setMsg(""); }} title="Hapus file" className="shrink-0 rounded-md p-1.5" style={{ color: th.red, border: `1px solid ${th.line}` }}><Trash2 size={13} /></button>}
                                           </div>
-                                          {fDel === f.path && (
+                                          {fDel === f.path && fSelMode !== t.tenant_id && (
                                             <div className="mt-1.5 flex items-center gap-1.5">
                                               <span className="text-[11px]" style={{ color: th.red }}>Hapus file ini permanen?</span>
                                               <button disabled={fBusy} onClick={() => confirmDeleteFile(t, f)} className="ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-white" style={{ background: th.red, opacity: fBusy ? 0.6 : 1 }}>{fBusy ? "Menghapus…" : "Hapus"}</button>
@@ -6072,6 +6160,16 @@ function AdminPanel({ th, onBack }) {
                                       );
                                     })}
                                   </div>
+                                  {fSelMode === t.tenant_id && fSel.size > 0 && (
+                                    <div className="mt-2 rounded-lg p-2" style={{ background: th.surface, border: `1px solid ${th.red}` }}>
+                                      <p className="mb-1.5 text-[11px]" style={{ color: th.red }}>Hapus {fSel.size} file permanen? Ketik <b style={{ fontFamily: MONO }}>{DELETE_CODE}</b> untuk konfirmasi.</p>
+                                      <div className="flex gap-1.5">
+                                        <input value={fBulkCode} onChange={(e) => setFBulkCode(e.target.value)} inputMode="numeric" placeholder="Kode" className="min-w-0 flex-1 rounded-lg px-2.5 py-1.5 text-[12px] outline-none" style={{ background: th.bg, color: th.ink, border: `1px solid ${th.line}`, fontFamily: MONO }} />
+                                        <button disabled={fBusy || fBulkCode !== DELETE_CODE} onClick={() => confirmDeleteFiles(t)} className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white" style={{ background: th.red, opacity: (fBusy || fBulkCode !== DELETE_CODE) ? 0.5 : 1 }}>{fBusy ? "Menghapus…" : `Hapus ${fSel.size}`}</button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  </>
                                 )}
                               </div>
                             )}
@@ -6184,6 +6282,111 @@ function CommandPalette({ T, invoices = [], role, onClose, onNav, onOpenInvoice,
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- Perpustakaan dokumen pelanggan (folder + file, multi-hapus) ---------- */
+function CustomerDocs({ T, docs, onPick, onMkdir, onDelete, onOpen }) {
+  const files = docs?.files || [];
+  const folders = docs?.folders || [];
+  const [open, setOpen] = useState(false);
+  const [cur, setCur] = useState(null);
+  const [selMode, setSelMode] = useState(false);
+  const [sel, setSel] = useState(() => new Set());
+  const [mk, setMk] = useState(false);
+  const [mkName, setMkName] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [code, setCode] = useState("");
+
+  const inFolder = files.map((f, i) => ({ ...f, _i: i })).filter((f) => (f.folder || null) === cur);
+  const shownFolders = cur === null ? folders : [];
+  const folderCount = (name) => files.filter((f) => f.folder === name).length;
+  const toggle = (key) => setSel((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const clearSel = () => { setSel(new Set()); setSelMode(false); };
+  const doDelete = () => {
+    const fileIdxs = []; const folderNames = [];
+    for (const k of sel) { if (k.startsWith("f:")) fileIdxs.push(Number(k.slice(2))); else if (k.startsWith("d:")) folderNames.push(k.slice(2)); }
+    onDelete({ fileIdxs, folderNames });
+    setConfirmDel(false); setCode(""); clearSel();
+  };
+
+  return (
+    <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <button onClick={() => setOpen((v) => !v)} className="kpress flex w-full items-center gap-2 text-left">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: T.brand2 + "14", color: T.brand }}><FolderOpen size={16} /></span>
+        <span className="flex-1 text-sm font-semibold">Dokumen pelanggan</span>
+        <span className="rounded-full px-1.5 text-[11px] font-bold" style={{ background: T.bg, color: T.sub }}>{files.length}</span>
+        <ChevronDown size={16} style={{ color: T.sub, transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          {/* Toolbar */}
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {cur !== null && (
+              <button onClick={() => setCur(null)} className="kpress flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><ChevronLeft size={13} /> Root</button>
+            )}
+            <span className="mr-auto text-[11px] font-semibold" style={{ color: T.sub }}>{cur === null ? "Semua dokumen" : `Folder: ${cur}`}</span>
+            <button onClick={() => setMk((v) => !v)} className="kpress flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Plus size={13} /> Folder</button>
+            <button onClick={() => onPick(cur)} className="kpress flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold" style={{ background: T.brand2 + "14", color: T.brand2 }}><Upload size={13} /> Unggah</button>
+            <button onClick={() => { if (selMode) clearSel(); else setSelMode(true); }} className="kpress flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold" style={selMode ? { background: T.red, color: "#fff" } : { background: T.bg, color: T.red, border: `1px solid ${T.line}` }}><Trash2 size={13} /> {selMode ? "Batal" : "Hapus"}</button>
+          </div>
+
+          {mk && (
+            <div className="mb-2 flex gap-2">
+              <input value={mkName} onChange={(e) => setMkName(e.target.value)} placeholder="Nama folder (mis. Kontrak, Faktur Pajak)" className="flex-1 rounded-lg px-3 py-2 text-sm outline-none" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }} />
+              <button onClick={() => { onMkdir(mkName); setMkName(""); setMk(false); }} disabled={!mkName.trim()} className="rounded-lg px-3 text-sm font-semibold text-white" style={{ background: T.brand, opacity: mkName.trim() ? 1 : 0.4 }}>Buat</button>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            {shownFolders.map((fd) => (
+              <div key={"d" + fd} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                {selMode && <button onClick={() => toggle("d:" + fd)} className="shrink-0">{sel.has("d:" + fd) ? <span className="grid h-5 w-5 place-items-center rounded-md text-white" style={{ background: T.red }}><Check size={13} /></span> : <span className="block h-5 w-5 rounded-md" style={{ border: `1.5px solid ${T.line}` }} />}</button>}
+                <button onClick={() => !selMode && setCur(fd)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                  <FolderOpen size={16} style={{ color: T.brass }} className="shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{fd}</span>
+                  <span className="shrink-0 text-[10px]" style={{ color: T.sub }}>{folderCount(fd)} file</span>
+                </button>
+                {!selMode && <ChevronRight size={14} style={{ color: T.sub }} />}
+              </div>
+            ))}
+            {inFolder.map((b) => (
+              <div key={"f" + b._i} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                {selMode && <button onClick={() => toggle("f:" + b._i)} className="shrink-0">{sel.has("f:" + b._i) ? <span className="grid h-5 w-5 place-items-center rounded-md text-white" style={{ background: T.red }}><Check size={13} /></span> : <span className="block h-5 w-5 rounded-md" style={{ border: `1.5px solid ${T.line}` }} />}</button>}
+                <FileText size={15} style={{ color: T.brand2 }} className="shrink-0" />
+                <button onClick={() => (selMode ? toggle("f:" + b._i) : onOpen(b))} className="min-w-0 flex-1 truncate text-left text-xs font-medium">{b.name || "dokumen"}</button>
+                {b.size ? <span className="shrink-0 text-[10px]" style={{ color: T.sub }}>{humanSize(b.size)}</span> : null}
+              </div>
+            ))}
+            {shownFolders.length === 0 && inFolder.length === 0 && (
+              <p className="py-3 text-center text-[11px]" style={{ color: T.sub }}>{cur === null ? "Belum ada dokumen. Buat folder atau unggah file (Excel/PDF/foto)." : "Folder kosong."}</p>
+            )}
+          </div>
+
+          {selMode && sel.size > 0 && (
+            <button onClick={() => setConfirmDel(true)} className="kpress mt-3 w-full rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: T.red }}>
+              Hapus {sel.size} item terpilih
+            </button>
+          )}
+        </div>
+      )}
+
+      {confirmDel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5" onClick={() => setConfirmDel(false)}>
+          <div className="drawer-ov absolute inset-0" style={{ background: "rgba(0,0,0,.5)" }} />
+          <div onClick={(e) => e.stopPropagation()} className="chat-panel relative w-full max-w-sm rounded-2xl p-4 shadow-2xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+            <h3 className="text-sm font-bold" style={{ color: T.red }}>Hapus {sel.size} item?</h3>
+            <p className="mt-1 text-xs" style={{ color: T.sub }}>Tindakan permanen. Ketik <b style={{ color: T.ink }}>12345</b> untuk konfirmasi.</p>
+            <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" placeholder="12345" className="mt-3 w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }} />
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => { setConfirmDel(false); setCode(""); }} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}>Batal</button>
+              <button onClick={doDelete} disabled={code !== "12345"} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.red, opacity: code === "12345" ? 1 : 0.4 }}>Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
