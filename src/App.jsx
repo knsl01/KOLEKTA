@@ -1790,6 +1790,7 @@ export default function KolektaApp() {
   const [fPetugas, setFPetugas] = useState("all");
   const [sortBy, setSortBy] = useState("overdue");
   const [caseSeg, setCaseSeg] = useState("semua");
+  const [custQ, setCustQ] = useState("");
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
   const [showChat, setShowChat] = useState(false);
@@ -2066,6 +2067,26 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     return c;
   }, [filtered]);
   const casesShown = useMemo(() => filtered.filter(casePred[caseSeg] || casePred.semua), [filtered, caseSeg]);
+
+  /* Pelanggan — daftar customer dikelompokkan dari invoice */
+  const pelanggan = useMemo(() => {
+    const map = new Map();
+    for (const i of enriched) {
+      const key = (i.customer || "—").trim() || "—";
+      let g = map.get(key);
+      if (!g) { g = { customer: key, tipe: i.tipe || "perusahaan", count: 0, aktif: 0, lunas: 0, total: 0, overdue: 0, maxDpd: 0, janji: 0, assignedTo: i.assignedTo || "" }; map.set(key, g); }
+      g.count++;
+      if (i.status === "lunas") g.lunas++;
+      else { g.aktif++; g.total += i.total; }
+      if (i.daysOverdue > 0) { g.overdue += i.total; if (i.daysOverdue > g.maxDpd) g.maxDpd = i.daysOverdue; }
+      if (i.janjiBayar || i.status === "janji_bayar") g.janji++;
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }, [enriched]);
+  const pelangganShown = useMemo(() => {
+    const q = custQ.trim().toLowerCase();
+    return q ? pelanggan.filter((g) => g.customer.toLowerCase().includes(q)) : pelanggan;
+  }, [pelanggan, custQ]);
 
   const agenda = useMemo(() => {
     const aktif = enriched.filter((i) => i.status !== "lunas");
@@ -2354,6 +2375,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
               <CalcIcon size={18} /><span>Kalkulator</span>
             </button>
+            <SideBtn id="pelanggan" icon={Users} label="Pelanggan" />
             {auth.role === "atasan" && <SideBtn id="audit" icon={ShieldCheck} label="Audit Log" />}
             <SideBtn id="set" icon={Settings} label="Pengaturan" />
           </nav>
@@ -2408,7 +2430,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {/* Judul (PC) */}
         <div className="hidden pb-1 pt-7 lg:block">
           <h2 className="text-xl font-bold tracking-tight" style={{ color: T.ink }}>{
-            ({ hari: "Dashboard", tagihan: "Cases", reports: "Ringkasan laporan", analitik: "Analitik", heatmap: "Heat Map", riwayat: "Riwayat", audit: "Audit Log", set: "Pengaturan", more: "Lainnya" })[tab]
+            ({ hari: "Dashboard", tagihan: "Cases", pelanggan: "Pelanggan", reports: "Ringkasan laporan", analitik: "Analitik", heatmap: "Heat Map", riwayat: "Riwayat", audit: "Audit Log", set: "Pengaturan", more: "Lainnya" })[tab]
             || navItems.find((n) => n.id === tab)?.label
           }</h2>
         </div>
@@ -2695,6 +2717,54 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           </div>
         )}
 
+        {/* ---------- PELANGGAN (daftar customer) ---------- */}
+        {tab === "pelanggan" && (
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center gap-2 rounded-lg px-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <Search size={16} style={{ color: T.sub }} />
+              <input value={custQ} onChange={(e) => setCustQ(e.target.value)} placeholder="Cari pelanggan / debitur"
+                className="w-full bg-transparent py-2.5 text-sm outline-none" />
+            </div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat label="Total pelanggan" value={String(pelanggan.length)} sub="debitur" />
+              <Stat label="Punya tunggakan" value={String(pelanggan.filter((g) => g.overdue > 0).length)} sub="overdue" accent={T.red} />
+            </div>
+            <div className="space-y-2">
+              {pelangganShown.map((g) => (
+                <button key={g.customer} onClick={() => { setCustQ(""); setQuery(g.customer); setCaseSeg("semua"); setOpenId(null); setTab("tagihan"); }}
+                  className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: T.brand2 + "14", color: T.brand }}>
+                    {g.tipe === "perorangan" ? <User size={18} /> : <Building2 size={18} />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{g.customer}</p>
+                    <p className="truncate text-[11px]" style={{ color: T.sub }}>
+                      {g.aktif} aktif{g.lunas ? ` · ${g.lunas} lunas` : ""}{g.assignedTo ? ` · ${g.assignedTo}` : ""}
+                    </p>
+                    {(g.overdue > 0 || g.janji > 0) && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {g.overdue > 0 && <span className="rounded-md px-1.5 py-0.5 text-[10px] font-bold" style={{ background: T.red + "1F", color: T.red }}>Overdue {g.maxDpd} hr</span>}
+                        {g.janji > 0 && <span className="rounded-md px-1.5 py-0.5 text-[10px] font-bold" style={{ background: T.amber + "1F", color: T.amber }}>{g.janji} janji bayar</span>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold" style={{ fontFamily: MONO }}>{rpc(g.total)}</p>
+                    <p className="text-[10px]" style={{ color: T.sub }}>outstanding</p>
+                  </div>
+                  <ChevronRight size={16} style={{ color: T.sub }} />
+                </button>
+              ))}
+              {pelangganShown.length === 0 && (
+                <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
+                  <p className="text-sm font-medium">{pelanggan.length === 0 ? "Belum ada pelanggan" : "Tidak ada yang cocok"}</p>
+                  <p className="mt-1 text-xs" style={{ color: T.sub }}>{pelanggan.length === 0 ? "Tambah tagihan dulu — pelanggan muncul otomatis dari invoice." : "Coba kata kunci lain."}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ---------- REPORTS (RINGKASAN / HUB) ---------- */}
         {tab === "reports" && (
           <div className="mt-4 space-y-4">
@@ -2924,6 +2994,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               return (
                 <>
                   <Group title="Manajemen">
+                    <Row icon={Users} label="Pelanggan" desc="Daftar debitur & outstanding per customer" on={() => setTab("pelanggan")} />
                     {auth.role === "atasan" && <Row icon={ShieldCheck} label="Audit Log" desc="Jejak perubahan (append-only)" on={() => setTab("audit")} />}
                     <Row icon={History} label="Riwayat kerja" desc={s.peran === "petugas" ? "Pekerjaan lapangan saya" : "Hasil kerja seluruh petugas"} on={openRiwayatKerja} badge={worklogTodayN} />
                     <Row icon={MessageCircle} label="Chat tim" desc="Personal, grup & panggilan" on={() => setShowChat(true)} badge={chatUnread} />
@@ -2984,7 +3055,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         style={{ background: T.surface, borderColor: T.line, paddingBottom: "max(env(safe-area-inset-bottom), 0px)" }}>
         {(() => {
           const inReports = ["reports", "analitik", "heatmap", "riwayat"].includes(tab);
-          const inMore = ["more", "audit", "set"].includes(tab);
+          const inMore = ["more", "audit", "set", "pelanggan"].includes(tab);
           const items = [
             { key: "dash", icon: Grid3x3, label: "Dashboard", active: tab === "hari" && !showChat, badge: 0, on: () => setTab("hari") },
             { key: "cases", icon: Wallet, label: "Cases", active: tab === "tagihan" && !showChat, badge: 0, on: () => setTab("tagihan") },
@@ -5883,6 +5954,7 @@ function CommandPalette({ T, invoices = [], role, onClose, onNav, onOpenInvoice,
   const nav = [
     { k: "hari", label: "Dashboard", icon: Grid3x3 },
     { k: "tagihan", label: "Cases", icon: Wallet },
+    { k: "pelanggan", label: "Pelanggan", icon: Users },
     { k: "reports", label: "Reports — Ringkasan", icon: FileText },
     { k: "analitik", label: "Analitik", icon: BarChart3 },
     { k: "heatmap", label: "Heat Map", icon: Flame },
