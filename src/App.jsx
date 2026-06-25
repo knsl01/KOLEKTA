@@ -1894,6 +1894,9 @@ export default function KolektaApp() {
   const navRef = useRef(null);
   const navBtns = useRef({});
   const [navInd, setNavInd] = useState(null);
+  const subNavRef = useRef(null);
+  const subBtns = useRef({});
+  const [subInd, setSubInd] = useState(null);
   const [showCmd, setShowCmd] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
@@ -2022,6 +2025,20 @@ export default function KolektaApp() {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [navActiveKey, navShrink, data]);
+
+  /* Geser indikator sub-nav Reports (Ringkasan/Analitik/Heat/Riwayat) */
+  const inReportsSection = ["reports", "analitik", "heatmap", "riwayat"].includes(tab);
+  useEffect(() => {
+    if (!inReportsSection) { setSubInd((p) => (p ? { ...p, show: false } : p)); return; }
+    const measure = () => {
+      const btn = subBtns.current[tab];
+      if (!btn) { setSubInd((p) => (p ? { ...p, show: false } : p)); return; }
+      setSubInd({ left: btn.offsetLeft, width: btn.offsetWidth, show: true });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [tab, inReportsSection, data]);
 
   /* Identitas untuk chat */
   const meRole = auth?.role || "petugas";
@@ -2615,16 +2632,25 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
         {/* Sub-nav Reports (HP) — muncul hanya di seksi Reports */}
         {["reports", "analitik", "heatmap", "riwayat"].includes(tab) && (
-          <nav className="sticky top-2 z-20 mt-4 flex gap-1 overflow-x-auto rounded-xl p-1 shadow-sm lg:hidden"
-            style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          <nav ref={subNavRef} className="sticky top-2 z-20 mt-4 flex gap-1 overflow-x-auto rounded-xl p-1 shadow-sm lg:hidden"
+            style={{ position: "relative", background: T.surface, border: `1px solid ${T.line}` }}>
+            {/* Indikator aktif yang menggeser halus antar sub-tab */}
+            <span aria-hidden style={{ position: "absolute", top: 4, bottom: 4, left: subInd ? subInd.left : 0, width: subInd ? subInd.width : 0, background: T.brand, borderRadius: 8, opacity: subInd && subInd.show ? 1 : 0, transition: "left .4s cubic-bezier(.34,1.4,.5,1), width .4s cubic-bezier(.34,1.4,.5,1), opacity .2s ease", pointerEvents: "none", zIndex: 0 }} />
             {[
               { id: "reports", icon: Grid3x3, label: "Ringkasan" },
               { id: "analitik", icon: BarChart3, label: "Analitik" },
               { id: "heatmap", icon: Flame, label: "Heat Map" },
               { id: "riwayat", icon: History, label: "Riwayat" },
-            ].map((n) => (
-              <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={0} />
-            ))}
+            ].map((n) => {
+              const active = tab === n.id;
+              return (
+                <button key={n.id} ref={(el) => { subBtns.current[n.id] = el; }} onClick={() => setTab(n.id)}
+                  className="kpress relative flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium"
+                  style={{ color: active ? "#fff" : T.sub, transition: "color .25s ease", zIndex: 1 }}>
+                  <n.icon size={16} className="shrink-0" /><span className="hidden truncate sm:inline">{n.label}</span><span className="truncate sm:hidden">{n.label.split(" ")[0]}</span>
+                </button>
+              );
+            })}
           </nav>
         )}
 
