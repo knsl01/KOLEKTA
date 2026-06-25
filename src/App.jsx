@@ -2339,8 +2339,8 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 .theme-glass nav.fixed,.theme-glass aside{
   -webkit-backdrop-filter:blur(22px) saturate(170%);backdrop-filter:blur(22px) saturate(170%);}
 /* Bottom nav & sidebar lebih opak sedikit demi keterbacaan */
-.theme-glass nav.fixed{background:rgba(255,255,255,0.72)!important;border-top:1px solid rgba(120,142,176,.28)!important;}
-.theme-glass.kglass-dark nav.fixed{background:rgba(16,26,38,0.72)!important;border-top:1px solid rgba(255,255,255,.12)!important;}
+.theme-glass nav.fixed{background:rgba(255,255,255,0.72)!important;border:1px solid rgba(255,255,255,.6)!important;box-shadow:0 14px 40px -12px rgba(22,30,52,.30)!important;}
+.theme-glass.kglass-dark nav.fixed{background:rgba(16,26,38,0.72)!important;border:1px solid rgba(255,255,255,.12)!important;box-shadow:0 14px 40px -12px rgba(0,0,0,.5)!important;}
 .theme-glass aside{background:rgba(255,255,255,0.60)!important;}
 .theme-glass.kglass-dark aside{background:rgba(16,26,38,0.58)!important;}
 /* Float shadow premium + tepi cahaya halus */
@@ -2365,7 +2365,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   background-image:radial-gradient(135% 110% at 12% -8%, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.30) 42%, rgba(255,255,255,0.16) 100%)!important;
   border:1px solid rgba(255,255,255,0.72)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.9), 0 12px 36px -16px rgba(22,30,52,.26)!important;}
-.theme-glass2 nav.fixed{background:linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.58))!important;border-top:1px solid rgba(255,255,255,.7)!important;box-shadow:0 -8px 30px rgba(22,30,52,.10)!important;}
+.theme-glass2 nav.fixed{background:linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.6))!important;border:1px solid rgba(255,255,255,.7)!important;box-shadow:0 16px 44px -12px rgba(22,30,52,.28)!important;}
 .theme-glass2 aside{background:rgba(255,255,255,0.55)!important;border-right:1px solid rgba(255,255,255,.6)!important;}
 .theme-glass2 .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.5), rgba(255,255,255,0.18))!important;}
 .theme-glass2 .drawer-ov{-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);background:rgba(40,48,66,.32)!important;}
@@ -2380,7 +2380,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   background-image:radial-gradient(135% 110% at 12% -8%, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.045) 40%, rgba(255,255,255,0.015) 100%)!important;
   border:1px solid rgba(255,255,255,0.16)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.26), inset 0 -16px 28px rgba(0,0,0,.10), 0 14px 40px -16px rgba(0,0,0,.55)!important;}
-.theme-glass2.kglass-dark nav.fixed{background:linear-gradient(180deg, rgba(34,36,42,0.64), rgba(18,19,23,0.72))!important;border-top:1px solid rgba(255,255,255,.12)!important;box-shadow:0 -8px 30px rgba(0,0,0,.4)!important;}
+.theme-glass2.kglass-dark nav.fixed{background:linear-gradient(180deg, rgba(40,42,50,0.7), rgba(22,24,30,0.78))!important;border:1px solid rgba(255,255,255,.16)!important;box-shadow:0 16px 44px -12px rgba(0,0,0,.55)!important;}
 .theme-glass2.kglass-dark aside{background:linear-gradient(180deg, rgba(30,32,38,0.58), rgba(16,17,21,0.64))!important;border-right:1px solid rgba(255,255,255,.10)!important;}
 .theme-glass2.kglass-dark .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))!important;}
 .theme-glass2.kglass-dark .drawer-ov{background:rgba(6,7,9,.5)!important;}
@@ -3222,7 +3222,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       <input ref={custFileRef} type="file" accept=".xlsx,.xls,.csv,application/pdf,image/*" multiple onChange={onCustFiles} className="hidden" />
 
       {/* FAB — aksi cepat (HP) */}
-      <div className="fixed right-4 z-40 lg:hidden" style={{ bottom: "calc(70px + max(env(safe-area-inset-bottom), 0px))" }}>
+      <div className="fixed right-4 z-40 lg:hidden" style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 88px)" }}>
         {fabOpen && (
           <>
             <div onClick={() => setFabOpen(false)} className="drawer-ov fixed inset-0" style={{ background: "rgba(0,0,0,0.35)", zIndex: -1 }} />
@@ -3247,9 +3247,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         </button>
       </div>
 
-      {/* Bottom navigation (HP) */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex items-stretch border-t lg:hidden"
-        style={{ background: T.surface, borderColor: T.line, paddingBottom: "max(env(safe-area-inset-bottom), 0px)" }}>
+      {/* Bottom navigation (HP) — floating pill */}
+      <nav className="fixed bottom-0 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-[26px] p-1.5 shadow-xl lg:hidden"
+        style={{ background: T.surface, border: `1px solid ${T.line}`, bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)", maxWidth: "calc(100% - 20px)" }}>
         {(() => {
           const inReports = ["reports", "analitik", "heatmap", "riwayat"].includes(tab);
           const inMore = ["more", "audit", "set", "pelanggan"].includes(tab);
@@ -3262,12 +3262,12 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           ];
           return items.map((it) => (
             <button key={it.key} onClick={it.on}
-              className="kpress relative flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10.5px] font-semibold"
-              style={{ color: it.active ? T.brand : T.sub }}>
+              className="kpress relative flex flex-col items-center justify-center gap-0.5 rounded-[20px] px-3.5 py-2 text-[10px] font-semibold transition-colors"
+              style={it.active ? { background: T.brand + "26", color: T.brand } : { color: T.sub }}>
               <it.icon size={22} />
               <span>{it.label}</span>
               {it.badge > 0 && (
-                <span className="absolute top-1 translate-x-3.5 rounded-full px-1 text-center text-[9px] font-bold leading-[15px] text-white"
+                <span className="absolute right-1.5 top-0.5 rounded-full px-1 text-center text-[9px] font-bold leading-[15px] text-white"
                   style={{ background: T.red, minWidth: 15, height: 15 }}>{it.badge > 99 ? "99+" : it.badge}</span>
               )}
             </button>
