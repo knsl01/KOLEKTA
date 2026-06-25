@@ -1764,6 +1764,7 @@ export default function KolektaApp() {
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
+  const [showCmd, setShowCmd] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
   const [worklogView, setWorklogView] = useState("list");
@@ -1834,6 +1835,16 @@ export default function KolektaApp() {
     return session;
   };
   const doLogout = () => { if (pushTimer.current) clearTimeout(pushTimer.current); clearAuth(); setAuth(null); setData(null); setTab("hari"); };
+
+  /* ⌘K / Ctrl+K — buka command palette global (cari & lompat) */
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); setShowCmd((v) => !v); }
+      if (e.key === "Escape") setShowCmd(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
 
@@ -2227,6 +2238,13 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <p className="text-[11px]" style={{ color: T.brass }}>collection control</p>
             </div>
           </div>
+          <div className="px-3 pb-1">
+            <button onClick={() => setShowCmd(true)}
+              className="kpress flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>
+              <Search size={16} /><span className="flex-1 text-left">Cari & perintah</span>
+              <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>⌘K</span>
+            </button>
+          </div>
           <nav className="flex flex-col gap-1 px-3">
             <p className="mb-1 mt-1 px-3 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Utama</p>
             <SideBtn id="hari" icon={Grid3x3} label="Dashboard" badge={panels.belum.length + panels.perlu.length} />
@@ -2283,6 +2301,10 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               </div>
               <p className="truncate text-xs" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
             </div>
+          </button>
+          <button onClick={() => setShowCmd(true)} aria-label="Cari & perintah"
+            className="kpress shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
+            <Search size={20} />
           </button>
           <span className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>
             {s.peran === "petugas" ? (s.petugasAktif || "Petugas") : "Atasan"}
@@ -2913,6 +2935,14 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         <ChatPanel T={T} auth={auth} meName={meName} meRole={meRole}
           ptName={auth.name || s?.perusahaan || ""} petugasNames={chatPetugas}
           onClose={() => setShowChat(false)} onUnread={setChatUnread} />
+      )}
+
+      {showCmd && (
+        <CommandPalette T={T} invoices={enriched} role={auth.role}
+          onClose={() => setShowCmd(false)}
+          onNav={(k) => { setShowCmd(false); setTab(k); }}
+          onOpenInvoice={(id) => { setShowCmd(false); setCaseSeg("semua"); setTab("tagihan"); setOpenId(id); }}
+          onAction={(k) => { setShowCmd(false); if (k === "lapor") openLapor(); else if (k === "chat") setShowChat(true); else if (k === "calc") setShowCalc(true); }} />
       )}
 
       <Kalkulator open={showCalc} onClose={() => setShowCalc(false)} />
@@ -5756,6 +5786,81 @@ function AdminPanel({ th, onBack }) {
         </>
       )}
       {msg && <p className="mt-2 text-[12px]" style={{ color: /✓/.test(msg) ? th.green : th.red }}>{msg}</p>}
+    </div>
+  );
+}
+
+/* ---------- Command Palette (⌘K) — cari & lompat cepat, slot AI ----------
+   Primitif enterprise: satu pintu untuk navigasi + pencarian global +
+   tempat masuk Asisten AI di masa depan. Tidak mengubah alur yang ada. */
+function CommandPalette({ T, invoices = [], role, onClose, onNav, onOpenInvoice, onAction }) {
+  const [q, setQ] = useState("");
+  const [aiNote, setAiNote] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => { const t = setTimeout(() => ref.current?.focus(), 60); return () => clearTimeout(t); }, []);
+  const ql = q.trim().toLowerCase();
+  const nav = [
+    { k: "hari", label: "Dashboard", icon: Grid3x3 },
+    { k: "tagihan", label: "Cases", icon: Wallet },
+    { k: "reports", label: "Reports — Ringkasan", icon: FileText },
+    { k: "analitik", label: "Analitik", icon: BarChart3 },
+    { k: "heatmap", label: "Heat Map", icon: Flame },
+    { k: "riwayat", label: "Riwayat penagihan", icon: History },
+    ...(role === "atasan" ? [{ k: "audit", label: "Audit Log", icon: ShieldCheck }] : []),
+    { k: "more", label: "More", icon: Menu },
+    { k: "set", label: "Pengaturan", icon: Settings },
+  ];
+  const actions = [
+    { k: "lapor", label: "Buat laporan lapangan", icon: ClipboardList },
+    { k: "chat", label: "Buka Chat tim", icon: MessageCircle },
+    { k: "calc", label: "Kalkulator", icon: CalcIcon },
+  ];
+  const navF = nav.filter((n) => !ql || n.label.toLowerCase().includes(ql));
+  const actF = actions.filter((a) => !ql || a.label.toLowerCase().includes(ql));
+  const invF = (ql ? invoices.filter((i) => i.customer.toLowerCase().includes(ql) || String(i.noInvoice || "").toLowerCase().includes(ql)) : []).slice(0, 8);
+  const RowBtn = ({ icon: Icon, label, sub, onClick, accent }) => (
+    <button onClick={onClick} className="kpress flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-black/5">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: (accent || T.brand2) + "14", color: accent || T.brand }}><Icon size={16} /></span>
+      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{label}</span>{sub && <span className="block truncate text-[11px]" style={{ color: T.sub }}>{sub}</span>}</span>
+      <ArrowRight size={14} style={{ color: T.sub }} />
+    </button>
+  );
+  const Label = ({ children }) => <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>{children}</p>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[10vh]" onClick={onClose}>
+      <div className="drawer-ov absolute inset-0" style={{ background: "rgba(0,0,0,0.45)" }} />
+      <div onClick={(e) => e.stopPropagation()} className="chat-panel relative w-full max-w-lg overflow-hidden rounded-2xl shadow-2xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: T.line }}>
+          <Search size={18} style={{ color: T.sub }} />
+          <input ref={ref} value={q} onChange={(e) => { setQ(e.target.value); setAiNote(false); }} placeholder="Cari customer, invoice, atau perintah…"
+            className="w-full bg-transparent text-sm outline-none" style={{ color: T.ink }} />
+          <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.bg, color: T.sub }}>ESC</span>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto p-2">
+          {/* Slot AI (planted, jujur: segera) */}
+          <button onClick={() => setAiNote(true)} className="kpress mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left" style={{ background: T.brand + "0D" }}>
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white" style={{ background: T.brand }}><Send size={15} /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold" style={{ color: T.brand }}>{ql ? `Tanya Kolekta AI: “${q}”` : "Tanya Kolekta AI"}</span>
+              <span className="block text-[11px]" style={{ color: T.sub }}>Ringkasan kasus, draf pesan & next-best-action</span>
+            </span>
+            <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: T.brass + "22", color: T.brass }}>SEGERA</span>
+          </button>
+          {aiNote && (
+            <div className="mb-1 rounded-lg px-3 py-2 text-[11px] leading-relaxed" style={{ background: T.bg, color: T.sub }}>
+              Asisten AI akan tersambung di sini — siap meringkas tunggakan, menyusun draf pesan penagihan, dan menyarankan tindakan berikutnya. Saat ini dalam pengembangan.
+            </div>
+          )}
+          {invF.length > 0 && <><Label>Customer / Invoice</Label>{invF.map((i) => (
+            <RowBtn key={i.id} icon={Wallet} label={i.customer} sub={`${i.noInvoice || "—"} · ${rpc(i.total)}${i.daysOverdue > 0 ? ` · telat ${i.daysOverdue} hr` : ""}`} onClick={() => onOpenInvoice(i.id)} />
+          ))}</>}
+          {actF.length > 0 && <><Label>Aksi cepat</Label>{actF.map((a) => <RowBtn key={a.k} icon={a.icon} label={a.label} onClick={() => onAction(a.k)} />)}</>}
+          {navF.length > 0 && <><Label>Buka halaman</Label>{navF.map((n) => <RowBtn key={n.k} icon={n.icon} label={n.label} onClick={() => onNav(n.k)} />)}</>}
+          {ql && invF.length === 0 && actF.length === 0 && navF.length === 0 && (
+            <p className="px-3 py-6 text-center text-sm" style={{ color: T.sub }}>Tidak ada hasil untuk “{q}”.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
