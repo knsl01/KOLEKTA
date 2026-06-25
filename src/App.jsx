@@ -1791,6 +1791,7 @@ export default function KolektaApp() {
   const [sortBy, setSortBy] = useState("overdue");
   const [caseSeg, setCaseSeg] = useState("semua");
   const [custQ, setCustQ] = useState("");
+  const [custSel, setCustSel] = useState(null);
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
   const [showChat, setShowChat] = useState(false);
@@ -2124,6 +2125,34 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
   const fileRef = useRef(null);
   const jsonRef = useRef(null);
+  const custFileRef = useRef(null);
+  /* Lampiran per-pelanggan (perpustakaan dokumen) — disimpan di data.customers[nama].files */
+  const patchCustomer = (name, fn) => setData((d) => {
+    const customers = { ...(d.customers || {}) };
+    customers[name] = fn(customers[name] || { files: [] });
+    return { ...d, customers };
+  });
+  const onCustFiles = async (e) => {
+    const files = Array.from(e.target.files || []); e.target.value = "";
+    if (!files.length || !custSel) return;
+    flash(`Mengunggah ${files.length} file…`);
+    const added = [];
+    for (const file of files) {
+      try {
+        const data0 = await readFileData(file);
+        let rec = { name: file.name, type: file.type || "file", size: file.size };
+        try { const up = await sbUpload(auth.code, "customer", file.name, data0); rec.path = up.path; rec.size = up.size || file.size; }
+        catch { rec.data = data0; }
+        added.push(rec);
+      } catch { /* skip file gagal baca */ }
+    }
+    if (added.length) {
+      patchCustomer(custSel, (c) => ({ ...c, files: [...added, ...(c.files || [])] }));
+      audit("tambah", `${added.length} dokumen pelanggan · ${custSel}`, null, { count: added.length });
+      flash(`${added.length} dokumen tersimpan`);
+    } else flash("Tidak ada file yang tersimpan");
+  };
+  const removeCustFile = (name, idx) => patchCustomer(name, (c) => ({ ...c, files: (c.files || []).filter((_, i) => i !== idx) }));
   const onImportFile = async (e) => {
     const file = e.target.files?.[0]; e.target.value = "";
     if (!file) return;
@@ -2698,7 +2727,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               </div>
             )}
 
-            {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} onAdd={(inv) => { addInvoice(inv); setShowAdd(false); flash("Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
+            {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} onAdd={(list) => { const arr = Array.isArray(list) ? list : [list]; arr.forEach(addInvoice); setShowAdd(false); flash(arr.length > 1 ? `${arr.length} tagihan ditambahkan` : "Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
 
             <div className="space-y-2">
               {casesShown.map((i) => (
@@ -2717,8 +2746,8 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           </div>
         )}
 
-        {/* ---------- PELANGGAN (daftar customer) ---------- */}
-        {tab === "pelanggan" && (
+        {/* ---------- PELANGGAN — daftar (perpustakaan) ---------- */}
+        {tab === "pelanggan" && !custSel && (
           <div className="mt-4 space-y-3">
             <div className="flex items-center gap-2 rounded-lg px-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
               <Search size={16} style={{ color: T.sub }} />
@@ -2731,7 +2760,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             </div>
             <div className="space-y-2">
               {pelangganShown.map((g) => (
-                <button key={g.customer} onClick={() => { setCustQ(""); setQuery(g.customer); setCaseSeg("semua"); setOpenId(null); setTab("tagihan"); }}
+                <button key={g.customer} onClick={() => setCustSel(g.customer)}
                   className="kpress flex w-full items-center gap-3 rounded-xl p-3 text-left shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: T.brand2 + "14", color: T.brand }}>
                     {g.tipe === "perorangan" ? <User size={18} /> : <Building2 size={18} />}
@@ -2739,7 +2768,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold">{g.customer}</p>
                     <p className="truncate text-[11px]" style={{ color: T.sub }}>
-                      {g.aktif} aktif{g.lunas ? ` · ${g.lunas} lunas` : ""}{g.assignedTo ? ` · ${g.assignedTo}` : ""}
+                      {g.count} invoice · {g.aktif} aktif{g.lunas ? ` · ${g.lunas} lunas` : ""}{g.assignedTo ? ` · ${g.assignedTo}` : ""}
                     </p>
                     {(g.overdue > 0 || g.janji > 0) && (
                       <div className="mt-1 flex flex-wrap gap-1">
@@ -2764,6 +2793,112 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             </div>
           </div>
         )}
+
+        {/* ---------- PELANGGAN — detail (profil + invoice + dokumen + WA) ---------- */}
+        {tab === "pelanggan" && custSel && (() => {
+          const myInvs = enriched.filter((i) => (i.customer || "").trim() === custSel).sort((a, b) => b.daysOverdue - a.daysOverdue);
+          const aktifInvs = myInvs.filter((i) => i.status !== "lunas");
+          const tipe = (myInvs.find((i) => i.tipe) || {}).tipe || "perusahaan";
+          const picN = (myInvs.find((i) => i.pic && i.pic.trim()) || {}).pic || "";
+          const tel = (myInvs.find((i) => i.telp && i.telp.trim()) || {}).telp || "";
+          const alamat = (myInvs.find((i) => i.alamat && i.alamat.trim()) || {}).alamat || "";
+          const totalOut = aktifInvs.reduce((a, i) => a + i.total, 0);
+          const overdueN = aktifInvs.filter((i) => i.daysOverdue > 0).length;
+          const nos = aktifInvs.map((i) => i.noInvoice).filter(Boolean);
+          const noInv = !!s.waTanpaInvoice;
+          const invRef = noInv || nos.length === 0 ? "" : nos.length === 1 ? `untuk Invoice ${nos[0]} ` : `untuk Invoice ${nos[0]} s/d ${nos[nos.length - 1]} (${nos.length} invoice) `;
+          const sap = tipe === "perorangan" ? `Bapak/Ibu ${custSel}` : (picN ? `Bapak/Ibu ${picN}` : `Bapak/Ibu dari ${custSel}`);
+          const waText = `Selamat ${greeting()}, ${sap} 🙏\n\nIzin mengingatkan tagihan ${invRef}dengan total *${rp(totalOut)}* yang telah jatuh tempo.\nMohon dapat diselesaikan atau dikonfirmasi jadwal pembayarannya. Terima kasih 🙏\n\n— ${s.perusahaan?.trim() || "Kolekta"}`;
+          const wl = waLink(tel, waText);
+          const files = (data.customers?.[custSel]?.files) || [];
+          return (
+            <div className="mt-4 space-y-3">
+              <button onClick={() => setCustSel(null)} className="kpress flex items-center gap-1.5 text-sm font-semibold" style={{ color: T.brand2 }}>
+                <ChevronLeft size={16} /> Semua pelanggan
+              </button>
+              {/* Profil */}
+              <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <div className="flex items-center gap-3">
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl" style={{ background: T.brand2 + "14", color: T.brand }}>
+                    {tipe === "perorangan" ? <User size={22} /> : <Building2 size={22} />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-base font-bold">{custSel}</p>
+                    <p className="truncate text-[11px]" style={{ color: T.sub }}>{tipe === "perorangan" ? "Perorangan" : "Perusahaan"}{picN ? ` · ${picN}` : ""}{tel ? ` · ${tel}` : ""}</p>
+                    {alamat && <p className="truncate text-[11px]" style={{ color: T.sub }}>{alamat}</p>}
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t pt-3 text-center" style={{ borderColor: T.line }}>
+                  <div><p className="text-[10px]" style={{ color: T.sub }}>Outstanding</p><p className="text-sm font-bold" style={{ fontFamily: MONO }}>{rpc(totalOut)}</p></div>
+                  <div><p className="text-[10px]" style={{ color: T.sub }}>Invoice aktif</p><p className="text-sm font-bold" style={{ fontFamily: MONO }}>{aktifInvs.length}</p></div>
+                  <div><p className="text-[10px]" style={{ color: T.sub }}>Overdue</p><p className="text-sm font-bold" style={{ color: overdueN ? T.red : T.ink, fontFamily: MONO }}>{overdueN}</p></div>
+                </div>
+              </div>
+
+              {/* WA pelanggan (format invoice awal–akhir / tanpa nomor) */}
+              <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold">Kirim pengingat WA</span>
+                  <button onClick={() => setData((d) => ({ ...d, settings: { ...d.settings, waTanpaInvoice: !d.settings.waTanpaInvoice } }))}
+                    className="chip rounded-full px-2.5 py-1 text-[11px] font-semibold" style={noInv ? { background: T.brand2, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>
+                    {noInv ? "Tanpa nomor invoice ✓" : "Tulis nomor invoice"}
+                  </button>
+                </div>
+                <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg p-2 text-[11px] leading-relaxed" style={{ background: T.bg, color: T.ink, border: `1px solid ${T.line}` }}>{waText}</pre>
+                <div className="flex gap-2">
+                  <button onClick={() => { if (wl) window.open(wl, "_blank", "noopener"); else { copy(waText); flash("No. WA kosong — pesan disalin"); } }}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold text-white" style={{ background: T.green }}>
+                    <MessageCircle size={15} /> {tel ? "Kirim WA" : "Salin (WA kosong)"}
+                  </button>
+                  <button onClick={() => { copy(waText); flash("Pesan disalin"); }} className="flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: T.bg, color: T.brand2, border: `1px solid ${T.line}` }}><Copy size={15} /></button>
+                </div>
+              </div>
+
+              {/* Perpustakaan dokumen pelanggan */}
+              <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold">Dokumen pelanggan ({files.length})</span>
+                  <button onClick={() => custFileRef.current?.click()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold" style={{ background: T.brand2 + "14", color: T.brand2 }}>
+                    <Upload size={14} /> Unggah (Excel/PDF/foto)
+                  </button>
+                </div>
+                {files.length === 0 ? (
+                  <p className="py-3 text-center text-[11px]" style={{ color: T.sub }}>Belum ada dokumen. Unggah kontrak, PO, faktur pajak, KTP/akta, dll.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {files.map((b, idx) => (
+                      <div key={idx} className="flex items-center gap-2 rounded-lg p-2" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                        <FileText size={15} style={{ color: T.brand2 }} className="shrink-0" />
+                        <button onClick={() => openBukti(b)} className="min-w-0 flex-1 truncate text-left text-xs font-medium">{b.name || "dokumen"}</button>
+                        {b.size ? <span className="shrink-0 text-[10px]" style={{ color: T.sub }}>{humanSize(b.size)}</span> : null}
+                        <button onClick={() => removeCustFile(custSel, idx)} className="shrink-0 rounded-md p-1" style={{ color: T.red }} aria-label="Hapus dokumen"><Trash2 size={13} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Daftar invoice pelanggan */}
+              <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                <p className="mb-2 text-sm font-semibold">Invoice ({myInvs.length})</p>
+                <div className="space-y-1.5">
+                  {myInvs.map((i) => (
+                    <button key={i.id} onClick={() => { setQuery(custSel); setCaseSeg("semua"); setOpenId(i.id); setTab("tagihan"); }}
+                      className="kpress flex w-full items-center gap-3 rounded-lg p-2 text-left" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+                      <span className="h-8 w-1 shrink-0 rounded-full" style={{ background: i.status === "lunas" ? T.green : i.daysOverdue > 0 ? T.red : T.amber }} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{i.noInvoice || "(tanpa no. invoice)"}</p>
+                        <p className="truncate text-[11px]" style={{ color: T.sub }}>JT {fmtTgl(i.tglJatuhTempo)}{i.daysOverdue > 0 ? ` · telat ${i.daysOverdue} hr` : ""}</p>
+                      </div>
+                      <Pill status={i.status} />
+                      <span className="shrink-0 text-sm font-semibold" style={{ fontFamily: MONO }}>{rp(i.total)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ---------- REPORTS (RINGKASAN / HUB) ---------- */}
         {tab === "reports" && (
@@ -2994,7 +3129,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               return (
                 <>
                   <Group title="Manajemen">
-                    <Row icon={Users} label="Pelanggan" desc="Daftar debitur & outstanding per customer" on={() => setTab("pelanggan")} />
+                    <Row icon={Users} label="Pelanggan" desc="Daftar debitur & outstanding per customer" on={() => { setCustSel(null); setTab("pelanggan"); }} />
                     {auth.role === "atasan" && <Row icon={ShieldCheck} label="Audit Log" desc="Jejak perubahan (append-only)" on={() => setTab("audit")} />}
                     <Row icon={History} label="Riwayat kerja" desc={s.peran === "petugas" ? "Pekerjaan lapangan saya" : "Hasil kerja seluruh petugas"} on={openRiwayatKerja} badge={worklogTodayN} />
                     <Row icon={MessageCircle} label="Chat tim" desc="Personal, grup & panggilan" on={() => setShowChat(true)} badge={chatUnread} />
@@ -3023,6 +3158,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={onImportFile} className="hidden" />
       <input ref={jsonRef} type="file" accept=".json,application/json" onChange={onImportJSON} className="hidden" />
+      <input ref={custFileRef} type="file" accept=".xlsx,.xls,.csv,application/pdf,image/*" multiple onChange={onCustFiles} className="hidden" />
 
       {/* FAB — aksi cepat (HP) */}
       <div className="fixed right-4 z-40 lg:hidden" style={{ bottom: "calc(70px + max(env(safe-area-inset-bottom), 0px))" }}>
@@ -3747,13 +3883,24 @@ const inputCls = "w-full rounded-lg px-3 py-2 text-sm outline-none";
 const inputSt = { background: T.bg, border: `1px solid ${T.line}`, color: T.ink };
 
 function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
-  const [f, setF] = useState({ customer: "", noInvoice: "", nominal: "", tglJatuhTempo: "", pic: "", telp: "", tipe: "perusahaan", alamat: "", jaminanTipe: "none", jaminan: "", assignedTo: defaultPetugas });
+  const [f, setF] = useState({ customer: "", pic: "", telp: "", tipe: "perusahaan", alamat: "", jaminanTipe: "none", jaminan: "", assignedTo: defaultPetugas });
+  const [rows, setRows] = useState([{ noInvoice: "", nominal: "", tglJatuhTempo: "" }]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const valid = f.customer.trim() && f.noInvoice.trim() && Number(f.nominal) > 0 && f.tglJatuhTempo;
+  const setRow = (idx, k, v) => setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, [k]: v } : r)));
+  const addRow = () => setRows((rs) => [...rs, { noInvoice: "", nominal: "", tglJatuhTempo: "" }]);
+  const delRow = (idx) => setRows((rs) => (rs.length > 1 ? rs.filter((_, i) => i !== idx) : rs));
+  const validRows = rows.filter((r) => Number(r.nominal) > 0 && r.tglJatuhTempo);
+  const totalAll = validRows.reduce((a, r) => a + Number(r.nominal || 0), 0);
+  const valid = f.customer.trim() && validRows.length > 0;
+  const submit = () => {
+    const base = { customer: f.customer.trim(), pic: f.pic.trim(), telp: f.telp.trim(), tipe: f.tipe, alamat: f.alamat.trim(), jaminanTipe: f.jaminanTipe, jaminan: f.jaminan.trim(), assignedTo: f.assignedTo, status: "belum_dihubungi" };
+    const list = validRows.map((r) => ({ ...base, noInvoice: r.noInvoice.trim(), nominal: Number(r.nominal), tglJatuhTempo: r.tglJatuhTempo }));
+    onAdd(list);
+  };
   return (
     <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Tambah tagihan</h3>
+        <h3 className="text-sm font-semibold">Tambah debitur &amp; tagihan</h3>
         <button onClick={onCancel}><X size={16} style={{ color: T.sub }} /></button>
       </div>
       <div className="mb-3 flex gap-1.5">
@@ -3767,13 +3914,36 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label={f.tipe === "perorangan" ? "Nama debitur" : "Customer / perusahaan"}><input className={inputCls} style={inputSt} value={f.customer} onChange={set("customer")} placeholder={f.tipe === "perorangan" ? "Nama lengkap" : "PT / CV …"} /></Field>
-        <Field label="No. invoice"><input className={inputCls} style={inputSt} value={f.noInvoice} onChange={set("noInvoice")} placeholder="INV-…" /></Field>
-        <Field label="Nominal (pokok)"><input type="text" inputMode="numeric" className={inputCls} style={inputSt} value={grpID(f.nominal)} onChange={(e) => setF({ ...f, nominal: onlyDigits(e.target.value) })} placeholder="0" /></Field>
-        <Field label="Jatuh tempo"><input type="date" className={inputCls} style={inputSt} value={f.tglJatuhTempo} onChange={set("tglJatuhTempo")} /></Field>
         <Field label={f.tipe === "perorangan" ? "Kontak (opsional)" : "Nama PIC (opsional)"}><input className={inputCls} style={inputSt} value={f.pic} onChange={set("pic")} placeholder={f.tipe === "perorangan" ? "mis. nomor rumah" : "mis. Bu Sari (Finance)"} /></Field>
         <Field label="No. WA (opsional)"><input className={inputCls} style={inputSt} value={f.telp} onChange={set("telp")} placeholder="08…" /></Field>
+        <Field label="Alamat (untuk surat, opsional)"><input className={inputCls} style={inputSt} value={f.alamat} onChange={set("alamat")} placeholder="Jl. … / Kota" /></Field>
       </div>
-      <div className="mt-3"><Field label="Alamat (untuk surat, opsional)"><input className={inputCls} style={inputSt} value={f.alamat} onChange={set("alamat")} placeholder="Jl. … / Kota" /></Field></div>
+
+      {/* Banyak invoice untuk 1 debitur (1 proyek bisa banyak invoice) */}
+      <div className="mt-3 rounded-lg p-3" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold" style={{ color: T.sub }}>Invoice ({rows.length})</p>
+          <span className="text-[11px]" style={{ color: T.sub }}>No. invoice opsional</span>
+        </div>
+        <div className="space-y-2">
+          {rows.map((r, idx) => (
+            <div key={idx} className="rounded-lg p-2" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <input className={inputCls} style={inputSt} value={r.noInvoice} onChange={(e) => setRow(idx, "noInvoice", e.target.value)} placeholder="No. invoice (opsional)" />
+                <input type="text" inputMode="numeric" className={inputCls} style={inputSt} value={grpID(r.nominal)} onChange={(e) => setRow(idx, "nominal", onlyDigits(e.target.value))} placeholder="Nominal (pokok)" />
+                <div className="flex items-center gap-1">
+                  <input type="date" className={inputCls} style={inputSt} value={r.tglJatuhTempo} onChange={(e) => setRow(idx, "tglJatuhTempo", e.target.value)} />
+                  {rows.length > 1 && <button onClick={() => delRow(idx)} className="shrink-0 rounded-md p-1.5" style={{ color: T.red }} aria-label="Hapus invoice"><Trash2 size={14} /></button>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={addRow} className="mt-2 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold" style={{ background: T.brand2 + "14", color: T.brand2 }}>
+          <Plus size={14} /> Tambah invoice
+        </button>
+      </div>
+
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Jenis jaminan"><select className={inputCls} style={inputSt} value={f.jaminanTipe} onChange={set("jaminanTipe")}>
           <option value="none">Tanpa jaminan</option>
@@ -3789,10 +3959,10 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
           {petugas.map((nm) => <option key={nm} value={nm}>{nm}</option>)}
         </select></Field></div>
       )}
-      {Number(f.nominal) > 0 && <p className="mt-2 text-xs" style={{ color: T.sub }}>Pokok: <b style={{ fontFamily: MONO, color: T.ink }}>{rp(Number(f.nominal))}</b></p>}
-      <button disabled={!valid} onClick={() => onAdd({ customer: f.customer.trim(), noInvoice: f.noInvoice.trim(), nominal: Number(f.nominal), tglJatuhTempo: f.tglJatuhTempo, pic: f.pic.trim(), telp: f.telp.trim(), tipe: f.tipe, alamat: f.alamat.trim(), jaminanTipe: f.jaminanTipe, jaminan: f.jaminan.trim(), assignedTo: f.assignedTo, status: "belum_dihubungi" })}
+      {totalAll > 0 && <p className="mt-2 text-xs" style={{ color: T.sub }}>{validRows.length} invoice · total pokok: <b style={{ fontFamily: MONO, color: T.ink }}>{rp(totalAll)}</b></p>}
+      <button disabled={!valid} onClick={submit}
         className="mt-3 w-full rounded-lg py-2.5 text-sm font-semibold text-white transition-opacity"
-        style={{ background: T.brand, opacity: valid ? 1 : 0.45 }}>Simpan tagihan</button>
+        style={{ background: T.brand, opacity: valid ? 1 : 0.45 }}>Simpan {validRows.length > 1 ? `${validRows.length} tagihan` : "tagihan"}</button>
     </div>
   );
 }
