@@ -106,6 +106,32 @@ const NAV = [
   { id: "set", icon: Settings, label: "Pengaturan" },
 ];
 
+/* Angka yang menghitung naik halus (count-up) saat nilainya berubah. */
+function useCountUp(target, dur = 750) {
+  const reduce = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [val, setVal] = useState(reduce ? target : 0);
+  const fromRef = useRef(reduce ? target : 0);
+  const rafRef = useRef(0);
+  useEffect(() => {
+    if (reduce) { fromRef.current = target; setVal(target); return; }
+    const from = fromRef.current;
+    const to = Number(target) || 0;
+    if (from === to) return;
+    const t0 = performance.now();
+    const tick = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - p, 3);
+      const cur = from + (to - from) * e;
+      fromRef.current = cur; setVal(cur);
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+      else { fromRef.current = to; setVal(to); }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [target, dur, reduce]);
+  return val;
+}
+
 /* ---------- Helpers ---------- */
 const onlyDigits = (v) => String(v ?? "").replace(/[^0-9]/g, "");
 const grpID = (v) => { const n = onlyDigits(v); return n ? Number(n).toLocaleString("id-ID") : ""; };
@@ -1891,12 +1917,18 @@ export default function KolektaApp() {
   };
   const toggleFab = () => { if (fabOpen) closeFab(); else { clearTimeout(fabCloseTimer.current); setFabClosing(false); setFabOpen(true); } };
   const [navShrink, setNavShrink] = useState(false);
+  const TAB_ORDER = ["hari", "tagihan", "chat", "pelanggan", "reports", "analitik", "heatmap", "riwayat", "audit", "more", "set"];
+  const prevTabRef = useRef(tab);
+  const tabDir = TAB_ORDER.indexOf(tab) < TAB_ORDER.indexOf(prevTabRef.current) ? -1 : 1;
+  useEffect(() => { prevTabRef.current = tab; }, [tab]);
   const navRef = useRef(null);
   const navBtns = useRef({});
   const [navInd, setNavInd] = useState(null);
   const subNavRef = useRef(null);
   const subBtns = useRef({});
   const [subInd, setSubInd] = useState(null);
+  const caseBtns = useRef({});
+  const [caseInd, setCaseInd] = useState(null);
   const [showCmd, setShowCmd] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
@@ -1914,6 +1946,14 @@ export default function KolektaApp() {
   const [waOpen, setWaOpen] = useState(false);
   const [waTpl, setWaTpl] = useState("halus");
   const [toast, setToast] = useState("");
+  const [toastOn, setToastOn] = useState(false);
+  const toastTimers = useRef([]);
+  const showToast = (m, ms = 1800) => {
+    toastTimers.current.forEach(clearTimeout); toastTimers.current = [];
+    setToast(m); setToastOn(true);
+    toastTimers.current.push(setTimeout(() => setToastOn(false), ms));
+    toastTimers.current.push(setTimeout(() => setToast(""), ms + 260));
+  };
   const [auth, setAuth] = useState(loadAuth);
   const showChat = tab === "chat";
   const setShowChat = (v) => setTab(v ? "chat" : "hari");
@@ -1959,7 +1999,7 @@ export default function KolektaApp() {
     (async () => { try { await window.storage.set(KEY + ":" + auth.tenantId, JSON.stringify(data)); } catch {} })();
     if (pushTimer.current) clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(() => {
-      sbPush(auth.code, data).catch(() => { setToast("Gagal sinkron ke server — tersimpan lokal"); setTimeout(() => setToast(""), 2500); });
+      sbPush(auth.code, data).catch(() => { showToast("Gagal sinkron ke server — tersimpan lokal", 2500); });
     }, 1200);
   }, [data, auth]);
 
@@ -1997,7 +2037,7 @@ export default function KolektaApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
+  const flash = (m) => showToast(m);
 
   /* Catat aktivitas ke audit log server (append-only). Fire-and-forget. */
   const audit = (action, entity, before, after, meta) => {
@@ -2039,6 +2079,20 @@ export default function KolektaApp() {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [tab, inReportsSection, data]);
+
+  /* Geser indikator segmen Cases (Semua/Overdue/Follow-up/…) */
+  useEffect(() => {
+    if (tab !== "tagihan") return;
+    const measure = () => {
+      const btn = caseBtns.current[caseSeg];
+      if (!btn) { setCaseInd((p) => (p ? { ...p, show: false } : p)); return; }
+      setCaseInd({ left: btn.offsetLeft, width: btn.offsetWidth, show: true });
+      try { btn.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" }); } catch {}
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [caseSeg, tab, caseCounts, data]);
 
   /* Identitas untuk chat */
   const meRole = auth?.role || "petugas";
@@ -2456,6 +2510,10 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       <style>{`
 @keyframes kolektaIn{from{opacity:0;transform:translateY(6px) scale(.995)}to{opacity:1;transform:none}}
 .tab-anim{animation:kolektaIn .28s cubic-bezier(.22,.61,.36,1)}
+@keyframes kolektaSlideInR{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
+@keyframes kolektaSlideInL{from{opacity:0;transform:translateX(-26px)}to{opacity:1;transform:none}}
+.tab-slide-r{animation:kolektaSlideInR .3s cubic-bezier(.22,.61,.36,1)}
+.tab-slide-l{animation:kolektaSlideInL .3s cubic-bezier(.22,.61,.36,1)}
 @keyframes kolektaFade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 .sub-fade{animation:kolektaFade .2s cubic-bezier(.22,.61,.36,1)}
 .kpress{transition:transform .09s ease}
@@ -2481,8 +2539,14 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 @keyframes kolektaFabOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(12px) scale(.7)}}
 .fab-item{animation:kolektaFabIn .4s cubic-bezier(.34,1.56,.64,1) both;transform-origin:right center}
 .fab-item.fab-out{animation:kolektaFabOut .19s cubic-bezier(.4,0,1,1) both}
+@keyframes kolektaSheet{from{opacity:0;transform:translateY(46px) scale(.985)}to{opacity:1;transform:none}}
+.ksheet{animation:kolektaSheet .42s cubic-bezier(.34,1.56,.64,1)}
+@keyframes kolektaDialog{0%{opacity:0;transform:translateY(8px) scale(.93)}60%{transform:translateY(0) scale(1.012)}100%{opacity:1;transform:none}}
+.kdialog{animation:kolektaDialog .34s cubic-bezier(.34,1.56,.64,1)}
+@keyframes kolektaToastIn{from{opacity:0;transform:translateX(-50%) translateY(16px) scale(.96)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
+.ktoast{animation:kolektaToastIn .32s cubic-bezier(.34,1.56,.64,1)}
 .chat-bg{background-image:radial-gradient(currentColor 1px,transparent 1px);background-size:22px 22px}
-@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step,.chat-panel,.chat-room,.chat-list,.msg-in,.mention-pop,.fab-item,.fab-item.fab-out{animation:none}.kpress:active,.chip:active{transform:none}}
+@media (prefers-reduced-motion:reduce){.tab-anim,.tab-slide-r,.tab-slide-l,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step,.chat-panel,.chat-room,.chat-list,.msg-in,.mention-pop,.fab-item,.fab-item.fab-out,.ksheet,.kdialog,.ktoast{animation:none}.kpress:active,.chip:active{transform:none}}
 
 /* ===== LIQUID GLASS THEME (visual-only; IA/nav tidak berubah) ===== */
 .theme-glass{background:
@@ -2663,17 +2727,17 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         </div>
 
         {/* Konten beranimasi */}
-        <div key={tab} className="tab-anim">
+        <div key={tab} className={tabDir >= 0 ? "tab-slide-r" : "tab-slide-l"}>
 
         {/* ---------- HARI INI ---------- */}
         {tab === "hari" && (
           <div className="mt-4 space-y-4">
             {/* KPI strip — ringkas, bukan pahlawan layar */}
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Total piutang aktif" value={rpc(stats.totalPiutang)} sub={`${stats.nAktif} invoice`} />
-              <Stat label="Overdue" value={rpc(stats.totalOverdue)} sub={`${stats.nOverdue} invoice telat`} accent={T.red} />
-              <Stat label="Belum dihubungi" value={String(panels.belum.length)} sub="perlu aksi" accent={T.amber} />
-              <Stat label="Perlu ditagih ulang" value={String(panels.perlu.length)} sub="ngendap / ingkar" accent={T.brand2} />
+              <Stat label="Total piutang aktif" num={stats.totalPiutang} format={rpc} sub={`${stats.nAktif} invoice`} />
+              <Stat label="Overdue" num={stats.totalOverdue} format={rpc} sub={`${stats.nOverdue} invoice telat`} accent={T.red} />
+              <Stat label="Belum dihubungi" num={panels.belum.length} sub="perlu aksi" accent={T.amber} />
+              <Stat label="Perlu ditagih ulang" num={panels.perlu.length} sub="ngendap / ingkar" accent={T.brand2} />
             </div>
 
             {/* Quick Actions — bisa dipilih lewat Pengaturan */}
@@ -2835,7 +2899,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {tab === "tagihan" && (
           <div className="mt-4 space-y-3">
             {/* Segmen cepat */}
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+            <div className="relative flex gap-1.5 overflow-x-auto pb-0.5">
+              {/* Indikator aktif yang menggeser halus antar segmen */}
+              <span aria-hidden style={{ position: "absolute", top: 0, left: caseInd ? caseInd.left : 0, width: caseInd ? caseInd.width : 0, height: "calc(100% - 2px)", background: T.brand, borderRadius: 9999, opacity: caseInd && caseInd.show ? 1 : 0, transition: "left .4s cubic-bezier(.34,1.4,.5,1), width .4s cubic-bezier(.34,1.4,.5,1), opacity .2s ease", pointerEvents: "none", zIndex: 0 }} />
               {[
                 ["semua", "Semua"],
                 ["overdue", "Overdue"],
@@ -2845,11 +2911,11 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               ].map(([v, lbl]) => {
                 const on = caseSeg === v;
                 return (
-                  <button key={v} onClick={() => setCaseSeg(v)}
-                    className="chip flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
-                    style={on ? { background: T.brand, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>
+                  <button key={v} ref={(el) => { caseBtns.current[v] = el; }} onClick={() => setCaseSeg(v)}
+                    className="chip relative flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
+                    style={{ background: on ? "transparent" : T.surface, color: on ? "#fff" : T.sub, border: `1px solid ${on ? "transparent" : T.line}`, transition: "color .25s ease, border-color .25s ease", zIndex: 1 }}>
                     {lbl}
-                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: on ? "#FFFFFF2E" : T.bg, color: on ? "#fff" : T.sub }}>{caseCounts[v] ?? 0}</span>
+                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: on ? "#FFFFFF2E" : T.bg, color: on ? "#fff" : T.sub, transition: "background-color .25s ease, color .25s ease" }}>{caseCounts[v] ?? 0}</span>
                   </button>
                 );
               })}
@@ -2951,16 +3017,18 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                       </div>
                       <ChevronDown size={16} style={{ color: T.sub, transform: expanded ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
                     </button>
-                    {expanded && (
-                      <div className="space-y-2 border-t p-2" style={{ borderColor: T.line }}>
-                        {g.items.map((i) => (
-                          <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
-                            onToggle={() => setOpenId(openId === i.id ? null : i.id)}
-                            onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
-                            patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
-                        ))}
+                    <div style={{ display: "grid", gridTemplateRows: expanded ? "1fr" : "0fr", transition: "grid-template-rows .32s cubic-bezier(.22,.61,.36,1)" }}>
+                      <div style={{ overflow: "hidden" }}>
+                        <div className="space-y-2 border-t p-2" style={{ borderColor: T.line, opacity: expanded ? 1 : 0, transition: "opacity .26s ease" }}>
+                          {g.items.map((i) => (
+                            <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
+                              onToggle={() => setOpenId(openId === i.id ? null : i.id)}
+                              onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
+                              patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
+                          ))}
+                        </div>
                       </div>
-                    )}
+                    </div>
                   </div>
                 );
               })}
@@ -2983,8 +3051,8 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 className="w-full bg-transparent py-2.5 text-sm outline-none" />
             </div>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Total pelanggan" value={String(pelanggan.length)} sub="debitur" />
-              <Stat label="Punya tunggakan" value={String(pelanggan.filter((g) => g.overdue > 0).length)} sub="overdue" accent={T.red} />
+              <Stat label="Total pelanggan" num={pelanggan.length} sub="debitur" />
+              <Stat label="Punya tunggakan" num={pelanggan.filter((g) => g.overdue > 0).length} sub="overdue" accent={T.red} />
             </div>
             <div className="space-y-2">
               {pelangganShown.map((g) => (
@@ -3138,9 +3206,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {tab === "reports" && (
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Piutang aktif" value={rpc(analytics.outstanding)} sub="outstanding" />
-              <Stat label="DSO" value={`${analytics.dso} hr`} sub="rata-rata umur" accent={T.brand2} />
-              <Stat label="Tertagih bln ini" value={rpc(analytics.tertagihBulanIni)} sub="dari pembayaran" accent={T.green} />
+              <Stat label="Piutang aktif" num={analytics.outstanding} format={rpc} sub="outstanding" />
+              <Stat label="DSO" num={analytics.dso} format={(n) => `${n} hr`} sub="rata-rata umur" accent={T.brand2} />
+              <Stat label="Tertagih bln ini" num={analytics.tertagihBulanIni} format={rpc} sub="dari pembayaran" accent={T.green} />
               <Stat label="PTP ditepati" value={analytics.ptp.rate == null ? "—" : `${analytics.ptp.rate}%`} sub={`${analytics.ptp.kept}/${analytics.ptp.total} janji`} accent={T.brand} />
             </div>
             <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
@@ -3171,9 +3239,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {tab === "analitik" && (
           <div className="mt-4 space-y-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Piutang aktif" value={rpc(analytics.outstanding)} sub="outstanding" />
-              <Stat label="DSO" value={`${analytics.dso} hr`} sub="rata-rata umur" accent={T.brand2} />
-              <Stat label="Tertagih bln ini" value={rpc(analytics.tertagihBulanIni)} sub="dari pembayaran" accent={T.green} />
+              <Stat label="Piutang aktif" num={analytics.outstanding} format={rpc} sub="outstanding" />
+              <Stat label="DSO" num={analytics.dso} format={(n) => `${n} hr`} sub="rata-rata umur" accent={T.brand2} />
+              <Stat label="Tertagih bln ini" num={analytics.tertagihBulanIni} format={rpc} sub="dari pembayaran" accent={T.green} />
               <Stat label="PTP ditepati" value={analytics.ptp.rate == null ? "—" : `${analytics.ptp.rate}%`} sub={`${analytics.ptp.kept}/${analytics.ptp.total} janji`} accent={T.brand} />
             </div>
 
@@ -3458,8 +3526,8 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       </nav>
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-white shadow-lg"
-          style={{ background: T.toast }}>{toast}</div>
+        <div className="ktoast fixed bottom-6 left-1/2 z-50 rounded-full px-4 py-2 text-sm text-white shadow-lg"
+          style={{ background: T.toast, transition: "transform .3s cubic-bezier(.34,1.56,.64,1), opacity .24s ease", transform: toastOn ? "translateX(-50%) translateY(0) scale(1)" : "translateX(-50%) translateY(16px) scale(.96)", opacity: toastOn ? 1 : 0 }}>{toast}</div>
       )}
 
       {showChat && auth && (
@@ -4031,8 +4099,8 @@ function Kalkulator({ open, onClose }) {
   };
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4" style={{ background: "rgba(0,0,0,.5)" }}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-t-2xl p-4 shadow-xl sm:rounded-2xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+    <div onClick={onClose} className="drawer-ov fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="ksheet w-full max-w-sm rounded-t-2xl p-4 shadow-xl sm:rounded-2xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CalcIcon size={18} style={{ color: T.brand2 }} />
@@ -4072,11 +4140,13 @@ function Kalkulator({ open, onClose }) {
 }
 
 /* ---------- Subcomponents ---------- */
-function Stat({ label, value, sub, accent }) {
+function Stat({ label, value, sub, accent, num, format }) {
+  const animated = useCountUp(num != null ? num : 0);
+  const display = num != null ? (format ? format(Math.round(animated)) : String(Math.round(animated))) : value;
   return (
     <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <p className="text-xs" style={{ color: T.sub }}>{label}</p>
-      <p className="mt-1 whitespace-nowrap text-base font-bold sm:text-lg" style={{ fontFamily: MONO, color: accent || T.brand }}>{value}</p>
+      <p className="mt-1 whitespace-nowrap text-base font-bold sm:text-lg" style={{ fontFamily: MONO, color: accent || T.brand }}>{display}</p>
       <p className="text-[11px]" style={{ color: T.sub }}>{sub}</p>
     </div>
   );
@@ -4141,7 +4211,7 @@ function AddForm({ onAdd, onCancel, petugas = [], defaultPetugas = "" }) {
     onAdd(list);
   };
   return (
-    <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+    <div className="filter-anim rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Tambah debitur &amp; tagihan</h3>
         <button onClick={onCancel}><X size={16} style={{ color: T.sub }} /></button>
@@ -4406,8 +4476,8 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     <>
     {fotoView && <FotoLightbox value={fotoView} onClose={() => setFotoView(null)} downloadName={`bukti-${i.noInvoice || "kolekta"}.jpg`} />}
     {lunasAsk && (
-      <div onClick={() => setLunasAsk(false)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
-        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <div onClick={() => setLunasAsk(false)} className="drawer-ov fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+        <div onClick={(e) => e.stopPropagation()} className="kdialog w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
           <div className="mb-1 flex items-center gap-2">
             <ShieldCheck size={18} style={{ color: T.green }} />
             <h3 className="text-sm font-semibold">Konfirmasi Lunas</h3>
@@ -4423,8 +4493,8 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
       </div>
     )}
     {delAsk && (
-      <div onClick={() => setDelAsk(false)} className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
-        <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+      <div onClick={() => setDelAsk(false)} className="drawer-ov fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,.5)" }}>
+        <div onClick={(e) => e.stopPropagation()} className="kdialog w-full max-w-xs rounded-2xl p-4 shadow-xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
           <div className="mb-1 flex items-center gap-2">
             <AlertTriangle size={18} style={{ color: T.red }} />
             <h3 className="text-sm font-semibold">Hapus tagihan</h3>
@@ -5569,9 +5639,9 @@ function RiwayatDetail({ inv, s, flash, copy, onClose, onOpen }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" onClick={onClose}>
-      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
+      <div className="drawer-ov absolute inset-0" style={{ background: "rgba(0,0,0,0.5)" }} />
       <div onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl shadow-xl"
+        className="ksheet relative flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl sm:rounded-2xl shadow-xl"
         style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <div className="flex items-start gap-2 border-b p-4" style={{ borderColor: T.line }}>
           <div className="min-w-0 flex-1">
