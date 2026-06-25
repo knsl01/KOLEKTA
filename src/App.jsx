@@ -46,7 +46,7 @@ const THEMES = {
     glass: "pro",
     // TRUE liquid glass (Vision Pro / iOS 26) — palet NETRAL: obsidian black + titanium silver + white frost,
     // aksen champagne gold tipis. Permukaan putih-translusen + blur lembut, highlight radial natural via .theme-glass2.
-    light: { bg: "#121317", surface: "rgba(255,255,255,0.10)", ink: "#F4F5F7", sub: "#9DA3AD", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E8C173", line: "rgba(255,255,255,0.18)", green: "#33D69F", amber: "#F7B53D", red: "#F85D4F", slate: "#8B919B", toast: "rgba(14,15,18,0.88)" },
+    light: { bg: "#E9ECF2", surface: "rgba(255,255,255,0.55)", ink: "#171A20", sub: "#5A616C", brand: "#2D3442", brand2: "#46505F", brass: "#9C6F2C", line: "rgba(28,38,58,0.12)", green: "#0E9E69", amber: "#C2871C", red: "#D2453A", slate: "#6B7280", toast: "rgba(16,18,22,0.92)" },
     dark: { bg: "#0A0B0E", surface: "rgba(255,255,255,0.075)", ink: "#F4F5F7", sub: "#969CA6", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E8C173", line: "rgba(255,255,255,0.15)", green: "#33D69F", amber: "#F7B53D", red: "#F85D4F", slate: "#858B95", toast: "rgba(6,7,9,0.9)" },
   },
 };
@@ -2270,33 +2270,41 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 .theme-glass .rounded-xl,.theme-glass .rounded-2xl{border-color:rgba(255,255,255,.45);}
 .theme-glass.kglass-dark .rounded-xl,.theme-glass.kglass-dark .rounded-2xl{border-color:rgba(255,255,255,.10);}
 
-/* ===== TRUE LIQUID GLASS (Vision Pro / iOS 26) — tema "Liquid Glass Pro" (palet netral obsidian/titanium) ===== */
-.theme-glass2{color-scheme:dark;background:
-  radial-gradient(1000px 580px at 14% -8%, rgba(255,255,255,.07), transparent 62%),
-  radial-gradient(820px 560px at 112% 4%, rgba(224,190,130,.09), transparent 56%),
-  radial-gradient(900px 820px at 50% 124%, rgba(255,255,255,.045), transparent 62%),
-  linear-gradient(157deg,#181A1F 0%,#101115 52%,#141519 100%) fixed;}
-.theme-glass2.kglass-dark{background:
+/* ===== TRUE LIQUID GLASS — "Liquid Glass Pro" (netral; LIGHT = white frost, DARK = obsidian) ===== */
+/* Backdrop blur berlaku di kedua mode */
+.theme-glass2 .shadow-sm,.theme-glass2 .shadow,.theme-glass2 .shadow-md,.theme-glass2 .shadow-lg,.theme-glass2 .shadow-xl,.theme-glass2 .shadow-2xl,
+.theme-glass2 nav.fixed,.theme-glass2 nav.sticky,.theme-glass2 aside,.theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
+  -webkit-backdrop-filter:blur(26px) saturate(135%);backdrop-filter:blur(26px) saturate(135%);}
+
+/* ---- MODE TERANG: white frost ---- */
+.theme-glass2{color-scheme:light;background:
+  radial-gradient(1000px 580px at 14% -8%, rgba(255,255,255,.65), transparent 62%),
+  radial-gradient(820px 560px at 112% 4%, rgba(224,190,130,.20), transparent 56%),
+  radial-gradient(900px 820px at 50% 124%, rgba(120,140,180,.18), transparent 62%),
+  linear-gradient(157deg,#EEF1F6 0%,#E2E6EE 52%,#EAEDF3 100%) fixed;}
+.theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
+  background-image:radial-gradient(135% 110% at 12% -8%, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.30) 42%, rgba(255,255,255,0.16) 100%)!important;
+  border:1px solid rgba(255,255,255,0.72)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.9), 0 12px 36px -16px rgba(22,30,52,.26)!important;}
+.theme-glass2 nav.fixed{background:linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.58))!important;border-top:1px solid rgba(255,255,255,.7)!important;box-shadow:0 -8px 30px rgba(22,30,52,.10)!important;}
+.theme-glass2 aside{background:rgba(255,255,255,0.55)!important;border-right:1px solid rgba(255,255,255,.6)!important;}
+.theme-glass2 .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.5), rgba(255,255,255,0.18))!important;}
+.theme-glass2 .drawer-ov{-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);background:rgba(40,48,66,.32)!important;}
+
+/* ---- MODE GELAP: obsidian ---- */
+.theme-glass2.kglass-dark{color-scheme:dark;background:
   radial-gradient(1000px 580px at 14% -8%, rgba(255,255,255,.05), transparent 62%),
   radial-gradient(820px 560px at 112% 4%, rgba(224,190,130,.07), transparent 56%),
   radial-gradient(900px 820px at 50% 124%, rgba(255,255,255,.035), transparent 62%),
   linear-gradient(157deg,#101115 0%,#08090C 55%,#0C0D11 100%) fixed;}
-/* Backdrop blur lembut + saturasi natural (netral, tidak vivid) */
-.theme-glass2 .shadow-sm,.theme-glass2 .shadow,.theme-glass2 .shadow-md,.theme-glass2 .shadow-lg,.theme-glass2 .shadow-xl,.theme-glass2 .shadow-2xl,
-.theme-glass2 nav.fixed,.theme-glass2 nav.sticky,.theme-glass2 aside,.theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
-  -webkit-backdrop-filter:blur(26px) saturate(135%);backdrop-filter:blur(26px) saturate(135%);}
-/* Glass surface natural: highlight radial dari sumber cahaya kiri-atas + tepi & specular halus + drop shadow lembut */
-.theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
+.theme-glass2.kglass-dark .rounded-xl,.theme-glass2.kglass-dark .rounded-2xl{
   background-image:radial-gradient(135% 110% at 12% -8%, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.045) 40%, rgba(255,255,255,0.015) 100%)!important;
   border:1px solid rgba(255,255,255,0.16)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.26), inset 0 -16px 28px rgba(0,0,0,.10), 0 14px 40px -16px rgba(0,0,0,.55)!important;}
-/* Bottom nav & sidebar: kaca charcoal lebih padat demi keterbacaan label */
-.theme-glass2 nav.fixed{background:linear-gradient(180deg, rgba(34,36,42,0.64), rgba(18,19,23,0.72))!important;border-top:1px solid rgba(255,255,255,.12)!important;box-shadow:0 -8px 30px rgba(0,0,0,.4)!important;}
-.theme-glass2 aside{background:linear-gradient(180deg, rgba(30,32,38,0.58), rgba(16,17,21,0.64))!important;border-right:1px solid rgba(255,255,255,.10)!important;}
-/* Input/komponen rounded-lg: kaca ringan (tanpa blur berat) */
-.theme-glass2 .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))!important;}
-/* Overlay modal: gelap netral + blur agar panel mengambang nyata */
-.theme-glass2 .drawer-ov{-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);background:rgba(6,7,9,.5)!important;}
+.theme-glass2.kglass-dark nav.fixed{background:linear-gradient(180deg, rgba(34,36,42,0.64), rgba(18,19,23,0.72))!important;border-top:1px solid rgba(255,255,255,.12)!important;box-shadow:0 -8px 30px rgba(0,0,0,.4)!important;}
+.theme-glass2.kglass-dark aside{background:linear-gradient(180deg, rgba(30,32,38,0.58), rgba(16,17,21,0.64))!important;border-right:1px solid rgba(255,255,255,.10)!important;}
+.theme-glass2.kglass-dark .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))!important;}
+.theme-glass2.kglass-dark .drawer-ov{background:rgba(6,7,9,.5)!important;}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}

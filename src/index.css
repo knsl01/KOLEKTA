@@ -10,3 +10,9 @@ body {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+/* Cegah auto-zoom iOS saat fokus input (font wajib >=16px di layar sentuh).
+   Tanpa mematikan pinch-zoom (aksesibilitas tetap). */
+@media (max-width: 1024px) {
+  input, select, textarea { font-size: 16px !important; }
+}
