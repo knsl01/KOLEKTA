@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useId } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Plus, Search, Settings, Copy, Check, Trash2, Clock, AlertTriangle,
   Wallet, Bell, RotateCcw, X, MessageCircle, ChevronDown, FileText, Scale,
@@ -1335,15 +1335,14 @@ const emptyData = () => ({ settings: defaultSettings(), invoices: [] });
 
 /* ---------- Logo ---------- */
 function Logo({ size = 36 }) {
-  const gid = `kg-${useId()}`;
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-label="Kolekta" role="img">
       <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+        <linearGradient id="kg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
           <stop stopColor={T.brand2} /><stop offset="1" stopColor={T.brand} />
         </linearGradient>
       </defs>
-      <rect width="48" height="48" rx="12" fill={`url(#${gid})`} />
+      <rect width="48" height="48" rx="12" fill="url(#kg)" />
       <path d="M17 13 V35" stroke="#fff" strokeWidth="3.6" strokeLinecap="round" />
       <path d="M17 25 L31 13" stroke="#fff" strokeWidth="3.6" strokeLinecap="round" />
       <path d="M28.5 13 H32 V16.5" stroke={T.brass} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1763,8 +1762,6 @@ export default function KolektaApp() {
   const [showAdd, setShowAdd] = useState(false);
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
-  const [fabOpen, setFabOpen] = useState(false);
-  const [showCmd, setShowCmd] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
   const [worklogView, setWorklogView] = useState("list");
@@ -1774,7 +1771,6 @@ export default function KolektaApp() {
   const [fJaminan, setFJaminan] = useState("all");
   const [fPetugas, setFPetugas] = useState("all");
   const [sortBy, setSortBy] = useState("overdue");
-  const [caseSeg, setCaseSeg] = useState("semua");
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
   const [showChat, setShowChat] = useState(false);
@@ -1835,16 +1831,6 @@ export default function KolektaApp() {
     return session;
   };
   const doLogout = () => { if (pushTimer.current) clearTimeout(pushTimer.current); clearAuth(); setAuth(null); setData(null); setTab("hari"); };
-
-  /* ⌘K / Ctrl+K — buka command palette global (cari & lompat) */
-  useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); setShowCmd((v) => !v); }
-      if (e.key === "Escape") setShowCmd(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 1800); };
 
@@ -2037,21 +2023,6 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     });
   }, [enriched, query, fStatus, fTipe, fJaminan, fPetugas, sortBy]);
 
-  /* Cases — segmen cepat (di atas filter lengkap) */
-  const casePred = {
-    semua: () => true,
-    overdue: (i) => i.daysOverdue > 0,
-    followup: (i) => i.status === "belum_dihubungi" && i.daysOverdue > 0,
-    janji: (i) => !!i.janjiBayar || i.status === "janji_bayar",
-    kunjungan: (i) => Array.isArray(i.aktivitas) && i.aktivitas.some((a) => a && a.lok),
-  };
-  const caseCounts = useMemo(() => {
-    const c = {};
-    for (const k of Object.keys(casePred)) c[k] = filtered.filter(casePred[k]).length;
-    return c;
-  }, [filtered]);
-  const casesShown = useMemo(() => filtered.filter(casePred[caseSeg] || casePred.semua), [filtered, caseSeg]);
-
   const agenda = useMemo(() => {
     const aktif = enriched.filter((i) => i.status !== "lunas");
     const due7 = aktif.filter((i) => i.odRaw >= -7 && i.odRaw <= 0).sort((a, b) => new Date(a.tglJatuhTempo) - new Date(b.tglJatuhTempo));
@@ -2238,33 +2209,18 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <p className="text-[11px]" style={{ color: T.brass }}>collection control</p>
             </div>
           </div>
-          <div className="px-3 pb-1">
-            <button onClick={() => setShowCmd(true)}
-              className="kpress flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>
-              <Search size={16} /><span className="flex-1 text-left">Cari & perintah</span>
-              <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>⌘K</span>
-            </button>
-          </div>
           <nav className="flex flex-col gap-1 px-3">
-            <p className="mb-1 mt-1 px-3 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Utama</p>
-            <SideBtn id="hari" icon={Grid3x3} label="Dashboard" badge={panels.belum.length + panels.perlu.length} />
-            <SideBtn id="tagihan" icon={Wallet} label="Cases" />
+            {navItems.map((n) => (
+              <SideBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
+            ))}
+            <button onClick={openLapor}
+              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ color: T.brand2 }}>
+              <ClipboardList size={18} /><span>Lapor</span>
+            </button>
             <button onClick={() => setShowChat(true)}
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
               <MessageCircle size={18} /><span>Chat</span>
               {chatUnread > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>}
-            </button>
-
-            <p className="mb-1 mt-3 px-3 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Reports</p>
-            <SideBtn id="reports" icon={FileText} label="Ringkasan" />
-            <SideBtn id="analitik" icon={BarChart3} label="Analitik" />
-            <SideBtn id="heatmap" icon={Flame} label="Heat Map" />
-            <SideBtn id="riwayat" icon={History} label="Riwayat" />
-
-            <p className="mb-1 mt-3 px-3 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>Lainnya</p>
-            <button onClick={openLapor}
-              className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-black/5" style={{ color: T.brand2 }}>
-              <ClipboardList size={18} /><span>Lapor lapangan</span>
             </button>
             <button onClick={openRiwayatKerja}
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
@@ -2275,8 +2231,6 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               className="kpress flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover:bg-black/5" style={{ color: T.sub }}>
               <CalcIcon size={18} /><span>Kalkulator</span>
             </button>
-            {auth.role === "atasan" && <SideBtn id="audit" icon={ShieldCheck} label="Audit Log" />}
-            <SideBtn id="set" icon={Settings} label="Pengaturan" />
           </nav>
           {sideSummary}
           <div className="mt-auto p-5">
@@ -2292,7 +2246,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           <div className="mx-auto max-w-3xl px-3 pb-24 sm:px-5">
             {/* Header (HP) */}
             <header className="flex items-center gap-2 pt-5 lg:hidden">
-          <button onClick={() => setTab("hari")} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          <button onClick={() => setDrawer(true)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
             <span className="shrink-0"><Logo size={40} /></span>
             <div className="min-w-0">
               <div className="flex min-w-0 items-baseline gap-2">
@@ -2302,36 +2256,35 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <p className="truncate text-xs" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
             </div>
           </button>
-          <button onClick={() => setShowCmd(true)} aria-label="Cari & perintah"
-            className="kpress shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
-            <Search size={20} />
+          <button onClick={() => setShowChat(true)} aria-label="Chat"
+            className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
+            <MessageCircle size={20} />
+            {chatUnread > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[11px] font-bold leading-[18px]"
+                style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>
+            )}
           </button>
-          <span className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>
-            {s.peran === "petugas" ? (s.petugasAktif || "Petugas") : "Atasan"}
-          </span>
+          <button onClick={openRiwayatKerja} aria-label="Riwayat kerja"
+            className="kpress relative shrink-0 rounded-xl p-2.5" style={{ background: T.surface, border: `1px solid ${T.line}`, color: T.brand2 }}>
+            <History size={20} />
+            {worklogTodayN > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-[18px] rounded-full px-1 text-[11px] font-bold leading-[18px]"
+                style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>
+            )}
+          </button>
         </header>
 
-        {/* Sub-nav Reports (HP) — muncul hanya di seksi Reports */}
-        {["reports", "analitik", "heatmap", "riwayat"].includes(tab) && (
-          <nav className="sticky top-2 z-20 mt-4 flex gap-1 overflow-x-auto rounded-xl p-1 shadow-sm lg:hidden"
-            style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-            {[
-              { id: "reports", icon: Grid3x3, label: "Ringkasan" },
-              { id: "analitik", icon: BarChart3, label: "Analitik" },
-              { id: "heatmap", icon: Flame, label: "Heat Map" },
-              { id: "riwayat", icon: History, label: "Riwayat" },
-            ].map((n) => (
-              <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={0} />
-            ))}
-          </nav>
-        )}
+        {/* Nav (HP) */}
+        <nav className="sticky top-2 z-20 mt-4 flex gap-1 rounded-xl p-1 shadow-sm lg:hidden"
+          style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          {navItems.filter((n) => n.id !== "set" && n.id !== "riwayat" && n.id !== "audit").map((n) => (
+            <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
+          ))}
+        </nav>
 
         {/* Judul (PC) */}
         <div className="hidden pb-1 pt-7 lg:block">
-          <h2 className="text-xl font-bold tracking-tight" style={{ color: T.ink }}>{
-            ({ hari: "Dashboard", tagihan: "Cases", reports: "Ringkasan laporan", analitik: "Analitik", heatmap: "Heat Map", riwayat: "Riwayat", audit: "Audit Log", set: "Pengaturan", more: "Lainnya" })[tab]
-            || navItems.find((n) => n.id === tab)?.label
-          }</h2>
+          <h2 className="text-xl font-bold tracking-tight" style={{ color: T.ink }}>{navItems.find((n) => n.id === tab)?.label}</h2>
         </div>
 
         {/* Konten beranimasi */}
@@ -2340,31 +2293,10 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         {/* ---------- HARI INI ---------- */}
         {tab === "hari" && (
           <div className="mt-4 space-y-4">
-            {/* KPI strip — ringkas, bukan pahlawan layar */}
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Total piutang aktif" value={rpc(stats.totalPiutang)} sub={`${stats.nAktif} invoice`} />
-              <Stat label="Overdue" value={rpc(stats.totalOverdue)} sub={`${stats.nOverdue} invoice telat`} accent={T.red} />
-              <Stat label="Belum dihubungi" value={String(panels.belum.length)} sub="perlu aksi" accent={T.amber} />
-              <Stat label="Perlu ditagih ulang" value={String(panels.perlu.length)} sub="ngendap / ingkar" accent={T.brand2} />
-            </div>
-
-            {/* Quick Actions — mulai tugas dalam 1 ketuk */}
-            <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { icon: ClipboardList, label: "Lapor lapangan", on: openLapor },
-                  { icon: FileText, label: "Laporan harian", on: () => setShowLaporan((v) => !v) },
-                  { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
-                  { icon: CalcIcon, label: "Kalkulator", on: () => setShowCalc(true) },
-                ].map((a, i) => (
-                  <button key={i} onClick={a.on} className="kpress flex flex-col items-center gap-1.5">
-                    <span className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: T.brand2 + "14", color: T.brand }}><a.icon size={20} /></span>
-                    <span className="text-center text-[10.5px] font-medium leading-tight" style={{ color: T.sub }}>{a.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
+            <button onClick={openLapor}
+              className="kpress flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white shadow-sm" style={{ background: T.brand }}>
+              <ClipboardList size={18} /> Lapor pekerjaan &amp; lapangan
+            </button>
             {s.peran === "petugas" && (() => {
               const me = tim.find((t) => t.nama === s.petugasAktif);
               if (!me || !me.target) return null;
@@ -2386,7 +2318,11 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 </div>
               );
             })()}
-
+            <button onClick={() => setShowLaporan((v) => !v)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold shadow-sm"
+              style={{ background: T.surface, color: T.brand2, border: `1px solid ${T.line}` }}>
+              <ClipboardList size={16} /> {showLaporan ? "Tutup laporan harian" : "Buat laporan harian"}
+            </button>
             {showLaporan && (
               <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                 <div className="mb-2 flex items-center gap-2">
@@ -2400,6 +2336,13 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-relaxed" style={{ color: T.ink, fontFamily: MONO }}>{docToPlain(laporanText)}</pre>
               </div>
             )}
+
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat label="Total piutang aktif" value={rpc(stats.totalPiutang)} sub={`${stats.nAktif} invoice`} />
+              <Stat label="Overdue" value={rpc(stats.totalOverdue)} sub={`${stats.nOverdue} invoice telat`} accent={T.red} />
+              <Stat label="Belum dihubungi" value={String(panels.belum.length)} sub="perlu aksi" accent={T.amber} />
+              <Stat label="Perlu ditagih ulang" value={String(panels.perlu.length)} sub="ngendap / ingkar" accent={T.brand2} />
+            </div>
 
             <FollowPanel title="Perlu ditindaklanjuti hari ini" icon={Bell} color={T.red}
               empty="Tidak ada janji bayar lewat atau jadwal tindak lanjut yang jatuh tempo." items={panels.tindak}
@@ -2497,29 +2440,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           </div>
         )}
 
-        {/* ---------- TAGIHAN (CASES) ---------- */}
+        {/* ---------- TAGIHAN ---------- */}
         {tab === "tagihan" && (
           <div className="mt-4 space-y-3">
-            {/* Segmen cepat */}
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-              {[
-                ["semua", "Semua"],
-                ["overdue", "Overdue"],
-                ["followup", "Follow-up"],
-                ["janji", "Janji bayar"],
-                ["kunjungan", "Kunjungan"],
-              ].map(([v, lbl]) => {
-                const on = caseSeg === v;
-                return (
-                  <button key={v} onClick={() => setCaseSeg(v)}
-                    className="chip flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold"
-                    style={on ? { background: T.brand, color: "#fff" } : { background: T.surface, color: T.sub, border: `1px solid ${T.line}` }}>
-                    {lbl}
-                    <span className="rounded-full px-1.5 text-[10px] font-bold" style={{ background: on ? "#FFFFFF2E" : T.bg, color: on ? "#fff" : T.sub }}>{caseCounts[v] ?? 0}</span>
-                  </button>
-                );
-              })}
-            </div>
             <div className="flex gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-lg px-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
                 <Search size={16} style={{ color: T.sub }} />
@@ -2598,51 +2521,18 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             {showAdd && <AddForm petugas={s.petugas || []} defaultPetugas={s.peran === "petugas" ? s.petugasAktif : ""} onAdd={(inv) => { addInvoice(inv); setShowAdd(false); flash("Invoice ditambahkan"); }} onCancel={() => setShowAdd(false)} />}
 
             <div className="space-y-2">
-              {casesShown.map((i) => (
+              {filtered.map((i) => (
                 <InvoiceCard key={i.id} i={i} s={s} open={openId === i.id}
                   onToggle={() => setOpenId(openId === i.id ? null : i.id)}
                   onStatement={(name) => { const t = statementText(name, enriched, s); audit("export", "Statement " + name); if (printLetter("Statement " + name, t)) flash("Statement dibuat"); else { copy(docToPlain(t)); flash("Popup diblokir — statement disalin"); } }}
                   patch={patch} remove={(id) => { remove(id); flash("Invoice dihapus"); }} copy={copy} flash={flash} audit={audit} />
               ))}
-              {casesShown.length === 0 && (
+              {filtered.length === 0 && (
                 <div className="rounded-xl py-12 text-center" style={{ background: T.surface, border: `1px dashed ${T.line}` }}>
-                  <p className="text-sm font-medium">{filtered.length === 0 ? "Belum ada tagihan" : "Tidak ada kasus di segmen ini"}</p>
-                  <p className="mt-1 text-xs" style={{ color: T.sub }}>{filtered.length === 0 ? "Tap “Tambah” untuk memasukkan invoice pertama." : "Coba segmen lain atau reset filter."}</p>
+                  <p className="text-sm font-medium">Belum ada tagihan</p>
+                  <p className="mt-1 text-xs" style={{ color: T.sub }}>Tap “Tambah” untuk memasukkan invoice pertama.</p>
                 </div>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* ---------- REPORTS (RINGKASAN / HUB) ---------- */}
-        {tab === "reports" && (
-          <div className="mt-4 space-y-4">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Piutang aktif" value={rpc(analytics.outstanding)} sub="outstanding" />
-              <Stat label="DSO" value={`${analytics.dso} hr`} sub="rata-rata umur" accent={T.brand2} />
-              <Stat label="Tertagih bln ini" value={rpc(analytics.tertagihBulanIni)} sub="dari pembayaran" accent={T.green} />
-              <Stat label="PTP ditepati" value={analytics.ptp.rate == null ? "—" : `${analytics.ptp.rate}%`} sub={`${analytics.ptp.kept}/${analytics.ptp.total} janji`} accent={T.brand} />
-            </div>
-            <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-              <h2 className="mb-1 text-sm font-semibold">Laporan & analitik</h2>
-              <p className="mb-3 text-xs" style={{ color: T.sub }}>Semua laporan penagihan di satu tempat.</p>
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                {[
-                  { icon: BarChart3, label: "Analitik & KPI", desc: "DSO, PTP, tren, leaderboard", on: () => setTab("analitik") },
-                  { icon: Flame, label: "Heat Map", desc: "Geografis, kalender, matriks", on: () => setTab("heatmap") },
-                  { icon: History, label: "Riwayat penagihan", desc: "Aktivitas & pembayaran", on: () => setTab("riwayat") },
-                  { icon: ClipboardList, label: "Laporan lapangan", desc: s.peran === "petugas" ? "Riwayat kerja saya" : "Hasil kerja petugas", on: openRiwayatKerja },
-                  { icon: MapPin, label: "Buat laporan", desc: "Lapor pekerjaan & kunjungan", on: openLapor },
-                  { icon: FileText, label: "Laporan harian", desc: "Ringkasan untuk atasan (PDF)", on: () => { if (!printLetter("Laporan Penagihan", laporanText)) { copy(docToPlain(laporanText)); flash("Popup diblokir — laporan disalin"); } } },
-                  { icon: FileSpreadsheet, label: "Collection report", desc: "Ekspor Excel semua tagihan", on: () => { try { exportExcel(enriched, s); audit("export", "Excel daftar tagihan", null, { count: enriched.length }); flash("Excel diunduh"); } catch { flash("Export gagal di lingkungan ini"); } } },
-                ].map((c, i) => (
-                  <button key={i} onClick={c.on} className="kpress flex flex-col items-start gap-2 rounded-xl p-3 text-left" style={{ background: T.bg, border: `1px solid ${T.line}` }}>
-                    <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ background: T.brand2 + "14", color: T.brand }}><c.icon size={18} /></span>
-                    <span className="text-[13px] font-semibold leading-tight">{c.label}</span>
-                    <span className="text-[11px] leading-tight" style={{ color: T.sub }}>{c.desc}</span>
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         )}
@@ -2800,70 +2690,6 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             onReset={() => { audit("reset", "Muat data contoh", { invoices: data.invoices.length }, null); setData(sampleData()); flash("Data direset ke contoh"); }}
             onClear={() => { audit("kosongkan", "Kosongkan semua tagihan", { invoices: data.invoices.length }, null); setData({ settings: data.settings, invoices: [] }); flash("Semua tagihan dihapus"); }} />
         )}
-
-        {/* ---------- MORE (halaman terstruktur) ---------- */}
-        {tab === "more" && (
-          <div className="mt-4 space-y-4">
-            {/* Profil & ringkasan */}
-            <div className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-              <div className="flex items-center gap-3">
-                <Logo size={40} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{auth.name || "Institusi"}</p>
-                  <span className="mt-0.5 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>
-                    {s.peran === "petugas" ? `Petugas · ${s.petugasAktif || "—"}` : "Atasan"}
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-3 gap-2 border-t pt-3 text-center" style={{ borderColor: T.line }}>
-                <div><p className="text-[10px]" style={{ color: T.sub }}>Piutang aktif</p><p className="text-sm font-bold" style={{ fontFamily: MONO }}>{rpc(stats.totalPiutang)}</p></div>
-                <div><p className="text-[10px]" style={{ color: T.sub }}>Overdue</p><p className="text-sm font-bold" style={{ color: stats.nOverdue ? T.red : T.ink, fontFamily: MONO }}>{stats.nOverdue}</p></div>
-                <div><p className="text-[10px]" style={{ color: T.sub }}>Belum FU</p><p className="text-sm font-bold" style={{ color: panels.belum.length ? T.amber : T.ink, fontFamily: MONO }}>{panels.belum.length}</p></div>
-              </div>
-            </div>
-
-            {(() => {
-              const Row = ({ icon: Icon, label, desc, on, danger, badge }) => (
-                <button onClick={on} className="kpress flex w-full items-center gap-3 px-4 py-3 text-left">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: (danger ? T.red : T.brand2) + "14", color: danger ? T.red : T.brand }}><Icon size={18} /></span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold" style={danger ? { color: T.red } : undefined}>{label}</span>
-                    {desc && <span className="block text-[11px]" style={{ color: T.sub }}>{desc}</span>}
-                  </span>
-                  {badge > 0 && <span className="rounded-full px-1.5 text-[11px] font-bold text-white" style={{ background: T.brass }}>{badge}</span>}
-                  <ChevronRight size={16} style={{ color: T.sub }} />
-                </button>
-              );
-              const Group = ({ title, children }) => (
-                <div>
-                  <p className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>{title}</p>
-                  <div className="divide-y overflow-hidden rounded-xl shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}`, borderColor: T.line }}>{children}</div>
-                </div>
-              );
-              return (
-                <>
-                  <Group title="Manajemen">
-                    {auth.role === "atasan" && <Row icon={ShieldCheck} label="Audit Log" desc="Jejak perubahan (append-only)" on={() => setTab("audit")} />}
-                    <Row icon={History} label="Riwayat kerja" desc={s.peran === "petugas" ? "Pekerjaan lapangan saya" : "Hasil kerja seluruh petugas"} on={openRiwayatKerja} badge={worklogTodayN} />
-                    <Row icon={MessageCircle} label="Chat tim" desc="Personal, grup & panggilan" on={() => setShowChat(true)} badge={chatUnread} />
-                  </Group>
-                  <Group title="Alat">
-                    <Row icon={ClipboardList} label="Buat laporan lapangan" desc="Lapor pekerjaan & kunjungan" on={openLapor} />
-                    <Row icon={FileSpreadsheet} label="Collection report" desc="Ekspor Excel semua tagihan" on={() => { try { exportExcel(enriched, s); audit("export", "Excel daftar tagihan", null, { count: enriched.length }); flash("Excel diunduh"); } catch { flash("Export gagal di lingkungan ini"); } }} />
-                    <Row icon={CalcIcon} label="Kalkulator" desc="Hitung bunga / cicilan" on={() => setShowCalc(true)} />
-                  </Group>
-                  <Group title="Data & sistem">
-                    <Row icon={Download} label="Cadangkan data" desc="Unduh backup JSON" on={() => { exportJSON(data); audit("backup", "Backup JSON", null, { invoices: data.invoices.length }); flash("Backup diunduh"); }} />
-                    <Row icon={Upload} label="Pulihkan data" desc="Impor dari file backup JSON" on={() => jsonRef.current?.click()} />
-                    <Row icon={Settings} label="Pengaturan" desc="Tema, peran, target, institusi" on={() => setTab("set")} />
-                    <Row icon={LogOut} label="Keluar" desc="Akhiri sesi institusi ini" on={doLogout} danger />
-                  </Group>
-                  <p className="px-1 pt-1 text-center text-[11px]" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span> · Kansil Network Solutions Labs</p>
-                </>
-              );
-            })()}
-          </div>
-        )}
         </div>{/* /konten */}
           </div>
         </div>
@@ -2872,59 +2698,60 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={onImportFile} className="hidden" />
       <input ref={jsonRef} type="file" accept=".json,application/json" onChange={onImportJSON} className="hidden" />
 
-      {/* FAB — aksi cepat (HP) */}
-      <div className="fixed right-4 z-40 lg:hidden" style={{ bottom: "calc(70px + max(env(safe-area-inset-bottom), 0px))" }}>
-        {fabOpen && (
-          <>
-            <div onClick={() => setFabOpen(false)} className="drawer-ov fixed inset-0" style={{ background: "rgba(0,0,0,0.35)", zIndex: -1 }} />
-            <div className="mb-3 flex flex-col items-end gap-2.5">
-              {[
-                { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
-                { icon: ClipboardList, label: "Buat laporan", on: () => openLapor() },
-                { icon: Upload, label: "Impor / unggah data", on: () => fileRef.current?.click() },
-              ].map((a, i) => (
-                <button key={i} onClick={() => { setFabOpen(false); a.on(); }} className="kpress flex items-center gap-2.5">
-                  <span className="rounded-lg px-2.5 py-1.5 text-xs font-semibold shadow-sm" style={{ background: T.surface, color: T.ink, border: `1px solid ${T.line}` }}>{a.label}</span>
-                  <span className="grid h-11 w-11 place-items-center rounded-2xl shadow-sm" style={{ background: T.surface, color: T.brand, border: `1px solid ${T.line}` }}><a.icon size={20} /></span>
-                </button>
-              ))}
+      {drawer && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div onClick={() => setDrawer(false)} className="drawer-ov absolute inset-0" style={{ background: "rgba(0,0,0,0.45)" }} />
+          <aside className="drawer-pn absolute left-0 top-0 flex h-full w-72 max-w-[82%] flex-col overflow-y-auto" style={{ background: T.surface, borderRight: `1px solid ${T.line}` }}>
+            <div className="flex items-center gap-3 p-5">
+              <Logo size={38} />
+              <div className="min-w-0 flex-1">
+                <h1 className="text-lg font-bold tracking-tight" style={{ color: T.brand }}>Kolekta</h1>
+                <p className="text-[11px]" style={{ color: T.brass }}>collection control</p>
+              </div>
+              <button onClick={() => setDrawer(false)}><X size={18} style={{ color: T.sub }} /></button>
             </div>
-          </>
-        )}
-        <button onClick={() => setFabOpen((v) => !v)} aria-label="Aksi cepat"
-          className="kpress ml-auto grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg"
-          style={{ background: T.brass, transform: fabOpen ? "rotate(45deg)" : "none", transition: "transform .2s ease" }}>
-          <Plus size={28} />
-        </button>
-      </div>
-
-      {/* Bottom navigation (HP) */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex items-stretch border-t lg:hidden"
-        style={{ background: T.surface, borderColor: T.line, paddingBottom: "max(env(safe-area-inset-bottom), 0px)" }}>
-        {(() => {
-          const inReports = ["reports", "analitik", "heatmap", "riwayat"].includes(tab);
-          const inMore = ["more", "audit", "set"].includes(tab);
-          const items = [
-            { key: "dash", icon: Grid3x3, label: "Dashboard", active: tab === "hari" && !showChat, badge: 0, on: () => setTab("hari") },
-            { key: "cases", icon: Wallet, label: "Cases", active: tab === "tagihan" && !showChat, badge: 0, on: () => setTab("tagihan") },
-            { key: "chat", icon: MessageCircle, label: "Chat", active: showChat, badge: chatUnread, on: () => setShowChat(true) },
-            { key: "reports", icon: BarChart3, label: "Reports", active: inReports && !showChat, badge: 0, on: () => { if (!inReports) setTab("reports"); } },
-            { key: "more", icon: Menu, label: "More", active: inMore && !showChat, badge: 0, on: () => setTab("more") },
-          ];
-          return items.map((it) => (
-            <button key={it.key} onClick={it.on}
-              className="kpress relative flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10.5px] font-semibold"
-              style={{ color: it.active ? T.brand : T.sub }}>
-              <it.icon size={22} />
-              <span>{it.label}</span>
-              {it.badge > 0 && (
-                <span className="absolute top-1 translate-x-3.5 rounded-full px-1 text-center text-[9px] font-bold leading-[15px] text-white"
-                  style={{ background: T.red, minWidth: 15, height: 15 }}>{it.badge > 99 ? "99+" : it.badge}</span>
-              )}
-            </button>
-          ));
-        })()}
-      </nav>
+            <nav className="flex flex-col gap-1 px-3">
+              {navItems.map((n) => {
+                const active = tab === n.id;
+                const badge = n.id === "hari" ? panels.belum.length + panels.perlu.length : 0;
+                return (
+                  <button key={n.id} onClick={() => { setTab(n.id); setDrawer(false); }}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium"
+                    style={active ? { background: T.brand, color: "#fff" } : { color: T.sub }}>
+                    <n.icon size={18} /><span>{n.label}</span>
+                    {badge > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: active ? "#FFFFFF33" : T.brass, color: "#fff" }}>{badge}</span>}
+                  </button>
+                );
+              })}
+              <button onClick={() => { openLapor(); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold" style={{ color: T.brand2 }}>
+                <ClipboardList size={18} /><span>Lapor</span>
+              </button>
+              <button onClick={() => { setShowChat(true); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <MessageCircle size={18} /><span>Chat</span>
+                {chatUnread > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.red, color: "#fff" }}>{chatUnread > 99 ? "99+" : chatUnread}</span>}
+              </button>
+              <button onClick={() => { openRiwayatKerja(); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <History size={18} /><span>Riwayat kerja</span>
+                {worklogTodayN > 0 && <span className="ml-auto min-w-[20px] rounded-full px-1.5 text-center text-xs font-bold leading-5" style={{ background: T.brass, color: "#fff" }}>{worklogTodayN}</span>}
+              </button>
+              <button onClick={() => { setShowCalc(true); setDrawer(false); }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" style={{ color: T.sub }}>
+                <CalcIcon size={18} /><span>Kalkulator</span>
+              </button>
+            </nav>
+            {sideSummary}
+            <div className="mt-auto p-5">
+              <span className="mb-2 inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: T.brand2 + "1A", color: T.brand2 }}>
+                {s.peran === "petugas" ? `Petugas: ${s.petugasAktif || "—"}` : "Mode: Atasan"}
+              </span>
+              <p className="text-[11px] leading-relaxed" style={{ color: T.sub }}>by <span style={{ color: T.brand2, fontWeight: 600 }}>KNSL</span><br />Kansil Network Solutions Labs</p>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-white shadow-lg"
@@ -2935,14 +2762,6 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
         <ChatPanel T={T} auth={auth} meName={meName} meRole={meRole}
           ptName={auth.name || s?.perusahaan || ""} petugasNames={chatPetugas}
           onClose={() => setShowChat(false)} onUnread={setChatUnread} />
-      )}
-
-      {showCmd && (
-        <CommandPalette T={T} invoices={enriched} role={auth.role}
-          onClose={() => setShowCmd(false)}
-          onNav={(k) => { setShowCmd(false); setTab(k); }}
-          onOpenInvoice={(id) => { setShowCmd(false); setCaseSeg("semua"); setTab("tagihan"); setOpenId(id); }}
-          onAction={(k) => { setShowCmd(false); if (k === "lapor") openLapor(); else if (k === "chat") setShowChat(true); else if (k === "calc") setShowCalc(true); }} />
       )}
 
       <Kalkulator open={showCalc} onClose={() => setShowCalc(false)} />
@@ -5786,81 +5605,6 @@ function AdminPanel({ th, onBack }) {
         </>
       )}
       {msg && <p className="mt-2 text-[12px]" style={{ color: /✓/.test(msg) ? th.green : th.red }}>{msg}</p>}
-    </div>
-  );
-}
-
-/* ---------- Command Palette (⌘K) — cari & lompat cepat, slot AI ----------
-   Primitif enterprise: satu pintu untuk navigasi + pencarian global +
-   tempat masuk Asisten AI di masa depan. Tidak mengubah alur yang ada. */
-function CommandPalette({ T, invoices = [], role, onClose, onNav, onOpenInvoice, onAction }) {
-  const [q, setQ] = useState("");
-  const [aiNote, setAiNote] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => { const t = setTimeout(() => ref.current?.focus(), 60); return () => clearTimeout(t); }, []);
-  const ql = q.trim().toLowerCase();
-  const nav = [
-    { k: "hari", label: "Dashboard", icon: Grid3x3 },
-    { k: "tagihan", label: "Cases", icon: Wallet },
-    { k: "reports", label: "Reports — Ringkasan", icon: FileText },
-    { k: "analitik", label: "Analitik", icon: BarChart3 },
-    { k: "heatmap", label: "Heat Map", icon: Flame },
-    { k: "riwayat", label: "Riwayat penagihan", icon: History },
-    ...(role === "atasan" ? [{ k: "audit", label: "Audit Log", icon: ShieldCheck }] : []),
-    { k: "more", label: "More", icon: Menu },
-    { k: "set", label: "Pengaturan", icon: Settings },
-  ];
-  const actions = [
-    { k: "lapor", label: "Buat laporan lapangan", icon: ClipboardList },
-    { k: "chat", label: "Buka Chat tim", icon: MessageCircle },
-    { k: "calc", label: "Kalkulator", icon: CalcIcon },
-  ];
-  const navF = nav.filter((n) => !ql || n.label.toLowerCase().includes(ql));
-  const actF = actions.filter((a) => !ql || a.label.toLowerCase().includes(ql));
-  const invF = (ql ? invoices.filter((i) => i.customer.toLowerCase().includes(ql) || String(i.noInvoice || "").toLowerCase().includes(ql)) : []).slice(0, 8);
-  const RowBtn = ({ icon: Icon, label, sub, onClick, accent }) => (
-    <button onClick={onClick} className="kpress flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-black/5">
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: (accent || T.brand2) + "14", color: accent || T.brand }}><Icon size={16} /></span>
-      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{label}</span>{sub && <span className="block truncate text-[11px]" style={{ color: T.sub }}>{sub}</span>}</span>
-      <ArrowRight size={14} style={{ color: T.sub }} />
-    </button>
-  );
-  const Label = ({ children }) => <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide" style={{ color: T.sub }}>{children}</p>;
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[10vh]" onClick={onClose}>
-      <div className="drawer-ov absolute inset-0" style={{ background: "rgba(0,0,0,0.45)" }} />
-      <div onClick={(e) => e.stopPropagation()} className="chat-panel relative w-full max-w-lg overflow-hidden rounded-2xl shadow-2xl" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-        <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: T.line }}>
-          <Search size={18} style={{ color: T.sub }} />
-          <input ref={ref} value={q} onChange={(e) => { setQ(e.target.value); setAiNote(false); }} placeholder="Cari customer, invoice, atau perintah…"
-            className="w-full bg-transparent text-sm outline-none" style={{ color: T.ink }} />
-          <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.bg, color: T.sub }}>ESC</span>
-        </div>
-        <div className="max-h-[60vh] overflow-y-auto p-2">
-          {/* Slot AI (planted, jujur: segera) */}
-          <button onClick={() => setAiNote(true)} className="kpress mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left" style={{ background: T.brand + "0D" }}>
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white" style={{ background: T.brand }}><Send size={15} /></span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold" style={{ color: T.brand }}>{ql ? `Tanya Kolekta AI: “${q}”` : "Tanya Kolekta AI"}</span>
-              <span className="block text-[11px]" style={{ color: T.sub }}>Ringkasan kasus, draf pesan & next-best-action</span>
-            </span>
-            <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: T.brass + "22", color: T.brass }}>SEGERA</span>
-          </button>
-          {aiNote && (
-            <div className="mb-1 rounded-lg px-3 py-2 text-[11px] leading-relaxed" style={{ background: T.bg, color: T.sub }}>
-              Asisten AI akan tersambung di sini — siap meringkas tunggakan, menyusun draf pesan penagihan, dan menyarankan tindakan berikutnya. Saat ini dalam pengembangan.
-            </div>
-          )}
-          {invF.length > 0 && <><Label>Customer / Invoice</Label>{invF.map((i) => (
-            <RowBtn key={i.id} icon={Wallet} label={i.customer} sub={`${i.noInvoice || "—"} · ${rpc(i.total)}${i.daysOverdue > 0 ? ` · telat ${i.daysOverdue} hr` : ""}`} onClick={() => onOpenInvoice(i.id)} />
-          ))}</>}
-          {actF.length > 0 && <><Label>Aksi cepat</Label>{actF.map((a) => <RowBtn key={a.k} icon={a.icon} label={a.label} onClick={() => onAction(a.k)} />)}</>}
-          {navF.length > 0 && <><Label>Buka halaman</Label>{navF.map((n) => <RowBtn key={n.k} icon={n.icon} label={n.label} onClick={() => onNav(n.k)} />)}</>}
-          {ql && invF.length === 0 && actF.length === 0 && navF.length === 0 && (
-            <p className="px-3 py-6 text-center text-sm" style={{ color: T.sub }}>Tidak ada hasil untuk “{q}”.</p>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
