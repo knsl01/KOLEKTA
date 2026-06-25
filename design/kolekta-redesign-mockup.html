@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Kolekta · Redesign Mockup (High Fidelity)</title>
+<style>
+  :root{
+    --bg:#EDF0F4; --surface:#FFFFFF; --ink:#18222E; --sub:#5C6675;
+    --brand:#1B3A5B; --brand2:#2C5C82; --brass:#B07A3C;
+    --line:#DBE1EA; --green:#2E7D63; --amber:#B97F2A; --red:#B0463F; --slate:#66707E;
+    --shadow:0 1px 2px rgba(24,34,46,.06),0 6px 20px rgba(24,34,46,.06);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:#0E1722;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);
+    display:flex;flex-wrap:wrap;gap:28px;justify-content:center;padding:28px 14px 80px}
+  .lab{width:100%;text-align:center;color:#9fb0c4;font-size:13px;letter-spacing:.04em;margin:4px 0 8px}
+  .phone{width:390px;height:844px;background:var(--bg);border-radius:44px;border:11px solid #0a1018;
+    box-shadow:0 30px 60px rgba(0,0,0,.45);overflow:hidden;position:relative;display:flex;flex-direction:column}
+  .scr-label{position:absolute;top:-22px;left:0;right:0;text-align:center;color:#7f93a8;font-size:12px;font-weight:600}
+  /* status bar */
+  .status{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-weight:600;font-size:15px;flex:0 0 auto}
+  .status .r{display:flex;gap:6px;align-items:center;font-size:12px}
+  .batt{background:var(--ink);color:#fff;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:700}
+  /* app header */
+  .appbar{display:flex;align-items:center;gap:10px;padding:8px 16px 10px;flex:0 0 auto}
+  .klogo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--brand2),var(--brand));display:grid;place-items:center;color:#fff;font-weight:800;font-size:20px;position:relative;box-shadow:var(--shadow)}
+  .klogo::after{content:"";position:absolute;right:7px;top:8px;width:6px;height:6px;border-radius:50%;background:var(--brass)}
+  .appbar h1{font-size:19px;margin:0;font-weight:800;line-height:1}
+  .appbar .tag{color:var(--brass);font-size:11px;font-weight:600}
+  .appbar .sub{color:var(--sub);font-size:10.5px}
+  .iconbtn{width:40px;height:40px;border-radius:13px;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;box-shadow:var(--shadow);position:relative}
+  .dot{position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:10px;font-weight:700;border-radius:999px;min-width:18px;height:18px;display:grid;place-items:center;padding:0 4px;border:2px solid var(--bg)}
+  /* scroll body */
+  .body{flex:1 1 auto;overflow-y:auto;padding:4px 16px 24px}
+  .body::-webkit-scrollbar{display:none}
+  /* cards */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:16px;margin-bottom:12px}
+  .row{display:flex;gap:10px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .muted{color:var(--sub)}
+  .h-sec{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sub);margin:18px 4px 8px;display:flex;align-items:center;gap:8px}
+  .stat-l{font-size:12px;color:var(--sub)}
+  .stat-v{font-size:26px;font-weight:800;letter-spacing:-.02em;margin:2px 0 0}
+  .stat-s{font-size:11px;color:var(--sub)}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
+  .p-red{background:#fdecea;color:var(--red)} .p-amber{background:#fbf1df;color:var(--amber)}
+  .p-green{background:#e7f3ec;color:var(--green)} .p-brand{background:#e8eef5;color:var(--brand2)}
+  .p-slate{background:#eef1f4;color:var(--slate)}
+  .bar{height:4px;border-radius:4px;background:var(--line);overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:4px}
+  /* primary CTA */
+  .cta{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:var(--brand);color:#fff;border:none;border-radius:16px;padding:16px;font-size:15px;font-weight:700;box-shadow:0 8px 20px rgba(27,58,91,.28);margin-bottom:12px}
+  /* case item */
+  .case{display:flex;gap:12px;align-items:flex-start;padding:13px 0;border-bottom:1px solid var(--line)}
+  .case:last-child{border-bottom:none}
+  .acc{width:4px;align-self:stretch;border-radius:4px;flex:0 0 auto}
+  .case .nm{font-weight:700;font-size:14px}
+  .case .meta{font-size:11.5px;color:var(--sub);margin-top:2px}
+  .amt{font-weight:800;font-size:13.5px;white-space:nowrap}
+  .seg{display:flex;gap:6px;background:#e6eaf0;border-radius:13px;padding:4px;margin-bottom:12px;overflow-x:auto}
+  .seg button{border:none;background:transparent;padding:8px 12px;border-radius:10px;font-size:12.5px;font-weight:600;color:var(--sub);white-space:nowrap;flex:0 0 auto}
+  .seg button.on{background:var(--surface);color:var(--brand);box-shadow:var(--shadow)}
+  /* bottom nav */
+  .tabbar{flex:0 0 auto;display:flex;background:var(--surface);border-top:1px solid var(--line);padding:8px 6px 22px;position:relative}
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--slate);font-size:10.5px;font-weight:600;background:none;border:none;position:relative}
+  .tab.on{color:var(--brand)}
+  .tab .ic{width:24px;height:24px}
+  .tabdot{position:absolute;top:-2px;right:50%;transform:translateX(16px);background:var(--red);color:#fff;font-size:9px;font-weight:700;border-radius:999px;min-width:16px;height:16px;display:grid;place-items:center;padding:0 4px}
+  /* FAB */
+  .fab{position:absolute;right:18px;bottom:96px;width:60px;height:60px;border-radius:20px;background:var(--brass);color:#fff;border:none;font-size:30px;font-weight:300;display:grid;place-items:center;box-shadow:0 10px 24px rgba(176,122,58,.45);z-index:5}
+  .fabmenu{position:absolute;right:18px;bottom:168px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;z-index:5}
+  .fabitem{display:flex;align-items:center;gap:10px}
+  .fabitem .lbl{background:var(--ink);color:#fff;font-size:12px;font-weight:600;padding:7px 11px;border-radius:10px;box-shadow:var(--shadow)}
+  .fabitem .ic{width:44px;height:44px;border-radius:14px;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;box-shadow:var(--shadow);color:var(--brand)}
+  .hidden{display:none!important}
+  .chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;background:#eef1f4;color:var(--slate)}
+  svg.i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .act{display:flex;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+  .act:last-child{border-bottom:none}
+  .av{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;color:#fff;font-weight:700;font-size:12px}
+  .qa{display:flex;flex-direction:column;align-items:center;gap:7px;flex:1}
+  .qa .b{width:52px;height:52px;border-radius:16px;background:#eef2f7;display:grid;place-items:center;color:var(--brand)}
+  .qa span{font-size:10.5px;font-weight:600;color:var(--sub);text-align:center}
+  .listitem{display:flex;gap:12px;align-items:center;padding:14px 4px;border-bottom:1px solid var(--line)}
+  .listitem .ic{width:38px;height:38px;border-radius:12px;background:#eef2f7;display:grid;place-items:center;color:var(--brand);flex:0 0 auto}
+  .listitem .t{font-weight:600;font-size:14px}
+  .listitem .d{font-size:11.5px;color:var(--sub)}
+</style>
+</head>
+<body>
+
+<!-- ============ SCREEN 1: DASHBOARD ============ -->
+<div class="phone">
+  <div class="scr-label">1 · DASHBOARD (Command Center)</div>
+  <div class="status"><span>7.26</span><div class="r"><span>📶</span><span>📡</span><span class="batt">66</span></div></div>
+  <div class="appbar">
+    <div class="klogo">K</div>
+    <div style="flex:1">
+      <h1>Kolekta <span class="tag">collection control</span></h1>
+      <div class="sub">Halo, Joni · Collector</div>
+    </div>
+    <div class="iconbtn"><svg class="i" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="dot">6</span></div>
+  </div>
+  <div class="body">
+    <!-- KPI strip -->
+    <div class="grid2">
+      <div class="card" style="margin-bottom:0"><div class="stat-l">Total piutang aktif</div><div class="stat-v">Rp60 M</div><div class="stat-s">8 invoice</div></div>
+      <div class="card" style="margin-bottom:0"><div class="stat-l">Overdue</div><div class="stat-v" style="color:var(--red)">Rp60 M</div><div class="stat-s">7 invoice telat</div></div>
+    </div>
+
+    <div class="h-sec">⚡ Quick Actions</div>
+    <div class="card"><div class="row" style="justify-content:space-between">
+      <div class="qa"><div class="b"><svg class="i"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div><span>Follow up</span></div>
+      <div class="qa"><div class="b"><svg class="i"><path d="M12 2v20M2 12h20"/></svg></div><span>Tambah debitur</span></div>
+      <div class="qa"><div class="b"><svg class="i"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div><span>Buat laporan</span></div>
+      <div class="qa"><div class="b"><svg class="i"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div><span>Kunjungan</span></div>
+    </div></div>
+
+    <div class="h-sec" style="color:var(--red)">🔔 Tugas hari ini · 1</div>
+    <div class="card">
+      <div class="case"><div class="acc" style="background:var(--red)"></div>
+        <div style="flex:1"><div class="nm">PT. Tata Mulia</div><div class="meta">Invoice 5 · telat 169 hari · terakhir dihubungi 2 hr lalu</div>
+          <div style="margin-top:7px"><span class="pill p-red">● Ingkar janji</span></div></div>
+        <div class="amt">Rp58,45 M</div>
+      </div>
+    </div>
+
+    <div class="h-sec" style="color:var(--amber)">⚠ Follow-up belum dikerjakan · 6</div>
+    <div class="card">
+      <div class="case"><div class="acc" style="background:var(--amber)"></div>
+        <div style="flex:1"><div class="nm">PT. Tata Mulia</div><div class="meta">Inv 7 · telat 1827 hari</div></div><div class="amt">Rp1,41 M</div></div>
+      <div class="case"><div class="acc" style="background:var(--amber)"></div>
+        <div style="flex:1"><div class="nm">PT Baja</div><div class="meta">Inv 999 · telat 85 hari</div></div><div class="amt">Rp20,6 jt</div></div>
+      <div class="case"><div class="acc" style="background:var(--amber)"></div>
+        <div style="flex:1"><div class="nm">PT Baja</div><div class="meta">Inv 888 · telat 113 hari</div></div><div class="amt">Rp5,5 jt</div></div>
+      <div style="text-align:center;padding-top:10px"><span class="pill p-slate">Lihat 3 lagi →</span></div>
+    </div>
+
+    <div class="h-sec">🕘 Aktivitas terbaru</div>
+    <div class="card">
+      <div class="act"><div class="av" style="background:var(--green)">JN</div><div style="flex:1"><b>Joni</b> catat pembayaran Rp500 jt<div class="muted" style="font-size:11px">PT Maju · 2 jam lalu</div></div></div>
+      <div class="act"><div class="av" style="background:var(--brand2)">RD</div><div style="flex:1"><b>Rudi</b> kunjungan + foto lapangan<div class="muted" style="font-size:11px">Siti R. · 5 jam lalu</div></div></div>
+      <div class="act"><div class="av" style="background:var(--brass)">SP</div><div style="flex:1"><b>Supervisor</b> kirim somasi 1<div class="muted" style="font-size:11px">PT Tata Mulia · kemarin</div></div></div>
+    </div>
+  </div>
+  <button class="fab">+</button>
+  <div class="tabbar">
+    <button class="tab on"><svg class="i ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>Cases</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat<span class="tabdot">6</span></button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>Reports</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>More</button>
+  </div>
+</div>
+
+<!-- ============ SCREEN 2: CASES ============ -->
+<div class="phone">
+  <div class="scr-label">2 · CASES (Tagihan)</div>
+  <div class="status"><span>7.26</span><div class="r"><span>📶</span><span>📡</span><span class="batt">66</span></div></div>
+  <div class="appbar">
+    <div class="klogo">K</div>
+    <div style="flex:1"><h1>Cases</h1><div class="sub">8 kasus aktif · Rp60 M outstanding</div></div>
+    <div class="iconbtn"><svg class="i" viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="card" style="padding:10px;display:flex;gap:8px;align-items:center">
+      <svg class="i" style="color:var(--sub)" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4-4"/></svg>
+      <span class="muted" style="font-size:13px">Cari customer / invoice…</span>
+    </div>
+    <div class="seg">
+      <button class="on">Semua</button><button>Overdue</button><button>Follow-up</button><button>Janji bayar</button><button>Kunjungan</button>
+    </div>
+    <div class="card">
+      <div class="case"><div class="acc" style="background:var(--red)"></div>
+        <div style="flex:1"><div class="nm">PT. Tata Mulia <span class="chip" style="background:#fdecea;color:var(--red)">Kol 5</span> <span class="chip" style="background:#fdecea;color:var(--red)">PRIO!</span></div>
+          <div class="meta">📁 Baturaja · Inv 7 · JT 24 Jun 2021</div><div style="margin-top:6px"><span class="pill p-slate">● Belum dihubungi</span></div></div>
+        <div class="amt">Rp1,41 M</div>
+      </div>
+      <div class="case"><div class="acc" style="background:var(--red)"></div>
+        <div style="flex:1"><div class="nm">PT. Tata Mulia <span class="chip" style="background:#fbf1df;color:var(--amber)">Kol 4</span> <span class="chip" style="background:#fdecea;color:var(--red)">PRIO!</span> <span class="chip" style="background:#e8eef5;color:var(--brand2)">📷 TL</span></div>
+          <div class="meta">Invoice 5 · JT 7 Jan 2026</div><div style="margin-top:6px"><span class="pill p-red">● Ingkar janji</span></div></div>
+        <div class="amt">Rp58,45 M</div>
+      </div>
+      <div class="case"><div class="acc" style="background:var(--amber)"></div>
+        <div style="flex:1"><div class="nm">PT Baja <span class="chip" style="background:#fbf1df;color:var(--amber)">Kol 3</span> <span class="chip">PRIO</span></div>
+          <div class="meta">Inv 888 · JT 4 Mar 2026</div><div style="margin-top:6px"><span class="pill p-slate">● Belum dihubungi</span></div></div>
+        <div class="amt">Rp5,56 jt</div>
+      </div>
+      <div class="case"><div class="acc" style="background:var(--amber)"></div>
+        <div style="flex:1"><div class="nm">PT Baja <span class="chip" style="background:#fbf1df;color:var(--amber)">Kol 2</span></div>
+          <div class="meta">📁 Proyek 5 · Inv 6 · JT 2 Jun 2026</div><div style="margin-top:6px"><span class="pill p-green">● Janji bayar 28 Jun</span></div></div>
+        <div class="amt">Rp20,4 jt</div>
+      </div>
+    </div>
+  </div>
+  <button class="fab">+</button>
+  <div class="tabbar">
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
+    <button class="tab on"><svg class="i ic" viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>Cases</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat<span class="tabdot">6</span></button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>Reports</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>More</button>
+  </div>
+</div>
+
+<!-- ============ SCREEN 3: CHAT ============ -->
+<div class="phone">
+  <div class="scr-label">3 · CHAT</div>
+  <div class="status"><span>7.26</span><div class="r"><span>📶</span><span>📡</span><span class="batt">66</span></div></div>
+  <div class="appbar">
+    <div class="klogo">K</div>
+    <div style="flex:1"><h1>Chat</h1><div class="sub">Tim collection · KNSL</div></div>
+    <div class="iconbtn"><svg class="i" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="seg"><button class="on">Personal</button><button>Grup</button><button>Panggilan</button></div>
+    <div class="card" style="padding:6px 14px">
+      <div class="listitem"><div class="ic" style="background:var(--brand);color:#fff">RD</div><div style="flex:1"><div class="t">Rudi <span class="chip">Collector</span></div><div class="d">Sudah ke lokasi PT Baja, foto…</div></div><div style="text-align:right"><div class="muted" style="font-size:11px">7.10</div><span class="dot" style="position:static;display:inline-grid;margin-top:4px">2</span></div></div>
+      <div class="listitem"><div class="ic" style="background:var(--brass);color:#fff">SP</div><div style="flex:1"><div class="t">Supervisor <span class="chip">Atasan</span></div><div class="d">Tolong kejar approval Tata Mulia</div></div><div class="muted" style="font-size:11px">kemarin</div></div>
+      <div class="listitem"><div class="ic" style="background:var(--brand2);color:#fff">LG</div><div style="flex:1"><div class="t">Legal <span class="chip">Legal</span></div><div class="d">Draft somasi 2 sudah siap ✅</div></div><div class="muted" style="font-size:11px">kemarin</div></div>
+    </div>
+    <div class="h-sec">📞 Panggilan cepat</div>
+    <div class="card"><div class="row" style="gap:10px">
+      <button class="cta" style="margin:0;background:var(--green);flex:1"><svg class="i" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Voice</button>
+      <button class="cta" style="margin:0;background:var(--brand2);flex:1"><svg class="i" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg> Video</button>
+    </div></div>
+  </div>
+  <div class="tabbar">
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>Cases</button>
+    <button class="tab on"><svg class="i ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>Reports</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>More</button>
+  </div>
+</div>
+
+<!-- ============ SCREEN 4: REPORTS ============ -->
+<div class="phone">
+  <div class="scr-label">4 · REPORTS (Laporan + Analytics)</div>
+  <div class="status"><span>7.26</span><div class="r"><span>📶</span><span>📡</span><span class="batt">66</span></div></div>
+  <div class="appbar">
+    <div class="klogo">K</div>
+    <div style="flex:1"><h1>Reports</h1><div class="sub">Laporan & analitik</div></div>
+    <div class="iconbtn"><svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="seg"><button class="on">Analytics</button><button>Harian</button><button>Kunjungan</button><button>Collection</button></div>
+    <div class="grid2">
+      <div class="card" style="margin-bottom:0"><div class="stat-l">DSO</div><div class="stat-v">5 hr</div><div class="stat-s">rata-rata umur</div></div>
+      <div class="card" style="margin-bottom:0"><div class="stat-l">Tertagih bln ini</div><div class="stat-v" style="color:var(--green)">Rp500 jt</div><div class="stat-s">dari pembayaran</div></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:2px">Tagihan baru vs tertagih</div>
+      <div class="muted" style="font-size:11px;margin-bottom:12px">6 bulan terakhir</div>
+      <div style="display:flex;align-items:flex-end;gap:10px;height:120px;padding-bottom:6px">
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px"><div style="width:60%;height:4px;background:var(--brand)"></div><span class="muted" style="font-size:10px">Jan</span></div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px"><div style="width:60%;height:4px;background:var(--brand)"></div><span class="muted" style="font-size:10px">Feb</span></div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px"><div style="width:60%;height:6px;background:var(--brand)"></div><span class="muted" style="font-size:10px">Mar</span></div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px"><div style="width:60%;height:6px;background:var(--brand)"></div><span class="muted" style="font-size:10px">Apr</span></div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px"><div style="width:60%;height:8px;background:var(--brand)"></div><span class="muted" style="font-size:10px">Mei</span></div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px"><div style="width:60%;height:100px;background:var(--brand);border-radius:3px 3px 0 0"></div><span class="muted" style="font-size:10px">Jun</span></div>
+      </div>
+      <div class="row" style="gap:14px;font-size:11px;margin-top:6px"><span>◼ <span class="muted">Tagihan baru</span></span><span style="color:var(--green)">◼ <span class="muted">Tertagih</span></span></div>
+    </div>
+    <div class="h-sec">🏆 Leaderboard petugas — bulan ini</div>
+    <div class="card">
+      <div class="case"><div class="acc" style="background:var(--brass)"></div><div style="flex:1"><div class="nm">🥇 JONI</div><div class="meta">3 akun · OS Rp26 jt · PTP —</div></div><div class="amt" style="color:var(--green)">Rp500 jt</div></div>
+      <div class="case"><div class="acc" style="background:var(--slate)"></div><div style="flex:1"><div class="nm">🥈 RUDI</div><div class="meta">5 akun · OS Rp34 jt · PTP 60%</div></div><div class="amt" style="color:var(--green)">Rp180 jt</div></div>
+    </div>
+    <div class="h-sec">📍 Heat map tunggakan</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="height:130px;background:linear-gradient(135deg,#dde6ef,#c9d6e3);position:relative">
+        <span style="position:absolute;left:30%;top:40%;width:14px;height:14px;border-radius:50%;background:var(--red)"></span>
+        <span style="position:absolute;left:50%;top:55%;width:11px;height:11px;border-radius:50%;background:var(--amber)"></span>
+        <span style="position:absolute;left:60%;top:35%;width:10px;height:10px;border-radius:50%;background:#e07a3a"></span>
+      </div>
+      <div style="padding:10px 14px;font-size:11px" class="muted">7 debitur dipetakan · Geografis · Kalender · Matriks →</div>
+    </div>
+  </div>
+  <button class="fab">+</button>
+  <div class="tabbar">
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>Cases</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat<span class="tabdot">6</span></button>
+    <button class="tab on"><svg class="i ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>Reports</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>More</button>
+  </div>
+</div>
+
+<!-- ============ SCREEN 5: MORE + FAB OPEN ============ -->
+<div class="phone">
+  <div class="scr-label">5 · MORE  +  FAB terbuka</div>
+  <div class="status"><span>7.26</span><div class="r"><span>📶</span><span>📡</span><span class="batt">66</span></div></div>
+  <div class="appbar">
+    <div class="klogo">K</div>
+    <div style="flex:1"><h1>More</h1><div class="sub">Joni · Collector · KNSL</div></div>
+    <div class="iconbtn"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+  </div>
+  <div class="body" style="opacity:.55">
+    <div class="h-sec">Manajemen</div>
+    <div class="card" style="padding:4px 14px">
+      <div class="listitem"><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg></div><div style="flex:1"><div class="t">Pelanggan</div><div class="d">Master data debitur</div></div></div>
+      <div class="listitem"><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div><div style="flex:1"><div class="t">Audit Log <span class="chip">Atasan</span></div><div class="d">Jejak perubahan (append-only)</div></div></div>
+      <div class="listitem"><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/></svg></div><div style="flex:1"><div class="t">Riwayat & Riwayat kerja</div><div class="d">Histori invoice & pekerjaan lapangan</div></div></div>
+    </div>
+    <div class="h-sec">Alat & sistem</div>
+    <div class="card" style="padding:4px 14px">
+      <div class="listitem"><div class="ic"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 10h8M8 14h2M8 18h2"/></svg></div><div style="flex:1"><div class="t">Kalkulator</div><div class="d">Hitung bunga / cicilan</div></div></div>
+      <div class="listitem"><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-6 0v4"/><rect x="2" y="9" width="20" height="11" rx="2"/></svg></div><div style="flex:1"><div class="t">Integrasi</div><div class="d">WhatsApp · Email · Akuntansi · API</div></div></div>
+      <div class="listitem"><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.5"/><path d="M21 4v6h-6"/></svg></div><div style="flex:1"><div class="t">Backup & Restore</div><div class="d">Cadangkan / pulihkan data</div></div></div>
+      <div class="listitem"><div class="ic"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v6M12 17v6"/></svg></div><div style="flex:1"><div class="t">Pengaturan</div><div class="d">Tema, peran, target, logout</div></div></div>
+    </div>
+  </div>
+  <!-- FAB menu open -->
+  <div class="fabmenu">
+    <div class="fabitem"><span class="lbl">Tambah debitur</span><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div></div>
+    <div class="fabitem"><span class="lbl">Buat laporan</span><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div></div>
+    <div class="fabitem"><span class="lbl">Buat reminder</span><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/></svg></div></div>
+    <div class="fabitem"><span class="lbl">Upload dokumen</span><div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></div></div>
+  </div>
+  <button class="fab" style="background:var(--ink);transform:rotate(45deg)">+</button>
+  <div class="tabbar">
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>Dashboard</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>Cases</button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat<span class="tabdot">6</span></button>
+    <button class="tab"><svg class="i ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>Reports</button>
+    <button class="tab on"><svg class="i ic" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>More</button>
+  </div>
+</div>
+
+</body>
+</html>
