@@ -46,8 +46,8 @@ const THEMES = {
     glass: "pro",
     // TRUE liquid glass (Vision Pro / iOS 26) — palet NETRAL: obsidian black + titanium silver + white frost,
     // aksen champagne gold tipis. Permukaan putih-translusen + blur lembut, highlight radial natural via .theme-glass2.
-    light: { bg: "#121317", surface: "rgba(255,255,255,0.10)", ink: "#F4F5F7", sub: "#9DA3AD", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E0BE82", line: "rgba(255,255,255,0.18)", green: "#76C9A4", amber: "#E3C078", red: "#EA8E83", slate: "#8B919B", toast: "rgba(14,15,18,0.88)" },
-    dark: { bg: "#0A0B0E", surface: "rgba(255,255,255,0.075)", ink: "#F4F5F7", sub: "#969CA6", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E0BE82", line: "rgba(255,255,255,0.15)", green: "#76C9A4", amber: "#E3C078", red: "#EA8E83", slate: "#858B95", toast: "rgba(6,7,9,0.9)" },
+    light: { bg: "#121317", surface: "rgba(255,255,255,0.10)", ink: "#F4F5F7", sub: "#9DA3AD", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E8C173", line: "rgba(255,255,255,0.18)", green: "#33D69F", amber: "#F7B53D", red: "#F85D4F", slate: "#8B919B", toast: "rgba(14,15,18,0.88)" },
+    dark: { bg: "#0A0B0E", surface: "rgba(255,255,255,0.075)", ink: "#F4F5F7", sub: "#969CA6", brand: "#B4BBC6", brand2: "#CDD2D9", brass: "#E8C173", line: "rgba(255,255,255,0.15)", green: "#33D69F", amber: "#F7B53D", red: "#F85D4F", slate: "#858B95", toast: "rgba(6,7,9,0.9)" },
   },
 };
 // Pemetaan tema lama → keluarga + mode (kompatibilitas data tersimpan).
