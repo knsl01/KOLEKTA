@@ -2,7 +2,20 @@
 *Visual design system · iOS 26 "Liquid Glass" × enterprise Collection Control*
 *Catatan: ini layer visual saja — Information Architecture, workflow & navigasi TIDAK berubah.*
 
-> Status: **tema "Liquid Glass" sudah live** di aplikasi (Pengaturan → Tema → Liquid Glass; Mode gelap tersedia). Mockup high-fidelity = screenshot aplikasi sungguhan (light, dark, desktop) yang dikirim bersama dokumen ini.
+> Status: **dua tingkat glass live** di aplikasi (Pengaturan → Tema):
+> - **Liquid Glass** (`soft`) — frosted halus, light-first, untuk yang ingin kalem & terang.
+> - **Liquid Glass Pro** (`pro`) — *TRUE* liquid glass ala iOS 26 / Apple Vision Pro: dark-first, permukaan putih-translusen tipis + backdrop-blur kuat, specular highlight, tepi cahaya, sheen diagonal (refraction), panel mengambang berlapis.
+>
+> ### Token Liquid Glass Pro (yang benar-benar dipakai di kode)
+> - Glass surface: `rgba(255,255,255,0.10)` (light) / `0.08` (dark) di atas material navy gelap
+> - Border/edge: `rgba(255,255,255,0.24)` + specular `inset 0 1px 0 rgba(255,255,255,.45)`
+> - Backdrop blur: **30px**, saturate **180%**
+> - Sheen (refraction): `linear-gradient(135deg, rgba(255,255,255,.16) → .02)`
+> - Drop shadow float: `0 18px 44px -14px rgba(0,0,0,.62)`
+> - Material latar: 3 radial bloom (navy/gold/blue) + linear navy, `fixed`
+> - Teks token solid terang (`#F3F7FC` / `#BAC6D8`) demi keterbacaan di atas kaca gelap
+>
+> Mockup high-fidelity = screenshot aplikasi sungguhan yang dikirim bersama dokumen ini.
 
 ---
 

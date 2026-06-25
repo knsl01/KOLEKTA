@@ -36,10 +36,18 @@ const THEMES = {
   },
   kaca: {
     name: "Liquid Glass",
-    glass: true,
+    glass: "soft",
     // Permukaan semi-transparan (frosted) + blur via kelas .theme-glass. Token solid tetap untuk teks/aksen agar terbaca.
     light: { bg: "#E7EEF7", surface: "rgba(255,255,255,0.66)", ink: "#13243B", sub: "#52647D", brand: "#1B3A5B", brand2: "#2C5C82", brass: "#A9772F", line: "rgba(120,142,176,0.30)", green: "#2E7D63", amber: "#A9762A", red: "#B0463F", slate: "#5E6E84", toast: "rgba(17,28,46,0.88)" },
     dark: { bg: "#0C1622", surface: "rgba(26,41,58,0.55)", ink: "#EAF1FB", sub: "#9FADC2", brand: "#6AA0D6", brand2: "#5A8FC4", brass: "#D6A85E", line: "rgba(255,255,255,0.14)", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#8C9AAE", toast: "rgba(7,13,21,0.9)" },
+  },
+  kaca2: {
+    name: "Liquid Glass Pro",
+    glass: "pro",
+    // TRUE liquid glass (Vision Pro / iOS 26): dark-first, permukaan putih-translusen tipis + blur kuat,
+    // specular highlight & tepi cahaya via .theme-glass2. Token teks terang demi keterbacaan di atas kaca gelap.
+    light: { bg: "#0B1322", surface: "rgba(255,255,255,0.10)", ink: "#F3F7FC", sub: "#BAC6D8", brand: "#62A6EC", brand2: "#86BAF2", brass: "#E6BC6A", line: "rgba(255,255,255,0.22)", green: "#5FD0A0", amber: "#F0B64F", red: "#F2796D", slate: "#9DABC0", toast: "rgba(10,16,26,0.86)" },
+    dark: { bg: "#060B14", surface: "rgba(255,255,255,0.08)", ink: "#F3F7FC", sub: "#AEBBCE", brand: "#62A6EC", brand2: "#86BAF2", brass: "#E6BC6A", line: "rgba(255,255,255,0.18)", green: "#5FD0A0", amber: "#F0B64F", red: "#F2796D", slate: "#94A2B6", toast: "rgba(4,8,14,0.9)" },
   },
 };
 // Pemetaan tema lama → keluarga + mode (kompatibilitas data tersimpan).
@@ -2131,7 +2139,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     return <div className="flex h-screen items-center justify-center" style={{ background: T.bg, color: T.sub, fontFamily: SANS }}>Memuat Kolekta…</div>;
 
   T = themePalette(data.settings.tema, data.settings.gelap);
-  const isGlass = !!THEMES[data.settings.tema]?.glass;
+  const glassKind = THEMES[data.settings.tema]?.glass; // "soft" | "pro" | undefined
+  const glassClass = glassKind === "pro" ? "theme-glass2" : glassKind === "soft" ? "theme-glass" : "";
+  const isGlass = !!glassClass;
 
   /* Audit Log hanya untuk Atasan PT (petugas tak punya akses penuh). */
   const navItems = auth.role === "atasan"
@@ -2207,7 +2217,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   );
 
   return (
-    <div className={`min-h-screen w-full${isGlass ? " theme-glass" + (data.settings.gelap ? " kglass-dark" : "") : ""}`} style={{ background: isGlass ? undefined : T.bg, color: T.ink, fontFamily: SANS }}>
+    <div className={`min-h-screen w-full${isGlass ? ` ${glassClass}` + (data.settings.gelap ? " kglass-dark" : "") : ""}`} style={{ background: isGlass ? undefined : T.bg, color: T.ink, fontFamily: SANS }}>
       <style>{`
 @keyframes kolektaIn{from{opacity:0;transform:translateY(6px) scale(.995)}to{opacity:1;transform:none}}
 .tab-anim{animation:kolektaIn .28s cubic-bezier(.22,.61,.36,1)}
@@ -2259,6 +2269,36 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 .theme-glass .shadow-lg,.theme-glass .shadow-xl,.theme-glass .shadow-2xl{box-shadow:0 18px 50px -16px rgba(13,22,34,.34);}
 .theme-glass .rounded-xl,.theme-glass .rounded-2xl{border-color:rgba(255,255,255,.45);}
 .theme-glass.kglass-dark .rounded-xl,.theme-glass.kglass-dark .rounded-2xl{border-color:rgba(255,255,255,.10);}
+
+/* ===== TRUE LIQUID GLASS (Vision Pro / iOS 26) — tema "Liquid Glass Pro" ===== */
+.theme-glass2{color-scheme:dark;background:
+  radial-gradient(900px 520px at 12% -6%, rgba(98,166,236,.30), transparent 60%),
+  radial-gradient(820px 540px at 112% 6%, rgba(230,188,106,.20), transparent 55%),
+  radial-gradient(760px 760px at 50% 122%, rgba(134,186,242,.18), transparent 60%),
+  linear-gradient(160deg,#0C1A2E 0%,#0A1018 52%,#0B1426 100%) fixed;}
+.theme-glass2.kglass-dark{background:
+  radial-gradient(900px 520px at 12% -6%, rgba(98,166,236,.24), transparent 60%),
+  radial-gradient(820px 540px at 112% 6%, rgba(230,188,106,.16), transparent 55%),
+  radial-gradient(760px 760px at 50% 122%, rgba(134,186,242,.14), transparent 60%),
+  linear-gradient(160deg,#070F1C 0%,#05080F 55%,#070F1E 100%) fixed;}
+/* Backdrop blur nyata + saturation boost pada semua kartu & chrome */
+.theme-glass2 .shadow-sm,.theme-glass2 .shadow,.theme-glass2 .shadow-md,.theme-glass2 .shadow-lg,.theme-glass2 .shadow-xl,.theme-glass2 .shadow-2xl,
+.theme-glass2 nav.fixed,.theme-glass2 nav.sticky,.theme-glass2 aside,.theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
+  -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);}
+/* Glass surface: sheen diagonal (refraction) + specular highlight atas + tepi cahaya + drop shadow */
+.theme-glass2 .rounded-xl,.theme-glass2 .rounded-2xl{
+  background-image:linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.06) 34%, rgba(255,255,255,0.02) 100%)!important;
+  border:1px solid rgba(255,255,255,0.24)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.45), inset 0 0 22px rgba(255,255,255,.05), 0 18px 44px -14px rgba(0,0,0,.62)!important;}
+/* Specular sweep tipis di tepi atas (light edge reflection) */
+.theme-glass2 .rounded-2xl{position:relative;}
+/* Bottom nav & sidebar: kaca lebih padat demi keterbacaan label */
+.theme-glass2 nav.fixed{background:linear-gradient(180deg, rgba(22,34,52,0.62), rgba(14,22,36,0.7))!important;border-top:1px solid rgba(255,255,255,.16)!important;box-shadow:0 -8px 30px rgba(0,0,0,.4)!important;}
+.theme-glass2 aside{background:linear-gradient(180deg, rgba(20,32,50,0.55), rgba(12,20,34,0.6))!important;border-right:1px solid rgba(255,255,255,.12)!important;}
+/* Input/komponen rounded-lg: kaca ringan (tanpa blur berat) */
+.theme-glass2 .rounded-lg{background-image:linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))!important;}
+/* Overlay modal sedikit gelap + blur agar panel mengambang nyata */
+.theme-glass2 .drawer-ov{-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);background:rgba(4,8,14,.5)!important;}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
