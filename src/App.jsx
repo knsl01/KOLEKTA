@@ -2288,6 +2288,19 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     return c;
   }, [filtered]);
   const casesShown = useMemo(() => filtered.filter(casePred[caseSeg] || casePred.semua), [filtered, caseSeg]);
+  /* Geser indikator segmen Cases (Semua/Overdue/Follow-up/…) */
+  useEffect(() => {
+    if (tab !== "tagihan") return;
+    const measure = () => {
+      const btn = caseBtns.current[caseSeg];
+      if (!btn) { setCaseInd((p) => (p ? { ...p, show: false } : p)); return; }
+      setCaseInd({ left: btn.offsetLeft, width: btn.offsetWidth, show: true });
+      try { btn.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" }); } catch {}
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [caseSeg, tab, caseCounts, data]);
   /* Cases dikelompokkan per PT/customer (klik nama -> expand invoice-nya) */
   const casesGrouped = useMemo(() => {
     const m = new Map();
