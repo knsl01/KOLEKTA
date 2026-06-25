@@ -82,6 +82,21 @@ const HASIL = {
 const HASIL_ORDER = ["ptp", "partial", "ingkar", "rtp", "notfound", "nocontact", "lain"];
 const stColor = (st) => T[STATUS_META[st].token];
 const stLabel = (st) => STATUS_META[st].label;
+/* Menu cepat Dashboard (Quick Actions) — bisa dipilih lewat Pengaturan */
+const QUICK_ACTIONS_META = [
+  ["lapor", "Lapor lapangan"],
+  ["laporan_harian", "Laporan harian"],
+  ["tambah", "Tambah debitur"],
+  ["riwayat_kerja", "Riwayat kerja"],
+  ["kalkulator", "Kalkulator"],
+  ["pelanggan", "Pelanggan"],
+  ["collection", "Collection report"],
+  ["chat", "Chat tim"],
+  ["reports", "Analitik & laporan"],
+  ["heatmap", "Heat Map"],
+];
+const defaultQuick = (role) => (role === "atasan" ? ["lapor", "laporan_harian", "tambah", "riwayat_kerja"] : ["lapor", "laporan_harian", "tambah", "kalkulator"]);
+
 const NAV = [
   { id: "hari", icon: Bell, label: "Hari Ini" },
   { id: "tagihan", icon: Wallet, label: "Tagihan" },
@@ -1425,7 +1440,7 @@ const parseCall = (body) => { const m = CALL_RE.exec(body || ""); return m ? { k
 const chatPreview = (body, hasAtt) => { const c = parseCall(body); if (c) return c.kind === "video" ? "📹 Panggilan video" : "📞 Panggilan suara"; return body || (hasAtt ? "📎 Lampiran" : ""); };
 
 /* ---------- Panel Chat (grup PT + japri atasan↔petugas) ---------- */
-function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread }) {
+function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread, embedded }) {
   const [openConv, setOpenConv] = useState(null);
   const [convos, setConvos] = useState([]);
   const [msgs, setMsgs] = useState([]);
@@ -1607,7 +1622,8 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
   const activeTitle = openConv ? (convList.find((c) => c.conv === openConv)?.title || "Chat") : null;
 
   return (
-    <div className="chat-panel fixed inset-0 z-[70] flex flex-col" style={{ background: T.bg, fontFamily: SANS }}>
+    <div className={`chat-panel fixed inset-x-0 top-0 flex flex-col ${embedded ? "z-20" : "z-[70] bottom-0"}`}
+      style={{ background: T.bg, fontFamily: SANS, bottom: embedded ? "calc(env(safe-area-inset-bottom, 0px) + 84px)" : 0 }}>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: T.surface, borderBottom: `1px solid ${T.line}` }}>
         {openConv ? (
@@ -1786,6 +1802,7 @@ export default function KolektaApp() {
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
+  const [navShrink, setNavShrink] = useState(false);
   const [showCmd, setShowCmd] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
@@ -1804,7 +1821,8 @@ export default function KolektaApp() {
   const [waTpl, setWaTpl] = useState("halus");
   const [toast, setToast] = useState("");
   const [auth, setAuth] = useState(loadAuth);
-  const [showChat, setShowChat] = useState(false);
+  const showChat = tab === "chat";
+  const setShowChat = (v) => setTab(v ? "chat" : "hari");
   const [chatUnread, setChatUnread] = useState(0);
   const loadedRef = useRef(false);
   const pushTimer = useRef(null);
@@ -1862,6 +1880,18 @@ export default function KolektaApp() {
     return session;
   };
   const doLogout = () => { if (pushTimer.current) clearTimeout(pushTimer.current); clearAuth(); setAuth(null); setData(null); setTab("hari"); };
+
+  /* Bottom-nav mengecil saat scroll, kembali saat berhenti (halus) */
+  useEffect(() => {
+    let t; let last = 0;
+    const onScroll = () => {
+      const y = window.scrollY || document.documentElement.scrollTop || 0;
+      if (Math.abs(y - last) < 4) return; last = y;
+      setNavShrink(true); clearTimeout(t); t = setTimeout(() => setNavShrink(false), 420);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); clearTimeout(t); };
+  }, []);
 
   /* ⌘K / Ctrl+K — buka command palette global (cari & lompat) */
   useEffect(() => {
@@ -2507,24 +2537,35 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
               <Stat label="Perlu ditagih ulang" value={String(panels.perlu.length)} sub="ngendap / ingkar" accent={T.brand2} />
             </div>
 
-            {/* Quick Actions — mulai tugas dalam 1 ketuk */}
-            <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { icon: ClipboardList, label: "Lapor lapangan", on: openLapor },
-                  { icon: FileText, label: "Laporan harian", on: () => setShowLaporan((v) => !v) },
-                  { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
-                  s.peran === "atasan"
-                    ? { icon: History, label: "Riwayat kerja", on: openRiwayatKerja }
-                    : { icon: CalcIcon, label: "Kalkulator", on: () => setShowCalc(true) },
-                ].map((a, i) => (
-                  <button key={i} onClick={a.on} className="kpress flex flex-col items-center gap-1.5">
-                    <span className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: T.brand2 + "14", color: T.brand }}><a.icon size={20} /></span>
-                    <span className="text-center text-[10.5px] font-medium leading-tight" style={{ color: T.sub }}>{a.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Quick Actions — bisa dipilih lewat Pengaturan */}
+            {(() => {
+              const reg = {
+                lapor: { icon: ClipboardList, label: "Lapor lapangan", on: openLapor },
+                laporan_harian: { icon: FileText, label: "Laporan harian", on: () => setShowLaporan((v) => !v) },
+                tambah: { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
+                riwayat_kerja: { icon: History, label: "Riwayat kerja", on: openRiwayatKerja },
+                kalkulator: { icon: CalcIcon, label: "Kalkulator", on: () => setShowCalc(true) },
+                pelanggan: { icon: Users, label: "Pelanggan", on: () => { setCustSel(null); setTab("pelanggan"); } },
+                collection: { icon: FileSpreadsheet, label: "Collection report", on: () => { try { exportExcel(enriched, s); audit("export", "Excel daftar tagihan", null, { count: enriched.length }); flash("Excel diunduh"); } catch { flash("Export gagal di lingkungan ini"); } } },
+                chat: { icon: MessageCircle, label: "Chat tim", on: () => setTab("chat") },
+                reports: { icon: BarChart3, label: "Analitik", on: () => setTab("reports") },
+                heatmap: { icon: Flame, label: "Heat Map", on: () => setTab("heatmap") },
+              };
+              const keys = (Array.isArray(s.quickActions) && s.quickActions.length ? s.quickActions : defaultQuick(s.peran)).map((k) => reg[k]).filter(Boolean);
+              if (!keys.length) return null;
+              return (
+                <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+                  <div className="grid grid-cols-4 gap-2">
+                    {keys.map((a, i) => (
+                      <button key={i} onClick={a.on} className="kpress flex flex-col items-center gap-1.5">
+                        <span className="grid h-12 w-12 place-items-center rounded-2xl transition-transform" style={{ background: T.brand2 + "14", color: T.brand }}><a.icon size={20} /></span>
+                        <span className="text-center text-[10.5px] font-medium leading-tight" style={{ color: T.sub }}>{a.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {s.peran === "petugas" && (() => {
               const me = tim.find((t) => t.nama === s.petugasAktif);
@@ -3222,6 +3263,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       <input ref={custFileRef} type="file" accept=".xlsx,.xls,.csv,application/pdf,image/*" multiple onChange={onCustFiles} className="hidden" />
 
       {/* FAB — aksi cepat (HP) */}
+      {tab !== "chat" && (
       <div className="fixed right-4 z-40 lg:hidden" style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 88px)" }}>
         {fabOpen && (
           <>
@@ -3246,10 +3288,11 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           <Plus size={28} />
         </button>
       </div>
+      )}
 
       {/* Bottom navigation (HP) — floating pill */}
       <nav className="fixed bottom-0 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-[26px] p-1.5 shadow-xl lg:hidden"
-        style={{ background: T.surface, border: `1px solid ${T.line}`, bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)", maxWidth: "calc(100% - 20px)" }}>
+        style={{ background: T.surface, border: `1px solid ${T.line}`, bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)", maxWidth: "calc(100% - 20px)", transition: "transform .32s cubic-bezier(.22,.61,.36,1)", transform: `translateX(-50%) scale(${navShrink ? 0.9 : 1})`, transformOrigin: "bottom center" }}>
         {(() => {
           const inReports = ["reports", "analitik", "heatmap", "riwayat"].includes(tab);
           const inMore = ["more", "audit", "set", "pelanggan"].includes(tab);
@@ -3262,10 +3305,10 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           ];
           return items.map((it) => (
             <button key={it.key} onClick={it.on}
-              className="kpress relative flex flex-col items-center justify-center gap-0.5 rounded-[20px] px-3.5 py-2 text-[10px] font-semibold transition-colors"
-              style={it.active ? { background: T.brand + "26", color: T.brand } : { color: T.sub }}>
-              <it.icon size={22} />
-              <span>{it.label}</span>
+              className="kpress relative flex flex-col items-center justify-center gap-0.5 rounded-[20px] px-3.5 font-semibold"
+              style={{ ...(it.active ? { background: T.brand + "26", color: T.brand } : { color: T.sub }), paddingTop: navShrink ? 8 : 8, paddingBottom: navShrink ? 8 : 8, transition: "background-color .25s ease, color .25s ease" }}>
+              <it.icon size={22} style={{ transition: "transform .3s cubic-bezier(.22,.61,.36,1)", transform: it.active ? "scale(1.06)" : "none" }} />
+              <span className="overflow-hidden text-[10px] leading-tight" style={{ maxHeight: navShrink ? 0 : 14, opacity: navShrink ? 0 : 1, marginTop: navShrink ? 0 : 2, transition: "max-height .3s cubic-bezier(.22,.61,.36,1), opacity .25s ease, margin-top .3s ease" }}>{it.label}</span>
               {it.badge > 0 && (
                 <span className="absolute right-1.5 top-0.5 rounded-full px-1 text-center text-[9px] font-bold leading-[15px] text-white"
                   style={{ background: T.red, minWidth: 15, height: 15 }}>{it.badge > 99 ? "99+" : it.badge}</span>
@@ -3281,9 +3324,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       )}
 
       {showChat && auth && (
-        <ChatPanel T={T} auth={auth} meName={meName} meRole={meRole}
+        <ChatPanel embedded T={T} auth={auth} meName={meName} meRole={meRole}
           ptName={auth.name || s?.perusahaan || ""} petugasNames={chatPetugas}
-          onClose={() => setShowChat(false)} onUnread={setChatUnread} />
+          onClose={() => setTab("hari")} onUnread={setChatUnread} />
       )}
 
       {showCmd && (
@@ -5522,6 +5565,32 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
             <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white" style={{ left: 2, transform: s.gelap ? "translateX(20px)" : "none", transition: "transform .2s cubic-bezier(.22,.61,.36,1)", boxShadow: "0 1px 3px rgba(0,0,0,.35)" }} />
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+        <h2 className="mb-1 text-sm font-semibold">Menu cepat Dashboard</h2>
+        <p className="mb-3 text-[11px]" style={{ color: T.sub }}>Pilih menu yang tampil di depan (Quick Actions). Disarankan 4.</p>
+        {(() => {
+          const cur = Array.isArray(s.quickActions) && s.quickActions.length ? s.quickActions : defaultQuick(role);
+          const toggle = (k) => {
+            const has = cur.includes(k);
+            const next = has ? cur.filter((x) => x !== k) : [...cur, k];
+            upd("quickActions", QUICK_ACTIONS_META.map(([key]) => key).filter((key) => next.includes(key)));
+          };
+          return (
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_ACTIONS_META.map(([k, lbl]) => {
+                const on = cur.includes(k);
+                return (
+                  <button key={k} onClick={() => toggle(k)} className="chip flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium"
+                    style={on ? { background: T.brand, color: "#fff" } : { background: T.bg, color: T.sub, border: `1px solid ${T.line}` }}>
+                    {on && <Check size={12} />}{lbl}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
       </section>
 
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
