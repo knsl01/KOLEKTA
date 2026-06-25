@@ -1762,7 +1762,6 @@ export default function KolektaApp() {
   const [showAdd, setShowAdd] = useState(false);
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
-  const [fabOpen, setFabOpen] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
   const [worklogView, setWorklogView] = useState("list");
@@ -2275,25 +2274,13 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           </button>
         </header>
 
-        {/* Sub-nav Reports (HP) — muncul hanya di seksi Reports */}
-        {["analitik", "heatmap", "riwayat"].includes(tab) && (
-          <nav className="sticky top-2 z-20 mt-4 flex gap-1 overflow-x-auto rounded-xl p-1 shadow-sm lg:hidden"
-            style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-            {[
-              { id: "analitik", icon: BarChart3, label: "Analitik" },
-              { id: "heatmap", icon: Flame, label: "Heat Map" },
-              { id: "riwayat", icon: History, label: "Riwayat" },
-            ].map((n) => (
-              <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={0} />
-            ))}
-            <button onClick={openRiwayatKerja}
-              className="kpress flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium"
-              style={{ color: T.sub }}>
-              <ClipboardList size={16} className="shrink-0" />
-              <span className="truncate">Laporan</span>
-            </button>
-          </nav>
-        )}
+        {/* Nav (HP) */}
+        <nav className="sticky top-2 z-20 mt-4 flex gap-1 rounded-xl p-1 shadow-sm lg:hidden"
+          style={{ background: T.surface, border: `1px solid ${T.line}` }}>
+          {navItems.filter((n) => n.id !== "set" && n.id !== "riwayat" && n.id !== "audit").map((n) => (
+            <TabBtn key={n.id} id={n.id} icon={n.icon} label={n.label} badge={n.id === "hari" ? panels.belum.length + panels.perlu.length : 0} />
+          ))}
+        </nav>
 
         {/* Judul (PC) */}
         <div className="hidden pb-1 pt-7 lg:block">
@@ -2710,60 +2697,6 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={onImportFile} className="hidden" />
       <input ref={jsonRef} type="file" accept=".json,application/json" onChange={onImportJSON} className="hidden" />
-
-      {/* FAB — aksi cepat (HP) */}
-      <div className="fixed right-4 z-40 lg:hidden" style={{ bottom: "calc(70px + max(env(safe-area-inset-bottom), 0px))" }}>
-        {fabOpen && (
-          <>
-            <div onClick={() => setFabOpen(false)} className="drawer-ov fixed inset-0" style={{ background: "rgba(0,0,0,0.35)", zIndex: -1 }} />
-            <div className="mb-3 flex flex-col items-end gap-2.5">
-              {[
-                { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
-                { icon: ClipboardList, label: "Buat laporan", on: () => openLapor() },
-                { icon: Upload, label: "Impor / unggah data", on: () => fileRef.current?.click() },
-              ].map((a, i) => (
-                <button key={i} onClick={() => { setFabOpen(false); a.on(); }} className="kpress flex items-center gap-2.5">
-                  <span className="rounded-lg px-2.5 py-1.5 text-xs font-semibold shadow-sm" style={{ background: T.surface, color: T.ink, border: `1px solid ${T.line}` }}>{a.label}</span>
-                  <span className="grid h-11 w-11 place-items-center rounded-2xl shadow-sm" style={{ background: T.surface, color: T.brand, border: `1px solid ${T.line}` }}><a.icon size={20} /></span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-        <button onClick={() => setFabOpen((v) => !v)} aria-label="Aksi cepat"
-          className="kpress ml-auto grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg"
-          style={{ background: T.brass, transform: fabOpen ? "rotate(45deg)" : "none", transition: "transform .2s ease" }}>
-          <Plus size={28} />
-        </button>
-      </div>
-
-      {/* Bottom navigation (HP) */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex items-stretch border-t lg:hidden"
-        style={{ background: T.surface, borderColor: T.line, paddingBottom: "max(env(safe-area-inset-bottom), 0px)" }}>
-        {(() => {
-          const inReports = ["analitik", "heatmap", "riwayat"].includes(tab);
-          const inMore = ["audit", "set"].includes(tab);
-          const items = [
-            { key: "dash", icon: Grid3x3, label: "Dashboard", active: tab === "hari" && !showChat, badge: 0, on: () => setTab("hari") },
-            { key: "cases", icon: Wallet, label: "Cases", active: tab === "tagihan" && !showChat, badge: 0, on: () => setTab("tagihan") },
-            { key: "chat", icon: MessageCircle, label: "Chat", active: showChat, badge: chatUnread, on: () => setShowChat(true) },
-            { key: "reports", icon: BarChart3, label: "Reports", active: inReports && !showChat, badge: 0, on: () => { if (!inReports) setTab("analitik"); } },
-            { key: "more", icon: Menu, label: "More", active: inMore && !showChat, badge: 0, on: () => setDrawer(true) },
-          ];
-          return items.map((it) => (
-            <button key={it.key} onClick={it.on}
-              className="kpress relative flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10.5px] font-semibold"
-              style={{ color: it.active ? T.brand : T.sub }}>
-              <it.icon size={22} />
-              <span>{it.label}</span>
-              {it.badge > 0 && (
-                <span className="absolute top-1 translate-x-3.5 rounded-full px-1 text-center text-[9px] font-bold leading-[15px] text-white"
-                  style={{ background: T.red, minWidth: 15, height: 15 }}>{it.badge > 99 ? "99+" : it.badge}</span>
-              )}
-            </button>
-          ));
-        })()}
-      </nav>
 
       {drawer && (
         <div className="fixed inset-0 z-40 lg:hidden">
