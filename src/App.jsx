@@ -1793,6 +1793,85 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
   );
 }
 
+/* Grid Quick Actions Dashboard — tap untuk jalan, tahan & geser untuk atur urutan */
+function QuickActionsGrid({ items, T, onReorder }) {
+  const keysSig = items.map((i) => i.key).join(",");
+  const [order, setOrder] = useState(() => items.map((i) => i.key));
+  useEffect(() => { setOrder(items.map((i) => i.key)); }, [keysSig]);
+  const [dragKey, setDragKey] = useState(null);
+  const refs = useRef({});
+  const press = useRef({ timer: null, started: false, pid: null, el: null, sx: 0, sy: 0, suppress: false });
+
+  const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+  const list = order.map((k) => byKey[k]).filter(Boolean);
+
+  const keyAt = (x, y) => {
+    for (const k of order) {
+      const el = refs.current[k]; if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return k;
+    }
+    return null;
+  };
+
+  const onDown = (k, e) => {
+    const p = press.current;
+    p.started = false; p.suppress = false; p.sx = e.clientX; p.sy = e.clientY;
+    p.pid = e.pointerId; p.el = e.currentTarget;
+    clearTimeout(p.timer);
+    p.timer = setTimeout(() => {
+      p.started = true; setDragKey(k);
+      try { p.el.setPointerCapture(p.pid); } catch {}
+      if (navigator.vibrate) try { navigator.vibrate(8); } catch {}
+    }, 200);
+  };
+  const onMove = (e) => {
+    const p = press.current;
+    if (!p.started) {
+      if (Math.abs(e.clientX - p.sx) > 8 || Math.abs(e.clientY - p.sy) > 8) clearTimeout(p.timer);
+      return;
+    }
+    e.preventDefault();
+    const over = keyAt(e.clientX, e.clientY);
+    if (over && over !== dragKey) {
+      setOrder((prev) => {
+        const from = prev.indexOf(dragKey), to = prev.indexOf(over);
+        if (from < 0 || to < 0) return prev;
+        const next = prev.slice(); next.splice(from, 1); next.splice(to, 0, dragKey);
+        return next;
+      });
+    }
+  };
+  const endDrag = () => {
+    const p = press.current; clearTimeout(p.timer);
+    if (p.started) {
+      p.suppress = true; setDragKey(null);
+      setOrder((cur) => { onReorder(cur); return cur; });
+    }
+    p.started = false;
+  };
+
+  return (
+    <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }} onPointerMove={onMove}>
+      <div className="grid grid-cols-4 gap-2">
+        {list.map((a) => {
+          const dragging = dragKey === a.key;
+          return (
+            <button key={a.key} ref={(el) => { refs.current[a.key] = el; }}
+              onPointerDown={(e) => onDown(a.key, e)} onPointerUp={endDrag} onPointerCancel={endDrag}
+              onClick={() => { const p = press.current; if (p.suppress) { p.suppress = false; return; } a.on(); }}
+              className="kpress flex select-none flex-col items-center gap-1.5"
+              style={{ touchAction: dragKey ? "none" : "auto", opacity: dragKey && !dragging ? 0.55 : 1, transform: dragging ? "scale(1.12)" : "none", zIndex: dragging ? 5 : "auto", transition: "transform .18s cubic-bezier(.34,1.56,.64,1), opacity .18s ease", position: "relative" }}>
+              <span className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: T.brand2 + "14", color: T.brand, boxShadow: dragging ? "0 8px 20px rgba(0,0,0,.18)" : "none", transition: "box-shadow .18s ease" }}><a.icon size={20} /></span>
+              <span className="text-center text-[10.5px] font-medium leading-tight" style={{ color: T.sub }}>{a.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function KolektaApp() {
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("hari");
@@ -1802,7 +1881,19 @@ export default function KolektaApp() {
   const [showLaporan, setShowLaporan] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
+  const [fabClosing, setFabClosing] = useState(false);
+  const fabCloseTimer = useRef(null);
+  const closeFab = () => {
+    if (!fabOpen || fabClosing) return;
+    setFabClosing(true);
+    clearTimeout(fabCloseTimer.current);
+    fabCloseTimer.current = setTimeout(() => { setFabOpen(false); setFabClosing(false); }, 190);
+  };
+  const toggleFab = () => { if (fabOpen) closeFab(); else { clearTimeout(fabCloseTimer.current); setFabClosing(false); setFabOpen(true); } };
   const [navShrink, setNavShrink] = useState(false);
+  const navRef = useRef(null);
+  const navBtns = useRef({});
+  const [navInd, setNavInd] = useState(null);
   const [showCmd, setShowCmd] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const [showWorklog, setShowWorklog] = useState(false);
@@ -1913,6 +2004,24 @@ export default function KolektaApp() {
   };
 
   const s = data?.settings;
+
+  /* Geser indikator bottom-nav ke menu aktif (animasi halus saat pindah tab) */
+  const navActiveKey = tab === "chat" ? "chat"
+    : tab === "hari" ? "dash"
+    : tab === "tagihan" ? "cases"
+    : ["reports", "analitik", "heatmap", "riwayat"].includes(tab) ? "reports"
+    : ["more", "audit", "set", "pelanggan"].includes(tab) ? "more"
+    : null;
+  useEffect(() => {
+    const measure = () => {
+      const btn = navBtns.current[navActiveKey];
+      if (!btn) { setNavInd((p) => (p ? { ...p, show: false } : p)); return; }
+      setNavInd({ left: btn.offsetLeft, width: btn.offsetWidth, show: true });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [navActiveKey, navShrink, data]);
 
   /* Identitas untuk chat */
   const meRole = auth?.role || "petugas";
@@ -2351,8 +2460,12 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 @keyframes kolektaPop{from{opacity:0;transform:translateY(7px) scale(.97)}to{opacity:1;transform:none}}
 .msg-in{animation:kolektaPop .22s cubic-bezier(.22,.61,.36,1)}
 .mention-pop{animation:kolektaExpand .16s cubic-bezier(.22,.61,.36,1);transform-origin:bottom}
+@keyframes kolektaFabIn{0%{opacity:0;transform:translateY(18px) scale(.6)}55%{opacity:1;transform:translateY(-4px) scale(1.06)}80%{transform:translateY(1px) scale(.985)}100%{opacity:1;transform:none}}
+@keyframes kolektaFabOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(12px) scale(.7)}}
+.fab-item{animation:kolektaFabIn .4s cubic-bezier(.34,1.56,.64,1) both;transform-origin:right center}
+.fab-item.fab-out{animation:kolektaFabOut .19s cubic-bezier(.4,0,1,1) both}
 .chat-bg{background-image:radial-gradient(currentColor 1px,transparent 1px);background-size:22px 22px}
-@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step,.chat-panel,.chat-room,.chat-list,.msg-in,.mention-pop{animation:none}.kpress:active,.chip:active{transform:none}}
+@media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step,.chat-panel,.chat-room,.chat-list,.msg-in,.mention-pop,.fab-item,.fab-item.fab-out{animation:none}.kpress:active,.chip:active{transform:none}}
 
 /* ===== LIQUID GLASS THEME (visual-only; IA/nav tidak berubah) ===== */
 .theme-glass{background:
@@ -2551,19 +2664,12 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                 reports: { icon: BarChart3, label: "Analitik", on: () => setTab("reports") },
                 heatmap: { icon: Flame, label: "Heat Map", on: () => setTab("heatmap") },
               };
-              const keys = (Array.isArray(s.quickActions) && s.quickActions.length ? s.quickActions : defaultQuick(s.peran)).map((k) => reg[k]).filter(Boolean);
-              if (!keys.length) return null;
+              const sel = (Array.isArray(s.quickActions) && s.quickActions.length ? s.quickActions : defaultQuick(s.peran)).filter((k) => reg[k]);
+              if (!sel.length) return null;
+              const qaItems = sel.map((k) => ({ key: k, ...reg[k] }));
               return (
-                <div className="rounded-xl p-3 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
-                  <div className="grid grid-cols-4 gap-2">
-                    {keys.map((a, i) => (
-                      <button key={i} onClick={a.on} className="kpress flex flex-col items-center gap-1.5">
-                        <span className="grid h-12 w-12 place-items-center rounded-2xl transition-transform" style={{ background: T.brand2 + "14", color: T.brand }}><a.icon size={20} /></span>
-                        <span className="text-center text-[10.5px] font-medium leading-tight" style={{ color: T.sub }}>{a.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <QuickActionsGrid items={qaItems} T={T}
+                  onReorder={(next) => setData((d) => ({ ...d, settings: { ...d.settings, quickActions: next } }))} />
               );
             })()}
 
@@ -3265,34 +3371,41 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       {/* FAB — aksi cepat (HP) */}
       {tab !== "chat" && (
       <div className="fixed right-4 z-40 lg:hidden" style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 88px)" }}>
-        {fabOpen && (
+        {fabOpen && (() => {
+          const acts = [
+            { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
+            { icon: ClipboardList, label: "Buat laporan", on: () => openLapor() },
+            { icon: Upload, label: "Impor / unggah data", on: () => fileRef.current?.click() },
+          ];
+          return (
           <>
-            <div onClick={() => setFabOpen(false)} className="drawer-ov fixed inset-0" style={{ background: "rgba(0,0,0,0.35)", zIndex: -1 }} />
+            <div onClick={closeFab} className="drawer-ov fixed inset-0" style={{ background: "rgba(0,0,0,0.35)", zIndex: -1 }} />
             <div className="mb-3 flex flex-col items-end gap-2.5">
-              {[
-                { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
-                { icon: ClipboardList, label: "Buat laporan", on: () => openLapor() },
-                { icon: Upload, label: "Impor / unggah data", on: () => fileRef.current?.click() },
-              ].map((a, i) => (
-                <button key={i} onClick={() => { setFabOpen(false); a.on(); }} className="kpress flex items-center gap-2.5">
+              {acts.map((a, i) => (
+                <button key={i} onClick={() => { closeFab(); a.on(); }}
+                  className={"kpress flex items-center gap-2.5 fab-item" + (fabClosing ? " fab-out" : "")}
+                  style={{ animationDelay: (fabClosing ? (acts.length - 1 - i) : i) * 45 + "ms" }}>
                   <span className="rounded-lg px-2.5 py-1.5 text-xs font-semibold shadow-sm" style={{ background: T.surface, color: T.ink, border: `1px solid ${T.line}` }}>{a.label}</span>
                   <span className="grid h-11 w-11 place-items-center rounded-2xl shadow-sm" style={{ background: T.surface, color: T.brand, border: `1px solid ${T.line}` }}><a.icon size={20} /></span>
                 </button>
               ))}
             </div>
           </>
-        )}
-        <button onClick={() => setFabOpen((v) => !v)} aria-label="Aksi cepat"
+          );
+        })()}
+        <button onClick={toggleFab} aria-label="Aksi cepat"
           className="kpress ml-auto grid h-14 w-14 place-items-center rounded-2xl text-white shadow-lg"
-          style={{ background: T.brass, transform: fabOpen ? "rotate(45deg)" : "none", transition: "transform .2s ease" }}>
+          style={{ background: T.brass, transform: (fabOpen && !fabClosing) ? "rotate(45deg)" : "none", transition: "transform .42s cubic-bezier(.34,1.56,.64,1)" }}>
           <Plus size={28} />
         </button>
       </div>
       )}
 
       {/* Bottom navigation (HP) — floating pill */}
-      <nav className="fixed bottom-0 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-[26px] p-1.5 shadow-xl lg:hidden"
-        style={{ background: T.surface, border: `1px solid ${T.line}`, bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)", maxWidth: "calc(100% - 20px)", transition: "transform .32s cubic-bezier(.22,.61,.36,1)", transform: `translateX(-50%) scale(${navShrink ? 0.9 : 1})`, transformOrigin: "bottom center" }}>
+      <nav ref={navRef} className="fixed bottom-0 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-[26px] p-1.5 shadow-xl lg:hidden"
+        style={{ position: "fixed", background: T.surface, border: `1px solid ${T.line}`, bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)", maxWidth: "calc(100% - 20px)", transition: "transform .32s cubic-bezier(.22,.61,.36,1)", transform: `translateX(-50%) scale(${navShrink ? 0.9 : 1})`, transformOrigin: "bottom center" }}>
+        {/* Indikator aktif yang menggeser halus antar menu */}
+        <span aria-hidden style={{ position: "absolute", top: 6, bottom: 6, left: navInd ? navInd.left : 0, width: navInd ? navInd.width : 0, background: T.brand + "26", borderRadius: 20, opacity: navInd && navInd.show ? 1 : 0, transition: "left .42s cubic-bezier(.34,1.4,.5,1), width .42s cubic-bezier(.34,1.4,.5,1), opacity .2s ease", pointerEvents: "none", zIndex: 0 }} />
         {(() => {
           const inReports = ["reports", "analitik", "heatmap", "riwayat"].includes(tab);
           const inMore = ["more", "audit", "set", "pelanggan"].includes(tab);
@@ -3304,9 +3417,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
             { key: "more", icon: Menu, label: "More", active: inMore && !showChat, badge: 0, on: () => setTab("more") },
           ];
           return items.map((it) => (
-            <button key={it.key} onClick={it.on}
+            <button key={it.key} ref={(el) => { navBtns.current[it.key] = el; }} onClick={it.on}
               className="kpress relative flex flex-col items-center justify-center gap-0.5 rounded-[20px] px-3.5 font-semibold"
-              style={{ ...(it.active ? { background: T.brand + "26", color: T.brand } : { color: T.sub }), paddingTop: navShrink ? 8 : 8, paddingBottom: navShrink ? 8 : 8, transition: "background-color .25s ease, color .25s ease" }}>
+              style={{ color: it.active ? T.brand : T.sub, paddingTop: navShrink ? 8 : 8, paddingBottom: navShrink ? 8 : 8, transition: "color .25s ease", zIndex: 1 }}>
               <it.icon size={22} style={{ transition: "transform .3s cubic-bezier(.22,.61,.36,1)", transform: it.active ? "scale(1.06)" : "none" }} />
               <span className="overflow-hidden text-[10px] leading-tight" style={{ maxHeight: navShrink ? 0 : 14, opacity: navShrink ? 0 : 1, marginTop: navShrink ? 0 : 2, transition: "max-height .3s cubic-bezier(.22,.61,.36,1), opacity .25s ease, margin-top .3s ease" }}>{it.label}</span>
               {it.badge > 0 && (
@@ -5569,13 +5682,14 @@ function Settingstab({ data, setData, onReset, onClear, flash, copy, onBackup, o
 
       <section className="rounded-xl p-4 shadow-sm" style={{ background: T.surface, border: `1px solid ${T.line}` }}>
         <h2 className="mb-1 text-sm font-semibold">Menu cepat Dashboard</h2>
-        <p className="mb-3 text-[11px]" style={{ color: T.sub }}>Pilih menu yang tampil di depan (Quick Actions). Disarankan 4.</p>
+        <p className="mb-3 text-[11px]" style={{ color: T.sub }}>Pilih menu yang tampil di depan (Quick Actions). Disarankan 4. Tahan & geser ikon di Dashboard untuk mengatur urutannya.</p>
         {(() => {
           const cur = Array.isArray(s.quickActions) && s.quickActions.length ? s.quickActions : defaultQuick(role);
           const toggle = (k) => {
             const has = cur.includes(k);
+            // Pertahankan urutan hasil drag di Dashboard: hapus saat dimatikan, tambah di akhir saat dinyalakan
             const next = has ? cur.filter((x) => x !== k) : [...cur, k];
-            upd("quickActions", QUICK_ACTIONS_META.map(([key]) => key).filter((key) => next.includes(key)));
+            upd("quickActions", next);
           };
           return (
             <div className="flex flex-wrap gap-1.5">
