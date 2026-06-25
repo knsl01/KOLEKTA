@@ -34,6 +34,13 @@ const THEMES = {
     light: { bg: "#FCEEF4", surface: "#FFFFFF", ink: "#2C141F", sub: "#7E5E6B", brand: "#9E2A5E", brand2: "#C24A7C", brass: "#BE7C42", line: "#F2DBE5", green: "#2F7D5B", amber: "#C0822A", red: "#C0413E", slate: "#8C6976", toast: "#2C141F" },
     dark: { bg: "#1C0E15", surface: "#28141E", ink: "#F6E4ED", sub: "#B98FA2", brand: "#D75A91", brand2: "#E771A4", brass: "#E0A65C", line: "#3A2230", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#A98C98", toast: "#0E0509" },
   },
+  kaca: {
+    name: "Liquid Glass",
+    glass: true,
+    // Permukaan semi-transparan (frosted) + blur via kelas .theme-glass. Token solid tetap untuk teks/aksen agar terbaca.
+    light: { bg: "#E7EEF7", surface: "rgba(255,255,255,0.66)", ink: "#13243B", sub: "#52647D", brand: "#1B3A5B", brand2: "#2C5C82", brass: "#A9772F", line: "rgba(120,142,176,0.30)", green: "#2E7D63", amber: "#A9762A", red: "#B0463F", slate: "#5E6E84", toast: "rgba(17,28,46,0.88)" },
+    dark: { bg: "#0C1622", surface: "rgba(26,41,58,0.55)", ink: "#EAF1FB", sub: "#9FADC2", brand: "#6AA0D6", brand2: "#5A8FC4", brass: "#D6A85E", line: "rgba(255,255,255,0.14)", green: "#4FB389", amber: "#E0A646", red: "#E27266", slate: "#8C9AAE", toast: "rgba(7,13,21,0.9)" },
+  },
 };
 // Pemetaan tema lama → keluarga + mode (kompatibilitas data tersimpan).
 const LEGACY_TEMA = { tinta: { base: "hutan", gelap: true } };
@@ -2124,6 +2131,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
     return <div className="flex h-screen items-center justify-center" style={{ background: T.bg, color: T.sub, fontFamily: SANS }}>Memuat Kolekta…</div>;
 
   T = themePalette(data.settings.tema, data.settings.gelap);
+  const isGlass = !!THEMES[data.settings.tema]?.glass;
 
   /* Audit Log hanya untuk Atasan PT (petugas tak punya akses penuh). */
   const navItems = auth.role === "atasan"
@@ -2199,7 +2207,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
   );
 
   return (
-    <div className="min-h-screen w-full" style={{ background: T.bg, color: T.ink, fontFamily: SANS }}>
+    <div className={`min-h-screen w-full${isGlass ? " theme-glass" + (data.settings.gelap ? " kglass-dark" : "") : ""}`} style={{ background: isGlass ? undefined : T.bg, color: T.ink, fontFamily: SANS }}>
       <style>{`
 @keyframes kolektaIn{from{opacity:0;transform:translateY(6px) scale(.995)}to{opacity:1;transform:none}}
 .tab-anim{animation:kolektaIn .28s cubic-bezier(.22,.61,.36,1)}
@@ -2226,6 +2234,31 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
 .mention-pop{animation:kolektaExpand .16s cubic-bezier(.22,.61,.36,1);transform-origin:bottom}
 .chat-bg{background-image:radial-gradient(currentColor 1px,transparent 1px);background-size:22px 22px}
 @media (prefers-reduced-motion:reduce){.tab-anim,.drawer-ov,.drawer-pn,.sub-fade,.filter-anim,.lapor-step,.chat-panel,.chat-room,.chat-list,.msg-in,.mention-pop{animation:none}.kpress:active,.chip:active{transform:none}}
+
+/* ===== LIQUID GLASS THEME (visual-only; IA/nav tidak berubah) ===== */
+.theme-glass{background:
+  radial-gradient(1100px 560px at 8% -8%, rgba(43,92,130,.20), transparent 60%),
+  radial-gradient(900px 640px at 112% 6%, rgba(176,122,58,.13), transparent 56%),
+  linear-gradient(160deg,#EAF1FA 0%,#DCE6F2 52%,#E6ECF5 100%) fixed;}
+.theme-glass.kglass-dark{background:
+  radial-gradient(1100px 560px at 8% -8%, rgba(90,143,196,.20), transparent 60%),
+  radial-gradient(900px 640px at 112% 6%, rgba(214,168,94,.12), transparent 56%),
+  linear-gradient(160deg,#0C1622 0%,#0A1119 60%,#0C1724 100%) fixed;}
+/* Frosted blur untuk kartu & chrome ber-shadow */
+.theme-glass .shadow-sm,.theme-glass .shadow,.theme-glass .shadow-md,.theme-glass .shadow-lg,.theme-glass .shadow-xl,.theme-glass .shadow-2xl{
+  -webkit-backdrop-filter:blur(18px) saturate(165%);backdrop-filter:blur(18px) saturate(165%);}
+.theme-glass nav.fixed,.theme-glass aside{
+  -webkit-backdrop-filter:blur(22px) saturate(170%);backdrop-filter:blur(22px) saturate(170%);}
+/* Bottom nav & sidebar lebih opak sedikit demi keterbacaan */
+.theme-glass nav.fixed{background:rgba(255,255,255,0.72)!important;border-top:1px solid rgba(120,142,176,.28)!important;}
+.theme-glass.kglass-dark nav.fixed{background:rgba(16,26,38,0.72)!important;border-top:1px solid rgba(255,255,255,.12)!important;}
+.theme-glass aside{background:rgba(255,255,255,0.60)!important;}
+.theme-glass.kglass-dark aside{background:rgba(16,26,38,0.58)!important;}
+/* Float shadow premium + tepi cahaya halus */
+.theme-glass .shadow-sm{box-shadow:0 1px 1px rgba(13,22,34,.04),0 10px 30px -12px rgba(13,22,34,.18);}
+.theme-glass .shadow-lg,.theme-glass .shadow-xl,.theme-glass .shadow-2xl{box-shadow:0 18px 50px -16px rgba(13,22,34,.34);}
+.theme-glass .rounded-xl,.theme-glass .rounded-2xl{border-color:rgba(255,255,255,.45);}
+.theme-glass.kglass-dark .rounded-xl,.theme-glass.kglass-dark .rounded-2xl{border-color:rgba(255,255,255,.10);}
       `}</style>
       <div className="lg:flex">
         {/* Sidebar (PC) */}
@@ -2355,7 +2388,9 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                   { icon: ClipboardList, label: "Lapor lapangan", on: openLapor },
                   { icon: FileText, label: "Laporan harian", on: () => setShowLaporan((v) => !v) },
                   { icon: Building2, label: "Tambah debitur", on: () => { setTab("tagihan"); setShowAdd(true); } },
-                  { icon: CalcIcon, label: "Kalkulator", on: () => setShowCalc(true) },
+                  s.peran === "atasan"
+                    ? { icon: History, label: "Riwayat kerja", on: openRiwayatKerja }
+                    : { icon: CalcIcon, label: "Kalkulator", on: () => setShowCalc(true) },
                 ].map((a, i) => (
                   <button key={i} onClick={a.on} className="kpress flex flex-col items-center gap-1.5">
                     <span className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: T.brand2 + "14", color: T.brand }}><a.icon size={20} /></span>
