@@ -324,6 +324,30 @@ function ptpStat(list) {
   return { kept, broken: total - kept, total, rate: total ? Math.round((kept / total) * 100) : null };
 }
 
+// Akru denda atas pokok yang menunggak. Pembayaran dialokasikan ke pokok dulu,
+// jadi denda berhenti bertambah saat pokok lunas — tapi denda yang sudah terlanjur
+// tetap terhitung sebagai kewajiban (nempel di pokok awal).
+function akruDenda(inv, ratePct) {
+  const rate = (ratePct || 0) / 100;
+  const dueMs = new Date(inv.tglJatuhTempo + "T00:00:00").getTime();
+  const t0 = today0().getTime();
+  if (t0 <= dueMs || !(rate > 0)) return 0;
+  const pays = (inv.pembayaran || [])
+    .map((p) => ({ t: new Date(p.ts + "T00:00:00").getTime(), jumlah: p.jumlah || 0 }))
+    .sort((a, b) => a.t - b.t);
+  let denda = 0, outstanding = inv.nominal || 0, segStart = dueMs, pi = 0;
+  // Pembayaran sebelum/saat jatuh tempo: kurangi pokok lebih dulu.
+  while (pi < pays.length && pays[pi].t <= dueMs) { outstanding = Math.max(0, outstanding - pays[pi].jumlah); pi++; }
+  while (segStart < t0) {
+    const next = pi < pays.length && pays[pi].t < t0 ? pays[pi].t : t0;
+    const days = Math.round((next - segStart) / 86400000);
+    if (outstanding > 0 && days > 0) denda += outstanding * rate * days;
+    segStart = next;
+    while (pi < pays.length && pays[pi].t <= segStart) { outstanding = Math.max(0, outstanding - pays[pi].jumlah); pi++; }
+  }
+  return Math.round(denda);
+}
+
 function enrich(inv, s) {
   const due = new Date(inv.tglJatuhTempo + "T00:00:00");
   const odRaw = dayDiff(today0(), due);
@@ -331,7 +355,10 @@ function enrich(inv, s) {
   const terbayar = (inv.pembayaran || []).reduce((a, p) => a + (p.jumlah || 0), 0);
   const sisaPokok = Math.max(0, inv.nominal - terbayar);
   const daysOverdue = lunas ? 0 : Math.max(0, odRaw);
-  const denda = lunas ? 0 : Math.round(sisaPokok * (s.dendaRatePct / 100) * daysOverdue);
+  // Denda terakru atas pokok yang menunggak; kelebihan bayar di atas pokok dianggap pelunasan denda.
+  const dendaTotal = lunas ? 0 : akruDenda(inv, s.dendaRatePct);
+  const dibayarDenda = Math.max(0, terbayar - (inv.nominal || 0));
+  const denda = lunas ? 0 : Math.max(0, dendaTotal - dibayarDenda);
   const total = lunas ? 0 : sisaPokok + denda;
   let bucket = "lancar";
   if (lunas) bucket = "lunas";
@@ -354,7 +381,7 @@ function enrich(inv, s) {
     prioScore = Math.min(100, Math.round(prioScore));
   }
   const prio = prioScore >= 70 ? { label: "Sangat tinggi", tone: "red" } : prioScore >= 45 ? { label: "Tinggi", tone: "amber" } : prioScore >= 25 ? { label: "Sedang", tone: "brand2" } : { label: "Rendah", tone: "slate" };
-  return { ...inv, due, odRaw, daysOverdue, terbayar, sisaPokok, denda, total, bucket, kol, ptpLewat, tlDue, prioScore, prioLabel: prio.label, prioTone: prio.tone };
+  return { ...inv, due, odRaw, daysOverdue, terbayar, sisaPokok, denda, dendaTotal, total, bucket, kol, ptpLewat, tlDue, prioScore, prioLabel: prio.label, prioTone: prio.tone };
 }
 
 function waLink(phone, text) {
@@ -4381,12 +4408,13 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
   const logBayar = () => {
     const j = Number((bayar + "").replace(/[^0-9]/g, ""));
     if (!(j > 0)) return;
+    const wajib = (i.nominal || 0) + (i.dendaTotal || 0); // pokok + denda terakru
     patch(i.id, (x) => {
       const pem = [{ ts: today0().toISOString().slice(0, 10), jumlah: j }, ...(x.pembayaran || [])];
       const tb = pem.reduce((a, p) => a + p.jumlah, 0);
-      return { ...x, pembayaran: pem, status: tb >= x.nominal ? "lunas" : x.status, lastFollowUp: today0().toISOString().slice(0, 10) };
+      return { ...x, pembayaran: pem, status: tb >= wajib ? "lunas" : x.status, lastFollowUp: today0().toISOString().slice(0, 10) };
     });
-    logAudit("bayar", ent, { sisaPokok: i.sisaPokok }, { jumlah: j, lunas: i.terbayar + j >= i.nominal });
+    logAudit("bayar", ent, { sisaPokok: i.sisaPokok, denda: i.denda }, { jumlah: j, lunas: i.terbayar + j >= wajib });
     setBayar(""); flash("Pembayaran dicatat");
   };
 
@@ -4407,9 +4435,10 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
     remove(i.id);
   };
   const markLunas = () => {
+    const wajib = (i.nominal || 0) + (i.dendaTotal || 0); // pokok + denda terakru
     patch(i.id, (x) => {
       const tb = (x.pembayaran || []).reduce((a, p) => a + p.jumlah, 0);
-      const sisa = Math.max(0, x.nominal - tb);
+      const sisa = Math.max(0, wajib - tb);
       const pem = sisa > 0 ? [{ ts: today0().toISOString().slice(0, 10), jumlah: sisa, note: "pelunasan" }, ...(x.pembayaran || [])] : (x.pembayaran || []);
       return { ...x, pembayaran: pem, status: "lunas" };
     });
