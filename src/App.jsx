@@ -10,6 +10,14 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
+import { onlyDigits, grpID, rp, rpc, fmtTgl, today0, dayDiff, daysSince, greeting, uid, fmtWaktu } from "./lib/format.js";
+import { ptpStat, enrich } from "./lib/calc.js";
+import { STATUS_META, STATUS_ORDER, HASIL, HASIL_ORDER, stLabel } from "./lib/constants.js";
+import {
+  waLink, recoLevel, ROMAN, isPerorangan, debtorBlock, sapaanWA, jaminanKlausa, escalationDocs,
+  docToPlain, fieldBase, kopLine, suratPernyataan, bastPenarikan, momKunjungan,
+  docMetaG, sigMapG, ESK_LABELS, eskLabel, eskalasiRows, statementText,
+} from "./lib/surat.js";
 
 /* ---------- Tema (inline style, bukan arbitrary Tailwind) ---------- */
 /* Tiap tema punya varian terang (light) & gelap (dark); mode gelap berlaku untuk semua tema. */
@@ -62,26 +70,8 @@ let T = themePalette("hutan", false);
 const MONO = "ui-monospace, 'SF Mono', 'Roboto Mono', 'DejaVu Sans Mono', monospace";
 const SANS = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
-const STATUS_META = {
-  belum_dihubungi: { label: "Belum dihubungi", token: "slate" },
-  sudah_followup: { label: "Sudah follow-up", token: "brand2" },
-  janji_bayar: { label: "Janji bayar", token: "amber" },
-  ingkar_janji: { label: "Ingkar janji", token: "red" },
-  lunas: { label: "Lunas", token: "green" },
-};
-const STATUS_ORDER = ["belum_dihubungi", "sudah_followup", "janji_bayar", "ingkar_janji", "lunas"];
-const HASIL = {
-  ptp: { label: "Janji bayar (PTP)", status: "janji_bayar" },
-  partial: { label: "Bayar sebagian", status: null },
-  ingkar: { label: "Ingkar janji", status: "ingkar_janji" },
-  rtp: { label: "Menolak bayar", status: "ingkar_janji" },
-  notfound: { label: "Tidak di tempat", status: null },
-  nocontact: { label: "Kontak terputus", status: null },
-  lain: { label: "Catatan", status: null },
-};
-const HASIL_ORDER = ["ptp", "partial", "ingkar", "rtp", "notfound", "nocontact", "lain"];
+/* STATUS_META, STATUS_ORDER, HASIL, HASIL_ORDER, stLabel dipindah ke ./lib/constants.js */
 const stColor = (st) => T[STATUS_META[st].token];
-const stLabel = (st) => STATUS_META[st].label;
 /* Menu cepat Dashboard (Quick Actions) — bisa dipilih lewat Pengaturan */
 const QUICK_ACTIONS_META = [
   ["lapor", "Lapor lapangan"],
@@ -133,35 +123,7 @@ function useCountUp(target, dur = 750) {
 }
 
 /* ---------- Helpers ---------- */
-const onlyDigits = (v) => String(v ?? "").replace(/[^0-9]/g, "");
-const grpID = (v) => { const n = onlyDigits(v); return n ? Number(n).toLocaleString("id-ID") : ""; };
-const rp = (n) =>
-  new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Math.round(n || 0));
-const rpc = (v) => {
-  let n = Math.round(v || 0); const neg = n < 0 ? "-" : ""; n = Math.abs(n);
-  const f = (x, d) => x.toFixed(d).replace(/\.0$/, "").replace(".", ",");
-  if (n >= 1e12) return `${neg}Rp${f(n / 1e12, n < 1e13 ? 1 : 0)} T`;
-  if (n >= 1e9) return `${neg}Rp${f(n / 1e9, n < 1e10 ? 1 : 0)} M`;
-  if (n >= 1e6) return `${neg}Rp${f(n / 1e6, n < 1e7 ? 1 : 0)} jt`;
-  if (n >= 1e3) return `${neg}Rp${Math.round(n / 1e3)} rb`;
-  return `${neg}Rp${n}`;
-};
-const fmtTgl = (iso) => {
-  if (!iso) return "-";
-  try { return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric" }).format(new Date(iso + "T00:00:00")); }
-  catch { return iso; }
-};
-const today0 = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
-const dayDiff = (a, b) => Math.round((a - b) / 86400000);
-const daysSince = (iso) => (iso ? dayDiff(today0(), new Date(iso)) : Infinity);
-const greeting = () => { const h = new Date().getHours(); return h < 11 ? "pagi" : h < 15 ? "siang" : h < 18 ? "sore" : "malam"; };
-const uid = () => Math.random().toString(36).slice(2, 9);
-
-const fmtWaktu = (iso) => {
-  if (!iso) return "";
-  try { return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)); }
-  catch { return iso; }
-};
+/* Helper format/tanggal/util murni dipindah ke ./lib/format.js */
 function resizeImage(file, max = 640, q = 0.55) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -307,350 +269,8 @@ function stampImage(dataUrl, info) {
   });
 }
 
-function kolektibilitas(odRaw, lunas) {
-  if (lunas) return { no: 1, short: "Lunas", label: "Lunas", tone: "green" };
-  if (odRaw <= 0) return { no: 1, short: "Kol 1", label: "Lancar (Kol 1)", tone: "green" };
-  if (odRaw <= 90) return { no: 2, short: "Kol 2", label: "Dalam Perhatian Khusus (Kol 2)", tone: "amber" };
-  if (odRaw <= 120) return { no: 3, short: "Kol 3", label: "Kurang Lancar (Kol 3)", tone: "amber" };
-  if (odRaw <= 180) return { no: 4, short: "Kol 4", label: "Diragukan (Kol 4)", tone: "red" };
-  return { no: 5, short: "Kol 5", label: "Macet (Kol 5)", tone: "red" };
-}
+/* kolektibilitas, ptpStat, akruDenda, enrich dipindah ke ./lib/calc.js */
 
-function ptpStat(list) {
-  const due = list.filter((i) => i.janjiBayar && new Date(i.janjiBayar) <= today0());
-  let kept = 0;
-  due.forEach((i) => { if (i.status === "lunas" || (i.pembayaran || []).some((p) => p.ts >= i.janjiBayar)) kept++; });
-  const total = due.length;
-  return { kept, broken: total - kept, total, rate: total ? Math.round((kept / total) * 100) : null };
-}
-
-// Akru denda atas pokok yang menunggak. Pembayaran dialokasikan ke pokok dulu,
-// jadi denda berhenti bertambah saat pokok lunas — tapi denda yang sudah terlanjur
-// tetap terhitung sebagai kewajiban (nempel di pokok awal).
-function akruDenda(inv, ratePct) {
-  const rate = (ratePct || 0) / 100;
-  const dueMs = new Date(inv.tglJatuhTempo + "T00:00:00").getTime();
-  const t0 = today0().getTime();
-  if (t0 <= dueMs || !(rate > 0)) return 0;
-  const pays = (inv.pembayaran || [])
-    .map((p) => ({ t: new Date(p.ts + "T00:00:00").getTime(), jumlah: p.jumlah || 0 }))
-    .sort((a, b) => a.t - b.t);
-  let denda = 0, outstanding = inv.nominal || 0, segStart = dueMs, pi = 0;
-  // Pembayaran sebelum/saat jatuh tempo: kurangi pokok lebih dulu.
-  while (pi < pays.length && pays[pi].t <= dueMs) { outstanding = Math.max(0, outstanding - pays[pi].jumlah); pi++; }
-  while (segStart < t0) {
-    const next = pi < pays.length && pays[pi].t < t0 ? pays[pi].t : t0;
-    const days = Math.round((next - segStart) / 86400000);
-    if (outstanding > 0 && days > 0) denda += outstanding * rate * days;
-    segStart = next;
-    while (pi < pays.length && pays[pi].t <= segStart) { outstanding = Math.max(0, outstanding - pays[pi].jumlah); pi++; }
-  }
-  return Math.round(denda);
-}
-
-function enrich(inv, s) {
-  const due = new Date(inv.tglJatuhTempo + "T00:00:00");
-  const odRaw = dayDiff(today0(), due);
-  const lunas = inv.status === "lunas";
-  const terbayar = (inv.pembayaran || []).reduce((a, p) => a + (p.jumlah || 0), 0);
-  const sisaPokok = Math.max(0, inv.nominal - terbayar);
-  const daysOverdue = lunas ? 0 : Math.max(0, odRaw);
-  // Denda terakru atas pokok yang menunggak; kelebihan bayar di atas pokok dianggap pelunasan denda.
-  const dendaTotal = lunas ? 0 : akruDenda(inv, s.dendaRatePct);
-  const dibayarDenda = Math.max(0, terbayar - (inv.nominal || 0));
-  const denda = lunas ? 0 : Math.max(0, dendaTotal - dibayarDenda);
-  const total = lunas ? 0 : sisaPokok + denda;
-  let bucket = "lancar";
-  if (lunas) bucket = "lunas";
-  else if (odRaw <= 0) bucket = "lancar";
-  else if (odRaw <= 30) bucket = "1-30";
-  else if (odRaw <= 60) bucket = "31-60";
-  else if (odRaw <= 90) bucket = "61-90";
-  else bucket = "90+";
-  const kol = kolektibilitas(odRaw, lunas);
-  const t0 = today0();
-  const ptpLewat = !lunas && inv.status === "janji_bayar" && inv.janjiBayar ? dayDiff(t0, new Date(inv.janjiBayar + "T00:00:00")) < 0 : false;
-  const tlDue = !lunas && inv.tindakLanjut ? dayDiff(t0, new Date(inv.tindakLanjut + "T00:00:00")) <= 0 : false;
-  let prioScore = 0;
-  if (!lunas) {
-    prioScore += Math.min(40, daysOverdue * 0.5);
-    prioScore += Math.min(30, (total / 1e7) * 10);
-    if (ptpLewat) prioScore += 20;
-    if (tlDue) prioScore += 10;
-    if (!inv.jaminanTipe || inv.jaminanTipe === "none") prioScore += 8;
-    prioScore = Math.min(100, Math.round(prioScore));
-  }
-  const prio = prioScore >= 70 ? { label: "Sangat tinggi", tone: "red" } : prioScore >= 45 ? { label: "Tinggi", tone: "amber" } : prioScore >= 25 ? { label: "Sedang", tone: "brand2" } : { label: "Rendah", tone: "slate" };
-  return { ...inv, due, odRaw, daysOverdue, terbayar, sisaPokok, denda, dendaTotal, total, bucket, kol, ptpLewat, tlDue, prioScore, prioLabel: prio.label, prioTone: prio.tone };
-}
-
-function waLink(phone, text) {
-  let d = (phone || "").replace(/[^0-9]/g, "");
-  if (!d) return null;
-  if (d.startsWith("0")) d = "62" + d.slice(1);
-  else if (d.startsWith("8")) d = "62" + d;
-  return `https://wa.me/${d}?text=${encodeURIComponent(text)}`;
-}
-
-const recoLevel = (i) => {
-  const d = i.daysOverdue;
-  const hasJ = i.jaminanTipe && i.jaminanTipe !== "none";
-  if (hasJ && d > 120) return "tarik";
-  if (d > 60) return "somasi";
-  if (d > 30) return "sp";
-  if (d > 14) return "tegas";
-  return "reminder";
-};
-
-const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
-const isPerorangan = (i) => (i.tipe || "perusahaan") === "perorangan";
-
-function debtorBlock(i) {
-  const alamat = i.alamat?.trim();
-  const pic = i.pic?.trim();
-  const baris = alamat ? alamat + "\n" : "";
-  if (isPerorangan(i)) return `Kepada Yth.\nSdr./Sdri. ${i.customer}\n${baris}di Tempat`;
-  return `Kepada Yth.\nManajemen ${i.customer}\n${pic ? "u.p. Bapak/Ibu " + pic + "\n" : ""}${baris}di Tempat`;
-}
-function sapaanWA(i) {
-  const pic = i.pic?.trim();
-  if (isPerorangan(i)) return `Bapak/Ibu ${i.customer}`;
-  return pic ? `Bapak/Ibu ${pic}` : `Bapak/Ibu dari ${i.customer}`;
-}
-function jaminanKlausa(i) {
-  const t = i.jaminanTipe;
-  const j = i.jaminan?.trim();
-  if (!j || !t || t === "none") return "";
-  if (t === "fidusia")
-    return `\n\nPerlu kami sampaikan bahwa kewajiban tersebut dijamin dengan jaminan fidusia berupa ${j}. Apabila Saudara tetap lalai memenuhi kewajiban, kami berhak melakukan eksekusi atas objek jaminan fidusia tersebut — termasuk penarikan dan penjualannya untuk pelunasan — sesuai Undang-Undang Nomor 42 Tahun 1999 tentang Jaminan Fidusia.`;
-  if (t === "tanah")
-    return `\n\nPerlu kami sampaikan bahwa kewajiban tersebut dijamin dengan Hak Tanggungan atas ${j}. Apabila Saudara tetap lalai, kami berhak menempuh eksekusi Hak Tanggungan atas objek jaminan tersebut sesuai Undang-Undang Nomor 4 Tahun 1996 tentang Hak Tanggungan.`;
-  return `\n\nPerlu kami sampaikan bahwa kewajiban tersebut disertai jaminan berupa ${j}, yang dapat kami tindaklanjuti sesuai ketentuan perjanjian dan peraturan yang berlaku apabila kewajiban tidak dipenuhi.`;
-}
-
-function escalationDocs(i, s) {
-  const p = s.perusahaan?.trim() || "[Nama Perusahaan Anda]";
-  const kota = s.kota?.trim();
-  const jabatan = s.jabatan?.trim() || "Bagian Penagihan / Kuasa Hukum";
-  const now = new Date();
-  const tgl = fmtTgl(now.toISOString().slice(0, 10));
-  const noSurat = (kode) => `......./${kode}/${ROMAN[now.getMonth()]}/${now.getFullYear()}`;
-  const ttdKota = `${kota ? kota + ", " : ""}${tgl}`;
-  const sebutan = isPerorangan(i) ? "Saudara" : "Perusahaan Saudara";
-  const pokok = i.sisaPokok ?? i.nominal;
-  const terbayar = i.terbayar || 0;
-  const barisBayar = terbayar > 0 ? `\nSudah Dibayar     : ${rp(terbayar)} (dari pokok ${rp(i.nominal)})` : "";
-
-  const reminder = `Selamat ${greeting()}, ${sapaanWA(i)} 🙏
-
-Izin mengingatkan untuk tagihan *${i.noInvoice}* yang jatuh tempo ${fmtTgl(i.tglJatuhTempo)} (telat ${i.daysOverdue} hari).
-
-Total saat ini: *${rp(i.total)}*
-(sisa pokok ${rp(pokok)} + denda ${rp(i.denda)})
-
-Mohon konfirmasi rencana pembayarannya ya, Pak/Bu. Terima kasih 🙏
-— ${p}`;
-
-  const tegas = `Selamat ${greeting()}, ${sapaanWA(i)}.
-
-Kami mencatat tagihan *${i.noInvoice}* sebesar ${rp(i.nominal)} telah jatuh tempo sejak ${fmtTgl(i.tglJatuhTempo)} dan kini menunggak *${i.daysOverdue} hari*. Termasuk denda, total kewajiban menjadi *${rp(i.total)}*.${i.jaminan?.trim() ? `\n\nPerlu diingat, tagihan ini disertai jaminan (${i.jaminan.trim()}).` : ""}
-
-Mohon pembayaran diselesaikan paling lambat 3 (tiga) hari kerja ke depan untuk menghindari proses penagihan lebih lanjut. Kami tunggu konfirmasinya hari ini.
-
-Terima kasih.
-— ${p}`;
-
-  const rincian = `No. Invoice/Tagihan : ${i.noInvoice}
-Tanggal Jatuh Tempo : ${fmtTgl(i.tglJatuhTempo)}
-Lama Keterlambatan  : ${i.daysOverdue} hari
-Pokok / AR          : ${rp(pokok)}${barisBayar}
-Denda Keterlambatan : ${rp(i.denda)}
-Total Kewajiban     : ${rp(i.total)}`;
-
-  const sp = `${kopLine(s)}
-SURAT PERINGATAN
-
-[[RIGHT]]${ttdKota}
-
-Nomor    : ${noSurat("SP")}
-Lampiran : -
-Hal      : Peringatan Keterlambatan Pembayaran
-
-${debtorBlock(i)}
-
-Dengan hormat,
-
-Sehubungan dengan kedudukan kami selaku ${p} (selanjutnya disebut "Kreditur") dan Saudara selaku pihak yang berkewajiban (selanjutnya disebut "Debitur"), perkenankan kami menyampaikan peringatan atas kewajiban pembayaran Saudara yang telah melewati tanggal jatuh tempo, dengan rincian sebagai berikut:
-
-${rincian}
-
-Bahwa berdasarkan Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata, kewajiban yang telah jatuh tempo dan dapat ditagih namun tidak dipenuhi menempatkan Debitur dalam keadaan lalai (wanprestasi).${jaminanKlausa(i)}
-
-Untuk itu, dengan ini kami menyampaikan PERINGATAN agar Saudara menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} selambat-lambatnya dalam waktu 7 (tujuh) hari kalender terhitung sejak surat ini diterima.
-
-Apabila sampai dengan batas waktu tersebut pembayaran belum kami terima, kami berhak menempuh upaya penagihan lebih lanjut sesuai ketentuan yang berlaku, termasuk pengenaan denda berjalan, penyampaian somasi, hingga langkah hukum, dengan segala biaya yang timbul menjadi beban Saudara.
-
-Demikian surat peringatan ini kami sampaikan untuk menjadi perhatian dan dilaksanakan sebagaimana mestinya.
-
-Hormat kami,
-${p}
-
-
-(__________________________)
-${jabatan}`;
-
-  const somasi = `${kopLine(s)}
-SOMASI
-
-[[RIGHT]]${ttdKota}
-
-Nomor    : ${noSurat("SOM")}
-Lampiran : -
-Hal      : Somasi (Teguran) atas Tunggakan Pembayaran
-
-${debtorBlock(i)}
-
-Dengan hormat,
-
-Kami, ${p} (selanjutnya disebut "Kreditur"), dengan ini menyampaikan SOMASI (teguran) kepada Saudara selaku Debitur sehubungan dengan kewajiban pembayaran yang telah jatuh tempo namun hingga saat ini belum diselesaikan, dengan dasar dan uraian sebagai berikut:
-
-1. Bahwa antara Kreditur dan Debitur terdapat hubungan hukum utang-piutang yang sah berdasarkan tagihan ${i.noInvoice}, sehingga Debitur berkewajiban melakukan pembayaran kepada Kreditur;
-
-2. Bahwa kewajiban Debitur tersebut telah jatuh tempo dan dapat ditagih (opeisbaar), dengan rincian sebagai berikut:
-
-${rincian}
-
-3. Bahwa sampai dengan tanggal Somasi ini Debitur belum memenuhi kewajibannya, sehingga Debitur berada dalam keadaan lalai (wanprestasi) sebagaimana dimaksud dalam Pasal 1238 dan Pasal 1243 Kitab Undang-Undang Hukum Perdata.${jaminanKlausa(i)}
-
-Berdasarkan hal-hal tersebut, kami MENEGUR dan meminta Saudara untuk melunasi seluruh kewajiban sebesar ${rp(i.total)} dalam waktu 7 (tujuh) hari kalender terhitung sejak Somasi ini diterima.
-
-Apabila dalam tenggang waktu tersebut Saudara tetap tidak memenuhi kewajiban, maka dengan sangat menyesal kami akan menempuh segala upaya hukum yang diperlukan guna melindungi hak kami, baik melalui gugatan perdata, eksekusi jaminan, maupun mekanisme penyelesaian sengketa lainnya sesuai ketentuan yang berlaku, dengan segala biaya yang timbul menjadi tanggungan Saudara.
-
-Demikian Somasi ini kami sampaikan dengan itikad baik untuk dilaksanakan sebagaimana mestinya.
-
-Hormat kami,
-${p}
-
-
-(__________________________)
-${jabatan}`;
-
-  let tarik = null;
-  if (i.jaminanTipe === "fidusia") {
-    tarik = `${kopLine(s)}
-SURAT PEMBERITAHUAN PENARIKAN OBJEK JAMINAN FIDUSIA
-
-[[RIGHT]]${ttdKota}
-
-Nomor    : ${noSurat("FID")}
-Lampiran : -
-Hal      : Pemberitahuan Penarikan/Eksekusi Objek Jaminan Fidusia
-
-${debtorBlock(i)}
-
-Dengan hormat,
-
-Menunjuk perjanjian pembiayaan/utang-piutang beserta Akta Jaminan Fidusia atas objek jaminan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p} selaku Penerima Fidusia, menyampaikan hal-hal sebagai berikut:
-
-1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
-
-${rincian}
-
-2. Bahwa kelalaian Debitur memenuhi kewajiban tersebut merupakan wanprestasi yang memberikan hak kepada Penerima Fidusia untuk melakukan eksekusi atas objek jaminan fidusia berupa:
-${i.jaminan || "(uraian objek jaminan)"}
-
-3. Bahwa eksekusi Jaminan Fidusia dilaksanakan berdasarkan Undang-Undang Nomor 42 Tahun 1999 tentang Jaminan Fidusia juncto Putusan Mahkamah Konstitusi Nomor 18/PUU-XVII/2019 dan Nomor 2/PUU-XIX/2021, yang mensyaratkan adanya kesepakatan mengenai telah terjadinya cidera janji dan kesediaan Debitur menyerahkan objek jaminan secara sukarela; apabila tidak tercapai kesepakatan, eksekusi ditempuh melalui permohonan eksekusi pada Pengadilan Negeri.
-
-Oleh karena itu, kami mengimbau Saudara dalam waktu 3 (tiga) hari kalender sejak surat ini untuk: (a) melunasi seluruh kewajiban sebesar ${rp(i.total)}; atau (b) menyerahkan objek jaminan secara sukarela kepada kami guna penyelesaian kewajiban, yang akan dituangkan dalam Berita Acara Serah Terima.
-
-Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
-
-Hormat kami,
-${p}
-
-
-(__________________________)
-${jabatan}`;
-  } else if (i.jaminanTipe === "tanah") {
-    tarik = `${kopLine(s)}
-SURAT PEMBERITAHUAN RENCANA LELANG EKSEKUSI HAK TANGGUNGAN
-
-[[RIGHT]]${ttdKota}
-
-Nomor    : ${noSurat("HT")}
-Lampiran : -
-Hal      : Pemberitahuan Rencana Lelang Eksekusi Hak Tanggungan
-
-${debtorBlock(i)}
-
-Dengan hormat,
-
-Menunjuk perjanjian utang-piutang beserta Akta Pemberian Hak Tanggungan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p} selaku pemegang Hak Tanggungan, menyampaikan hal-hal sebagai berikut:
-
-1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
-
-${rincian}
-
-2. Bahwa atas kelalaian (wanprestasi) tersebut, sesuai Pasal 6 Undang-Undang Nomor 4 Tahun 1996 tentang Hak Tanggungan, pemegang Hak Tanggungan pertama berhak menjual objek Hak Tanggungan atas kekuasaan sendiri (parate eksekusi) melalui pelelangan umum;
-
-3. Bahwa kami memberitahukan rencana pelaksanaan lelang eksekusi melalui Kantor Pelayanan Kekayaan Negara dan Lelang (KPKNL) atas objek jaminan berupa:
-${i.jaminan || "(uraian objek jaminan)"}
-
-Sehubungan dengan itu, kami mengimbau Saudara dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} guna menghindari pelaksanaan lelang dimaksud.
-
-Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
-
-Hormat kami,
-${p}
-
-
-(__________________________)
-${jabatan}`;
-  } else if (i.jaminanTipe && i.jaminanTipe !== "none") {
-    tarik = `${kopLine(s)}
-SURAT PEMBERITAHUAN EKSEKUSI OBJEK JAMINAN
-
-[[RIGHT]]${ttdKota}
-
-Nomor    : ${noSurat("EKS")}
-Lampiran : -
-Hal      : Pemberitahuan Eksekusi atas Objek Jaminan
-
-${debtorBlock(i)}
-
-Dengan hormat,
-
-Menunjuk perjanjian utang-piutang beserta pengikatan jaminan, serta surat peringatan dan/atau somasi yang telah kami sampaikan sebelumnya, dengan ini kami, ${p}, menyampaikan hal-hal sebagai berikut:
-
-1. Bahwa Debitur memiliki kewajiban yang telah jatuh tempo dan belum diselesaikan, dengan rincian:
-
-${rincian}
-
-2. Bahwa atas kelalaian (wanprestasi) tersebut, kami memberitahukan rencana tindak lanjut/eksekusi atas objek jaminan berupa:
-${i.jaminan || "(uraian objek jaminan)"}
-sesuai ketentuan perjanjian dan peraturan perundang-undangan yang berlaku.
-
-Sehubungan dengan itu, kami mengimbau Saudara dalam waktu 7 (tujuh) hari kalender sejak surat ini untuk menyelesaikan seluruh kewajiban sebesar ${rp(i.total)} guna menghindari pelaksanaan tindak lanjut dimaksud.
-
-Demikian pemberitahuan ini kami sampaikan untuk menjadi perhatian.
-
-Hormat kami,
-${p}
-
-
-(__________________________)
-${jabatan}`;
-  }
-
-  const out = [
-    { key: "reminder", label: "Reminder", text: reminder, wa: true },
-    { key: "tegas", label: "Reminder Tegas", text: tegas, wa: true },
-    { key: "sp", label: "Surat Peringatan", text: sp, wa: false },
-    { key: "somasi", label: "Somasi", text: somasi, wa: false },
-  ];
-  if (tarik) out.push({ key: "tarik", label: i.jaminanTipe === "fidusia" ? "Surat Penarikan" : i.jaminanTipe === "tanah" ? "Lelang HT" : "Eksekusi Jaminan", text: tarik, wa: false });
-  return out;
-}
 
 /* Cetak via iframe tersembunyi — tetap di dalam aplikasi sehingga pengguna
    tidak "nyantol" di tab/penampil PDF baru (penting untuk PWA standalone iOS).
@@ -841,158 +461,12 @@ function printDoc(label, text, sig) {
   return printViaIframe(label, renderDocHtml(text, sigMap));
 }
 
-// Versi teks polos (untuk disalin ke clipboard / WA) — buang penanda tata letak.
-function docToPlain(text) {
-  return (text || "")
-    .replace(/^\[\[KOP\|(.*)\]\]$/gm, (_, g) => g.split("|").filter(Boolean).join("\n"))
-    .replace(/^\[\[RIGHT\]\]/gm, "")
-    .replace(/\[\[\/?SIGGRID\]\]\n?/g, "")
-    .replace(/^cap\|(.*)\|(.*)$/gm, (_, a, b) => `${a}\t\t${b}`)
-    .replace(/^sig\|.*$/gm, "")
-    .replace(/^name\|(.*)\|(.*)$/gm, (_, a, b) => `${a}\t\t${b}`)
-    .replace(/\[\[SIGN\d?\]\]/g, "(__________________________)")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
 
-function fieldBase(s) {
-  const p = s.perusahaan?.trim() || "[Nama Perusahaan Anda]";
-  const kota = s.kota?.trim();
-  const jabatan = s.jabatan?.trim() || "Petugas Penagihan";
-  const tgl = fmtTgl(today0().toISOString().slice(0, 10));
-  return { p, jabatan, ttdKota: `${kota ? kota + ", " : ""}${tgl}` };
-}
-// Kop surat (letterhead) dari profil institusi. Pakai "/" pengganti "|" agar parser aman.
-function kopLine(s) {
-  const p = (s.perusahaan?.trim() || "[Nama Perusahaan Anda]").replace(/\|/g, "/");
-  const alamat = (s.alamatKantor?.trim() || "").replace(/\|/g, "/");
-  const kontak = (s.kontakKantor?.trim() || "").replace(/\|/g, "/");
-  return `[[KOP|${p}|${alamat}|${kontak}]]`;
-}
-function suratPernyataan(i, s, f) {
-  const { p, ttdKota } = fieldBase(s);
-  const ar = i.sisaPokok ?? i.nominal;
-  return `SURAT PERNYATAAN KESANGGUPAN PEMBAYARAN
-
-Yang bertanda tangan di bawah ini:
-Nama    : ${i.customer}
-Alamat  : ${i.alamat || "-"}${i.pic ? `\nJabatan : ${i.pic}` : ""}
-
-dalam hal ini bertindak untuk dan atas nama diri sendiri/badan usaha tersebut di atas (selanjutnya disebut "Pihak yang Menyatakan"), dengan ini menyatakan dengan sebenarnya dan tanpa paksaan dari pihak manapun, sebagai berikut:
-
-1. Bahwa Pihak yang Menyatakan mengakui memiliki kewajiban pembayaran kepada ${p} dengan rincian:
-
-No. Tagihan     : ${i.noInvoice}
-Pokok / AR      : ${rp(ar)}
-Denda           : ${rp(i.denda)}
-Total Kewajiban : ${rp(i.total)}
-
-2. Bahwa Pihak yang Menyatakan SANGGUP dan BERJANJI menyelesaikan kewajiban tersebut sebesar ${rp(f.jumlah || i.total)} selambat-lambatnya pada tanggal ${fmtTgl(f.tgl)};
-
-3. Bahwa apabila Pihak yang Menyatakan lalai memenuhi pernyataan ini, Pihak yang Menyatakan bersedia menanggung denda keterlambatan dan/atau penyerahan jaminan serta menerima segala upaya hukum sesuai ketentuan perjanjian dan peraturan perundang-undangan yang berlaku;
-
-4. Bahwa Surat Pernyataan ini dibuat sebagai pengakuan utang sekaligus alat bukti yang sah dan dapat dipergunakan sebagaimana mestinya.
-
-Demikian Surat Pernyataan ini dibuat dengan penuh kesadaran dan tanggung jawab, dibubuhi meterai secukupnya.
-
-${ttdKota}
-Yang Menyatakan,
-
-[[SIGN]]
-${i.customer}`;
-}
-function bastPenarikan(i, s, f) {
-  const { p, jabatan, ttdKota } = fieldBase(s);
-  return `${kopLine(s)}
-BERITA ACARA SERAH TERIMA OBJEK JAMINAN
-
-Pada hari ini, ${ttdKota}, yang bertanda tangan di bawah ini telah sepakat melakukan serah terima objek jaminan, masing-masing:
-
-A. PARA PIHAK
-1. ${i.customer}, beralamat di ${i.alamat || "-"}, selanjutnya disebut "Pihak Pertama" (yang menyerahkan);
-2. ${p}, selanjutnya disebut "Pihak Kedua" (yang menerima).
-
-B. OBJEK DAN DASAR
-1. Bahwa Pihak Pertama memiliki kewajiban kepada Pihak Kedua atas tagihan ${i.noInvoice} sebesar ${rp(i.total)} yang telah jatuh tempo dan belum diselesaikan;
-
-2. Bahwa untuk penyelesaian kewajiban tersebut, Pihak Pertama dengan ini menyerahkan secara sukarela objek jaminan berupa:
-${i.jaminan || "(uraian objek jaminan)"}
-dengan kondisi/kelengkapan: ${f.kondisi || "-"}.
-
-C. KETENTUAN
-1. Bahwa penyerahan objek jaminan dilakukan secara sukarela tanpa paksaan dari pihak manapun;
-
-2. Bahwa Pihak Kedua berhak memproses objek jaminan untuk penyelesaian kewajiban sesuai ketentuan yang berlaku, dan hasil bersih penjualannya diperhitungkan dengan kewajiban Pihak Pertama;
-
-3. Bahwa apabila terdapat kelebihan hasil penjualan setelah dikurangi seluruh kewajiban dan biaya, akan dikembalikan kepada Pihak Pertama; sebaliknya, kekurangannya tetap menjadi kewajiban Pihak Pertama.
-
-Demikian Berita Acara ini dibuat dengan sebenarnya dan ditandatangani oleh Para Pihak dalam keadaan sadar tanpa adanya paksaan.
-
-${ttdKota}
-
-[[SIGGRID]]
-cap|Pihak Pertama (yang menyerahkan),|Pihak Kedua (yang menerima),
-sig|SIGN1|SIGN2
-name|${i.customer}|${p}
-name||${jabatan}
-[[/SIGGRID]]`;
-}
-function momKunjungan(i, s, f) {
-  const { p, jabatan, ttdKota } = fieldBase(s);
-  const petugas = (s.petugasAktif && s.petugasAktif.trim()) || jabatan;
-  const ar = i.sisaPokok ?? i.nominal;
-  return `${kopLine(s)}
-MINUTES OF MEETING (MOM) — BERITA ACARA KUNJUNGAN PENAGIHAN
-
-Hari / Tanggal : ${ttdKota}
-Tempat         : ${i.alamat || "-"}
-Perihal        : Pembahasan penyelesaian kewajiban yang telah jatuh tempo
-
-A. PESERTA / PARA PIHAK
-1. Pihak Penagih : ${petugas} — ${p}
-2. Pihak Debitur : ${i.customer}${i.pic ? ` (u.p. ${i.pic})` : ""}
-
-B. DATA KEWAJIBAN
-No. Tagihan     : ${i.noInvoice}
-Pokok / AR      : ${rp(ar)}
-Denda           : ${rp(i.denda)}
-Total Kewajiban : ${rp(i.total)}
-Jatuh Tempo     : ${fmtTgl(i.tglJatuhTempo)}${i.daysOverdue > 0 ? ` (telat ${i.daysOverdue} hari)` : ""}
-
-C. POKOK PEMBAHASAN
-1. Konfirmasi posisi tunggakan saat kunjungan — Pokok/AR ${rp(ar)} + denda ${rp(i.denda)} = total kewajiban ${rp(i.total)}.${f.pembahasan ? "\n2. " + f.pembahasan : ""}
-
-D. KESEPAKATAN / RENCANA TINDAK LANJUT
-${f.kesepakatan || "-"}${f.tgl ? `\n\nTarget penyelesaian : ${fmtTgl(f.tgl)}` : ""}
-
-E. PENUTUP
-Demikian Berita Acara/Minutes of Meeting ini dibuat dengan sebenarnya berdasarkan hasil pertemuan, dan disetujui serta ditandatangani oleh Para Pihak tanpa adanya paksaan, untuk dipergunakan sebagaimana mestinya.
-
-${ttdKota}
-
-[[SIGGRID]]
-cap|Pihak Debitur,|Pihak Penagih,
-sig|SIGN1|SIGN2
-name|${i.customer}|${petugas}
-name||${p}
-[[/SIGGRID]]`;
-}
 
 function printLetter(label, text) {
   return printViaIframe(label, renderDocHtml(text, {}));
 }
 
-/* Metadata dokumen lapangan (dipakai arsip & detail riwayat untuk cetak ulang). */
-function docMetaG(jenis) {
-  return jenis === "mom" ? { gen: momKunjungan, label: "MOM / Berita Acara Kunjungan" }
-    : jenis === "bast" ? { gen: bastPenarikan, label: "BAST Penarikan" }
-    : { gen: suratPernyataan, label: "Surat Pernyataan" };
-}
-function sigMapG(jenis, a, b) {
-  return jenis === "mom" ? { SIGN1: a, SIGN2: b }
-    : jenis === "bast" ? { SIGN1: a }
-    : { SIGN: a };
-}
 // Cetak ulang satu dokumen arsip (dk) untuk tagihan i.
 function reprintDokumen(i, s, dk) {
   const { gen, label } = docMetaG(dk.jenis);
@@ -1039,27 +513,6 @@ function exportExcel(rows, s) {
 }
 
 /* ---------- Riwayat eskalasi (label, daftar, rekap) ---------- */
-const ESK_LABELS = { reminder: "Reminder", tegas: "Reminder Tegas", sp: "Surat Peringatan", somasi: "Somasi" };
-function eskLabel(level, jaminanTipe) {
-  if (level === "tarik") return jaminanTipe === "fidusia" ? "Surat Penarikan" : jaminanTipe === "tanah" ? "Lelang HT" : "Eksekusi Jaminan";
-  return ESK_LABELS[level] || level;
-}
-// Gabung semua entri eskalasi dari seluruh tagihan -> urut terbaru dulu
-function eskalasiRows(rows) {
-  const out = [];
-  (rows || []).forEach((i) => (i.eskalasi || []).forEach((e) => out.push({
-    ts: e.ts,
-    id: i.id,
-    customer: i.customer,
-    noInvoice: i.noInvoice,
-    level: e.level,
-    tindakan: eskLabel(e.level, i.jaminanTipe),
-    petugas: i.assignedTo || "",
-    total: i.total,
-    status: stLabel(i.status),
-  })));
-  return out.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
-}
 
 function exportEskalasiExcel(list, s) {
   const data = list.map((r) => ({
@@ -1092,57 +545,6 @@ function printEskalasiRekap(list, s) {
   return printViaIframe("Rekap Riwayat Eskalasi", html);
 }
 
-/* ---------- Statement of Account per debitur ---------- */
-function statementText(name, list, s) {
-  const { p, jabatan, ttdKota } = fieldBase(s);
-  const now = new Date();
-  const tgl = fmtTgl(now.toISOString().slice(0, 10));
-  const noSOA = `......./SOA/${ROMAN[now.getMonth()]}/${now.getFullYear()}`;
-  const rows = list.filter((i) => i.customer.trim().toLowerCase() === name.trim().toLowerCase());
-  const totOut = rows.filter((i) => i.status !== "lunas").reduce((a, i) => a + i.total, 0);
-  const totBayar = rows.reduce((a, i) => a + (i.terbayar || 0), 0);
-  const totTagih = rows.reduce((a, i) => a + i.total, 0);
-  const lines = rows.map((i) =>
-    `- ${i.noInvoice} | JT ${fmtTgl(i.tglJatuhTempo)} | Pokok ${rp(i.nominal)} | Dibayar ${rp(i.terbayar || 0)} | Sisa+Denda ${rp(i.total)} | ${stLabel(i.status)}`
-  ).join("\n");
-  return `${kopLine(s)}
-STATEMENT OF ACCOUNT
-
-[[RIGHT]]${ttdKota}
-
-Nomor : ${noSOA}
-Hal   : Statement of Account (Rincian Posisi Tagihan)
-
-Kepada Yth.
-${name}
-di Tempat
-
-Dengan hormat,
-
-Bersama ini kami sampaikan ringkasan posisi tagihan (Statement of Account) atas nama Saudara per tanggal ${tgl}, sebagai berikut:
-
-Debitur        : ${name}
-Jumlah Invoice : ${rows.length}
-
-RINCIAN TAGIHAN
-${lines || "-"}
-
-RINGKASAN
-Total Tagihan      : ${rp(totTagih)}
-Total Dibayar      : ${rp(totBayar)}
-Total Outstanding  : ${rp(totOut)}
-
-Mohon Saudara berkenan mencocokkan data di atas dengan catatan Saudara. Apabila terdapat perbedaan, mohon konfirmasi kepada kami selambat-lambatnya dalam waktu 7 (tujuh) hari kerja sejak Statement ini diterima; apabila tidak terdapat konfirmasi, maka data di atas dianggap telah sesuai dan disetujui.
-
-Demikian kami sampaikan. Atas perhatian dan kerja samanya, kami ucapkan terima kasih.
-
-Hormat kami,
-${p}
-
-
-(__________________________)
-${jabatan}`;
-}
 
 /* ---------- Backup JSON ---------- */
 function exportJSON(state) {
