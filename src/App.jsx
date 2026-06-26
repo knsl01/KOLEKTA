@@ -845,6 +845,13 @@ function Pill({ status }) {
   );
 }
 
+// True bila pokok sudah lunas tapi masih ada denda berjalan — sisa tagihan = denda saja.
+const isDendaOnly = (i) => i.status !== "lunas" && (i.sisaPokok ?? 0) === 0 && (i.denda ?? 0) > 0;
+// Label kecil "denda" agar jelas tanpa buka detail bahwa nominal tersisa adalah denda.
+function DendaTag({ className = "" }) {
+  return <span className={`inline-block rounded px-1.5 py-0.5 text-[9px] font-bold leading-none ${className}`} style={{ background: T.red + "1A", color: T.red }}>denda</span>;
+}
+
 /* ---------- util chat ---------- */
 const CHAT_NAME_COLORS = ["#2563eb", "#dc2626", "#7c3aed", "#0891b2", "#ea580c", "#0d9488", "#c026d3", "#65a30d", "#db2777", "#4f46e5"];
 const chatColor = (name) => {
@@ -885,7 +892,7 @@ const parseCall = (body) => { const m = CALL_RE.exec(body || ""); return m ? { k
 const chatPreview = (body, hasAtt) => { const c = parseCall(body); if (c) return c.kind === "video" ? "📹 Panggilan video" : "📞 Panggilan suara"; return body || (hasAtt ? "📎 Lampiran" : ""); };
 
 /* ---------- Panel Chat (grup PT + japri atasan↔petugas) ---------- */
-function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread, embedded }) {
+function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onUnread, onConvOpen, embedded }) {
   const [openConv, setOpenConv] = useState(null);
   const [convos, setConvos] = useState([]);
   const [msgs, setMsgs] = useState([]);
@@ -923,6 +930,9 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
   const sumOf = (k) => convos.find((c) => c.conv === k);
   const totalUnread = useMemo(() => convos.reduce((a, c) => a + (c.unread || 0), 0), [convos]);
   useEffect(() => { onUnread && onUnread(totalUnread); }, [totalUnread, onUnread]);
+  // Beritahu parent saat masuk/keluar ruang percakapan -> untuk sembunyikan bottom-nav.
+  useEffect(() => { onConvOpen && onConvOpen(!!openConv); }, [openConv, onConvOpen]);
+  useEffect(() => () => { onConvOpen && onConvOpen(false); }, [onConvOpen]);
 
   /* Daftar percakapan (saat di list) */
   useEffect(() => {
@@ -1068,7 +1078,7 @@ function ChatPanel({ T, auth, meName, meRole, ptName, petugasNames, onClose, onU
 
   return (
     <div className={`chat-panel fixed inset-x-0 top-0 flex flex-col ${embedded ? "z-20" : "z-[70] bottom-0"}`}
-      style={{ background: T.bg, fontFamily: SANS, bottom: embedded ? "calc(env(safe-area-inset-bottom, 0px) + 84px)" : 0 }}>
+      style={{ background: T.bg, fontFamily: SANS, bottom: embedded && !openConv ? "calc(env(safe-area-inset-bottom, 0px) + 84px)" : 0 }}>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: T.surface, borderBottom: `1px solid ${T.line}` }}>
         {openConv ? (
@@ -1377,6 +1387,7 @@ export default function KolektaApp() {
   const showChat = tab === "chat";
   const setShowChat = (v) => setTab(v ? "chat" : "hari");
   const [chatUnread, setChatUnread] = useState(0);
+  const [chatThreadOpen, setChatThreadOpen] = useState(false); // true saat ruang percakapan terbuka -> sembunyikan bottom-nav
   const loadedRef = useRef(false);
   const pushTimer = useRef(null);
 
@@ -2243,7 +2254,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                     <button key={i.id} onClick={() => { setTab("tagihan"); setOpenId(i.id); }} className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-black/5">
                       <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: T.amber + "1A", color: T.amber }}>{i.odRaw === 0 ? "hari ini" : `${-i.odRaw} hr lagi`}</span>
                       <span className="min-w-0 flex-1 truncate text-sm">{i.customer}</span>
-                      <span className="shrink-0 whitespace-nowrap text-sm font-semibold" style={{ fontFamily: MONO }}>{rp(i.total)}</span>
+                      <span className="shrink-0 whitespace-nowrap text-sm font-semibold" style={{ fontFamily: MONO }}>{isDendaOnly(i) && <DendaTag className="mr-1" />}{rp(i.total)}</span>
                     </button>
                   ))}
                 </div>
@@ -2303,7 +2314,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                       <p className="text-xs" style={{ color: T.sub }}>{i.noInvoice} · telat {i.daysOverdue} hari{i.ptpLewat ? " · ingkar janji" : ""}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-sm font-semibold" style={{ fontFamily: MONO }}>{rp(i.total)}</p>
+                      <p className="text-sm font-semibold" style={{ fontFamily: MONO }}>{isDendaOnly(i) && <DendaTag className="mr-1" />}{rp(i.total)}</p>
                       <p className="text-[10px] font-bold" style={{ color: T[i.prioTone] }}>{i.prioLabel} · {i.prioScore}</p>
                     </div>
                   </button>
@@ -2612,7 +2623,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
                         <p className="truncate text-[11px]" style={{ color: T.sub }}>JT {fmtTgl(i.tglJatuhTempo)}{i.daysOverdue > 0 ? ` · telat ${i.daysOverdue} hr` : ""}</p>
                       </div>
                       <Pill status={i.status} />
-                      <span className="shrink-0 text-sm font-semibold" style={{ fontFamily: MONO }}>{rp(i.total)}</span>
+                      <span className="shrink-0 text-sm font-semibold" style={{ fontFamily: MONO }}>{isDendaOnly(i) && <DendaTag className="mr-1" />}{rp(i.total)}</span>
                     </button>
                   ))}
                 </div>
@@ -2914,7 +2925,8 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       </div>
       )}
 
-      {/* Bottom navigation (HP) — floating pill */}
+      {/* Bottom navigation (HP) — floating pill; disembunyikan saat di dalam ruang chat */}
+      {!chatThreadOpen && (
       <nav ref={navRef} className="fixed bottom-0 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-[26px] p-1.5 shadow-xl lg:hidden"
         style={{ position: "fixed", background: T.surface, border: `1px solid ${T.line}`, bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)", maxWidth: "calc(100% - 20px)", transition: "transform .32s cubic-bezier(.22,.61,.36,1)", transform: `translateX(-50%) scale(${navShrink ? 0.9 : 1})`, transformOrigin: "bottom center" }}>
         {/* Indikator aktif yang menggeser halus antar menu */}
@@ -2943,6 +2955,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
           ));
         })()}
       </nav>
+      )}
 
       {toast && (
         <div className="ktoast fixed bottom-6 left-1/2 z-50 rounded-full px-4 py-2 text-sm text-white shadow-lg"
@@ -2952,7 +2965,7 @@ Surat/Eskalasi Kirim : ${a.eskToday}`;
       {showChat && auth && (
         <ChatPanel embedded T={T} auth={auth} meName={meName} meRole={meRole}
           ptName={auth.name || s?.perusahaan || ""} petugasNames={chatPetugas}
-          onClose={() => setTab("hari")} onUnread={setChatUnread} />
+          onClose={() => setTab("hari")} onUnread={setChatUnread} onConvOpen={setChatThreadOpen} />
       )}
 
       {showCmd && (
@@ -3594,7 +3607,7 @@ function FollowPanel({ title, icon: Icon, color, items, empty, onOpen, note }) {
                   {note && i.janjiBayar && new Date(i.janjiBayar) < today0() ? " · janji bayar lewat" : ""}
                 </p>
               </div>
-              <span className="shrink-0 text-sm font-semibold" style={{ fontFamily: MONO }}>{rp(i.total)}</span>
+              <span className="shrink-0 text-sm font-semibold" style={{ fontFamily: MONO }}>{isDendaOnly(i) && <DendaTag className="mr-1" />}{rp(i.total)}</span>
             </button>
           ))}
         </div>
@@ -3947,7 +3960,7 @@ function InvoiceCard({ i, s, open, onToggle, patch, remove, copy, flash, onState
           </p>
         </div>
         <div className="shrink-0 text-right">
-          <p className="whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO }}>{rp(i.total)}</p>
+          <p className="flex items-center justify-end gap-1 whitespace-nowrap text-sm font-bold" style={{ fontFamily: MONO }}>{isDendaOnly(i) && <DendaTag />}{rp(i.total)}</p>
           <Pill status={i.status} />
         </div>
         <ChevronDown size={16} style={{ color: T.sub, transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
@@ -4821,7 +4834,7 @@ function CalHeat({ rows, onOpen }) {
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: T[i.kol.tone] }} />
                 <span className="min-w-0 flex-1 truncate text-xs">{i.customer}</span>
                 <span className="shrink-0 text-[11px]" style={{ color: T.sub }}>{i.daysOverdue > 0 ? `telat ${i.daysOverdue} hr` : "belum JT"}</span>
-                <span className="shrink-0 text-xs font-bold" style={{ fontFamily: MONO }}>{rpc(i.total)}</span>
+                <span className="shrink-0 text-xs font-bold" style={{ fontFamily: MONO }}>{isDendaOnly(i) && <DendaTag className="mr-1" />}{rpc(i.total)}</span>
               </button>
             ))}
           </div>
